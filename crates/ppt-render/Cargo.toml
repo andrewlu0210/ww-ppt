@@ -1,0 +1,13 @@
+[package]
+name = "ppt-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ppt-model.workspace = true
+ppt-geometry.workspace = true
+ppt-text.workspace = true
+vello.workspace = true
+parley.workspace = true
+image.workspace = true

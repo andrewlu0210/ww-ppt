@@ -1,0 +1,12 @@
+[package]
+name = "ppt-ooxml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ppt-model.workspace = true
+roxmltree.workspace = true
+zip.workspace = true
+
+[dev-dependencies]

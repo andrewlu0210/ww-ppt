@@ -1,0 +1,11 @@
+[package]
+name = "ppt-editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ppt-model.workspace = true
+ppt-text.workspace = true
+parley.workspace = true
+ppt-geometry.workspace = true

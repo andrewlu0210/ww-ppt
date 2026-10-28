@@ -1,0 +1,9 @@
+[package]
+name = "ppt-fonts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fontique = "0.12"
+serde = { version = "1", features = ["derive"] }

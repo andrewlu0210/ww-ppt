@@ -1,0 +1,1422 @@
+//! Editing state and interaction logic, independent of rendering and the DOM.
+//!
+//! All pointer coordinates are in slide space (EMU). The host converts from
+//! screen coordinates and passes tolerances already scaled to EMU.
+
+mod richedit;
+
+use parley::BoundingBox;
+use ppt_geometry::kurbo::{Affine, Point};
+use ppt_geometry::{text_affine, text_width_pt};
+use ppt_model::{
+    Align, Anchor, Color, EMU_PER_INCH, EMU_PER_PT, Geometry, Line, Paragraph, Presentation, RunStyle, Shape, ShapeId,
+    ShapeKind, Slide, TextBody, Xfrm,
+};
+use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
+
+pub use richedit::{Move, RichEdit};
+
+/// Smallest width/height a resize can produce (2pt), except for lines.
+const MIN_SIZE: f64 = 25_400.0;
+const UNDO_LIMIT: usize = 100;
+/// Offset for pasted/duplicated shapes on the same slide.
+const PASTE_OFFSET: i64 = 228_600;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Handle {
+    NW,
+    N,
+    NE,
+    E,
+    SE,
+    S,
+    SW,
+    W,
+    Rotate,
+}
+
+impl Handle {
+    pub const RESIZE: [Handle; 8] = [Handle::NW, Handle::N, Handle::NE, Handle::E, Handle::SE, Handle::S, Handle::SW, Handle::W];
+
+    /// Which edges the handle moves: -1 = left/top, 1 = right/bottom.
+    fn sign(self) -> (f64, f64) {
+        match self {
+            Handle::NW => (-1.0, -1.0),
+            Handle::N => (0.0, -1.0),
+            Handle::NE => (1.0, -1.0),
+            Handle::E => (1.0, 0.0),
+            Handle::SE => (1.0, 1.0),
+            Handle::S => (0.0, 1.0),
+            Handle::SW => (-1.0, 1.0),
+            Handle::W => (-1.0, 0.0),
+            Handle::Rotate => (0.0, 0.0),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CursorIcon {
+    Default,
+    Move,
+    Text,
+    Rotate,
+    /// Resize along this screen angle in degrees (0 = horizontal).
+    Resize(f64),
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PointerEvent {
+    pub x: f64,
+    pub y: f64,
+    pub shift: bool,
+    /// Held while dragging: disables smart guides.
+    pub alt: bool,
+    pub meta: bool,
+    pub clicks: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+    pub ctrl: bool,
+}
+
+/// Hit-test tolerances in EMU, derived from screen pixels by the host.
+#[derive(Clone, Copy, Debug)]
+pub struct Tolerance {
+    pub handle: f64,
+    /// Distance from the top edge to the rotation handle.
+    pub rotate_offset: f64,
+    /// Smart guide snapping distance.
+    pub snap: f64,
+}
+
+/// A smart guide line shown while dragging, in slide space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Guide {
+    pub vertical: bool,
+    /// x for vertical guides, y for horizontal ones.
+    pub pos: f64,
+    pub from: f64,
+    pub to: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlignTo {
+    Left,
+    Center,
+    Right,
+    Top,
+    Middle,
+    Bottom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Toggle {
+    Bold,
+    Italic,
+    Underline,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZOrder {
+    Front,
+    Forward,
+    Backward,
+    Back,
+}
+
+/// Text formatting at the caret/selection, for toolbar state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextFormat {
+    pub style: RunStyle,
+    pub align: Align,
+    pub bullet: bool,
+    pub level: u8,
+}
+
+#[derive(Clone)]
+struct Snapshot {
+    pres: Presentation,
+    slide: usize,
+    selection: Vec<ShapeId>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum DragKind {
+    Move,
+    Resize(Handle),
+    Rotate,
+    TextSelect,
+    Marquee { additive: bool },
+}
+
+struct Drag {
+    kind: DragKind,
+    start: (f64, f64),
+    origs: Vec<(ShapeId, Xfrm)>,
+    base_selection: Vec<ShapeId>,
+    before: Option<Snapshot>,
+    moved: bool,
+}
+
+pub struct TextEdit {
+    pub shape: ShapeId,
+    pub rich: RichEdit,
+    original: TextBody,
+    /// Remove the shape when editing ends with no text (new text boxes).
+    remove_if_empty: bool,
+}
+
+/// What the host needs to draw the text being edited.
+pub struct TextEditView<'a> {
+    /// Maps editor layout space (points) to slide space.
+    pub transform: Affine,
+    pub layout: &'a BodyLayout,
+    pub selection: Vec<BoundingBox>,
+    pub caret: Option<BoundingBox>,
+    pub compose: Vec<BoundingBox>,
+    /// IME candidate window anchor, in layout space.
+    pub ime_area: BoundingBox,
+}
+
+pub struct Editor {
+    pub pres: Presentation,
+    pub slide: usize,
+    /// Selected shapes on the current slide, in selection order.
+    pub selection: Vec<ShapeId>,
+    pub text: Option<TextEdit>,
+    /// Smart guides to draw for the current drag.
+    pub guides: Vec<Guide>,
+    /// Rubber-band rectangle (x0, y0, x1, y1) while marquee-selecting.
+    pub marquee: Option<(f64, f64, f64, f64)>,
+    drag: Option<Drag>,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    clipboard: Vec<Shape>,
+    /// How many times the clipboard was pasted onto its source slide (for offsets).
+    paste_count: i64,
+    clipboard_slide: Option<usize>,
+    /// Bumped on every document change; lets hosts cache thumbnails and know about unsaved edits.
+    revision: u64,
+}
+
+/// A snap target: (position, extent start, extent end).
+type SnapLine = (f64, f64, f64);
+
+/// Axis-aligned bounds of a possibly rotated shape.
+fn bounds(x: &Xfrm) -> (f64, f64, f64, f64) {
+    let (w, h) = (x.w as f64, x.h as f64);
+    let pts = [x.to_slide(0.0, 0.0), x.to_slide(w, 0.0), x.to_slide(w, h), x.to_slide(0.0, h)];
+    pts.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |(x0, y0, x1, y1), p| (x0.min(p.0), y0.min(p.1), x1.max(p.0), y1.max(p.1)))
+}
+
+impl Editor {
+    pub fn new(pres: Presentation) -> Self {
+        Self {
+            pres,
+            slide: 0,
+            selection: Vec::new(),
+            text: None,
+            guides: Vec::new(),
+            marquee: None,
+            drag: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            clipboard: Vec::new(),
+            paste_count: 0,
+            clipboard_slide: None,
+            revision: 0,
+        }
+    }
+
+    pub fn load(&mut self, pres: Presentation) {
+        *self = Editor::new(pres);
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn changed(&mut self) {
+        self.revision += 1;
+    }
+
+    pub fn set_slide(&mut self, engine: &mut TextEngine, index: usize) {
+        self.end_text_edit(engine);
+        self.slide = index.min(self.pres.slides.len().saturating_sub(1));
+        self.selection.clear();
+    }
+
+    fn current_shapes(&self) -> &[Shape] {
+        self.pres.slides.get(self.slide).map(|s| s.shapes.as_slice()).unwrap_or(&[])
+    }
+
+    pub fn is_selected(&self, id: ShapeId) -> bool {
+        self.selection.contains(&id)
+    }
+
+    /// The single selected shape, if exactly one is selected.
+    pub fn selected_shape(&self) -> Option<&Shape> {
+        match self.selection.as_slice() {
+            [id] => self.pres.shape(self.slide, *id),
+            _ => None,
+        }
+    }
+
+    pub fn selected_shapes(&self) -> Vec<&Shape> {
+        self.current_shapes().iter().filter(|s| self.selection.contains(&s.id)).collect()
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty() || self.text.as_ref().is_some_and(|t| t.rich.can_undo())
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot { pres: self.pres.clone(), slide: self.slide, selection: self.selection.clone() }
+    }
+
+    fn push_undo(&mut self, snap: Snapshot) {
+        self.undo.push(snap);
+        if self.undo.len() > UNDO_LIMIT {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+        self.changed();
+    }
+
+    pub fn undo(&mut self, engine: &mut TextEngine) -> bool {
+        // Inside a text box, undo typing first.
+        if let Some(edit) = &mut self.text
+            && edit.rich.can_undo()
+        {
+            edit.rich.undo(engine);
+            self.fit_edited_shape(engine);
+            return true;
+        }
+        self.end_text_edit(engine);
+        let Some(snap) = self.undo.pop() else { return false };
+        self.redo.push(self.snapshot());
+        self.restore(snap);
+        true
+    }
+
+    pub fn redo(&mut self, engine: &mut TextEngine) -> bool {
+        if let Some(edit) = &mut self.text
+            && edit.rich.redo(engine)
+        {
+            self.fit_edited_shape(engine);
+            return true;
+        }
+        self.end_text_edit(engine);
+        let Some(snap) = self.redo.pop() else { return false };
+        self.undo.push(self.snapshot());
+        self.restore(snap);
+        true
+    }
+
+    fn restore(&mut self, snap: Snapshot) {
+        self.pres = snap.pres;
+        self.slide = snap.slide.min(self.pres.slides.len().saturating_sub(1));
+        let slide = self.slide;
+        self.selection = snap.selection.into_iter().filter(|id| self.pres.shape(slide, *id).is_some()).collect();
+        self.changed();
+    }
+
+    /// Runs `f` on every selected shape as one undo step.
+    fn modify_selected(&mut self, f: impl Fn(&mut Shape)) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        let before = self.snapshot();
+        let selection = self.selection.clone();
+        let Some(slide) = self.pres.slides.get_mut(self.slide) else { return false };
+        for shape in slide.shapes.iter_mut().filter(|s| selection.contains(&s.id)) {
+            f(shape);
+        }
+        self.push_undo(before);
+        true
+    }
+
+    // --- Hit testing -------------------------------------------------------
+
+    /// Topmost selectable shape under the point.
+    pub fn hit_test(&self, x: f64, y: f64, tol: f64) -> Option<ShapeId> {
+        self.current_shapes()
+            .iter()
+            .rev()
+            .filter(|s| selectable(s))
+            .find(|s| shape_contains(s, x, y, tol))
+            .map(|s| s.id)
+    }
+
+    /// Handle positions of the single selected shape, in slide space.
+    pub fn handles(&self, tol: &Tolerance) -> Vec<(Handle, (f64, f64))> {
+        let Some(shape) = self.selected_shape() else { return Vec::new() };
+        handle_points(&shape.xfrm, shape.geometry.is_line(), tol.rotate_offset)
+    }
+
+    fn handle_at(&self, x: f64, y: f64, tol: &Tolerance) -> Option<Handle> {
+        if self.text.is_some() {
+            return None;
+        }
+        self.handles(tol).into_iter().find(|(_, (hx, hy))| (hx - x).hypot(hy - y) <= tol.handle).map(|(h, _)| h)
+    }
+
+    pub fn hover_cursor(&self, ev: &PointerEvent, tol: &Tolerance) -> CursorIcon {
+        if let Some(drag) = &self.drag {
+            return match drag.kind {
+                DragKind::Move => CursorIcon::Move,
+                DragKind::Rotate => CursorIcon::Rotate,
+                DragKind::TextSelect => CursorIcon::Text,
+                DragKind::Marquee { .. } => CursorIcon::Default,
+                DragKind::Resize(h) => resize_cursor(h, &drag.origs.first().map(|o| o.1).unwrap_or_default()),
+            };
+        }
+        if let Some(edit) = &self.text
+            && let Some(shape) = self.pres.shape(self.slide, edit.shape)
+            && shape_contains(shape, ev.x, ev.y, tol.handle)
+        {
+            return CursorIcon::Text;
+        }
+        if let Some(h) = self.handle_at(ev.x, ev.y, tol) {
+            let xfrm = self.selected_shape().map(|s| s.xfrm).unwrap_or_default();
+            return if h == Handle::Rotate { CursorIcon::Rotate } else { resize_cursor(h, &xfrm) };
+        }
+        if self.hit_test(ev.x, ev.y, tol.handle).is_some() { CursorIcon::Move } else { CursorIcon::Default }
+    }
+
+    // --- Pointer -----------------------------------------------------------
+
+    fn origs(&self) -> Vec<(ShapeId, Xfrm)> {
+        self.selected_shapes().iter().map(|s| (s.id, s.xfrm)).collect()
+    }
+
+    /// Returns true when the view needs to be redrawn.
+    pub fn pointer_down(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> bool {
+        // Clicks inside the shape being edited move the caret.
+        if let Some(edit_id) = self.text.as_ref().map(|t| t.shape) {
+            let inside = self.pres.shape(self.slide, edit_id).is_some_and(|s| shape_contains(s, ev.x, ev.y, tol.handle));
+            if inside {
+                if let Some((x, y)) = self.to_text_space(ev.x, ev.y)
+                    && let Some(edit) = &mut self.text
+                {
+                    edit.rich.pointer_down(x, y, ev.clicks, ev.shift);
+                }
+                self.drag = Some(Drag {
+                    kind: DragKind::TextSelect,
+                    start: (ev.x, ev.y),
+                    origs: Vec::new(),
+                    base_selection: Vec::new(),
+                    before: None,
+                    moved: false,
+                });
+                return true;
+            }
+            self.end_text_edit(engine);
+        }
+
+        if let Some(handle) = self.handle_at(ev.x, ev.y, tol) {
+            let kind = if handle == Handle::Rotate { DragKind::Rotate } else { DragKind::Resize(handle) };
+            self.drag = Some(Drag { kind, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+            return true;
+        }
+
+        match self.hit_test(ev.x, ev.y, tol.handle) {
+            Some(id) => {
+                if ev.shift || ev.meta {
+                    // Toggle membership; dragging still moves the whole selection.
+                    if let Some(i) = self.selection.iter().position(|s| *s == id) {
+                        self.selection.remove(i);
+                        return true;
+                    }
+                    self.selection.push(id);
+                } else if !self.is_selected(id) {
+                    self.selection = vec![id];
+                }
+                let shape = self.pres.shape(self.slide, id).expect("hit shape exists");
+                if ev.clicks >= 2 && can_hold_text(shape) {
+                    self.begin_text_edit(engine, id, false);
+                    if let Some((x, y)) = self.to_text_space(ev.x, ev.y)
+                        && let Some(edit) = &mut self.text
+                    {
+                        edit.rich.pointer_down(x, y, ev.clicks - 1, false);
+                    }
+                    return true;
+                }
+                self.drag = Some(Drag { kind: DragKind::Move, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+            }
+            None => {
+                let additive = ev.shift || ev.meta;
+                if !additive {
+                    self.selection.clear();
+                }
+                self.drag = Some(Drag {
+                    kind: DragKind::Marquee { additive },
+                    start: (ev.x, ev.y),
+                    origs: Vec::new(),
+                    base_selection: self.selection.clone(),
+                    before: None,
+                    moved: false,
+                });
+            }
+        }
+        true
+    }
+
+    pub fn pointer_move(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> bool {
+        let Some(drag) = &mut self.drag else { return false };
+        let (dx, dy) = (ev.x - drag.start.0, ev.y - drag.start.1);
+        if !drag.moved && dx.hypot(dy) < tol.handle / 3.0 {
+            return false;
+        }
+        drag.moved = true;
+        let kind = drag.kind;
+        let start = drag.start;
+        let origs = drag.origs.clone();
+        match kind {
+            DragKind::TextSelect => {
+                if let Some((x, y)) = self.to_text_space(ev.x, ev.y)
+                    && let Some(edit) = &mut self.text
+                {
+                    edit.rich.pointer_drag(x, y);
+                }
+                let _ = engine;
+            }
+            DragKind::Marquee { additive } => {
+                let rect = (start.0.min(ev.x), start.1.min(ev.y), start.0.max(ev.x), start.1.max(ev.y));
+                self.marquee = Some(rect);
+                let base = self.drag.as_ref().map(|d| d.base_selection.clone()).unwrap_or_default();
+                let mut sel = if additive { base } else { Vec::new() };
+                for s in self.current_shapes().iter().filter(|s| selectable(s)) {
+                    let (x0, y0, x1, y1) = bounds(&s.xfrm);
+                    if x0 >= rect.0 && y0 >= rect.1 && x1 <= rect.2 && y1 <= rect.3 && !sel.contains(&s.id) {
+                        sel.push(s.id);
+                    }
+                }
+                self.selection = sel;
+            }
+            DragKind::Move => {
+                let (mut dx, mut dy) = (dx, dy);
+                if ev.shift {
+                    // Constrain to the dominant axis.
+                    if dx.abs() > dy.abs() { dy = 0.0 } else { dx = 0.0 }
+                }
+                self.guides.clear();
+                if !ev.alt {
+                    let moving: Vec<ShapeId> = origs.iter().map(|o| o.0).collect();
+                    let union = origs.iter().map(|o| bounds(&o.1)).fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |a, b| {
+                        (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))
+                    });
+                    let moved = (union.0 + dx, union.1 + dy, union.2 + dx, union.3 + dy);
+                    let (sx, sy, guides) = self.snap(&moving, moved, tol.snap, ev.shift && dx == 0.0, ev.shift && dy == 0.0);
+                    dx += sx;
+                    dy += sy;
+                    self.guides = guides;
+                }
+                for (id, o) in &origs {
+                    if let Some(shape) = self.pres.shape_mut(self.slide, *id) {
+                        shape.xfrm = Xfrm { x: o.x + dx.round() as i64, y: o.y + dy.round() as i64, ..*o };
+                    }
+                }
+            }
+            DragKind::Resize(handle) => {
+                let Some(&(id, orig)) = origs.first() else { return false };
+                let is_line = self.pres.shape(self.slide, id).is_some_and(|s| s.geometry.is_line());
+                let mut new = resize(&orig, handle, dx, dy, ev.shift, if is_line { 0.0 } else { MIN_SIZE });
+                self.guides.clear();
+                if !ev.alt && !ev.shift && orig.rot == 0.0 && !is_line {
+                    new = self.snap_resize(id, new, handle, tol.snap);
+                }
+                if let Some(shape) = self.pres.shape_mut(self.slide, id) {
+                    shape.xfrm = new;
+                }
+            }
+            DragKind::Rotate => {
+                let Some(&(id, orig)) = origs.first() else { return false };
+                let (cx, cy) = orig.center();
+                let mut angle = (ev.y - cy).atan2(ev.x - cx).to_degrees() + 90.0;
+                if ev.shift {
+                    angle = (angle / 15.0).round() * 15.0;
+                }
+                if let Some(shape) = self.pres.shape_mut(self.slide, id) {
+                    shape.xfrm = Xfrm { rot: angle.rem_euclid(360.0), ..orig };
+                }
+            }
+        }
+        true
+    }
+
+    pub fn pointer_up(&mut self, _engine: &mut TextEngine, _ev: &PointerEvent) -> bool {
+        self.guides.clear();
+        let had_marquee = self.marquee.take().is_some();
+        let Some(drag) = self.drag.take() else { return had_marquee };
+        if drag.moved
+            && let Some(before) = drag.before
+        {
+            self.push_undo(before);
+        }
+        drag.moved || had_marquee
+    }
+
+    /// Snap lines from the slide and the other shapes, as (vertical lines, horizontal lines).
+    fn snap_targets(&self, exclude: &[ShapeId]) -> (Vec<SnapLine>, Vec<SnapLine>) {
+        let (w, h) = (self.pres.slide_width as f64, self.pres.slide_height as f64);
+        let mut xs = vec![(0.0, 0.0, h), (w / 2.0, 0.0, h), (w, 0.0, h)];
+        let mut ys = vec![(0.0, 0.0, w), (h / 2.0, 0.0, w), (h, 0.0, w)];
+        for s in self.current_shapes().iter().filter(|s| !exclude.contains(&s.id)) {
+            let (x0, y0, x1, y1) = bounds(&s.xfrm);
+            for x in [x0, (x0 + x1) / 2.0, x1] {
+                xs.push((x, y0, y1));
+            }
+            for y in [y0, (y0 + y1) / 2.0, y1] {
+                ys.push((y, x0, x1));
+            }
+        }
+        (xs, ys)
+    }
+
+    /// Returns the correction to apply to a moving box and the guides to show.
+    fn snap(&self, moving: &[ShapeId], b: (f64, f64, f64, f64), tol: f64, lock_x: bool, lock_y: bool) -> (f64, f64, Vec<Guide>) {
+        let (xs, ys) = self.snap_targets(moving);
+        let best = |edges: [f64; 3], targets: &[SnapLine]| {
+            let mut best: Option<(f64, SnapLine)> = None;
+            for e in edges {
+                for t in targets {
+                    let d = t.0 - e;
+                    if d.abs() <= tol && best.is_none_or(|(bd, _)| d.abs() < bd.abs()) {
+                        best = Some((d, *t));
+                    }
+                }
+            }
+            best
+        };
+        let mut guides = Vec::new();
+        let mut sx = 0.0;
+        let mut sy = 0.0;
+        if !lock_x && let Some((d, _)) = best([b.0, (b.0 + b.2) / 2.0, b.2], &xs) {
+            sx = d;
+        }
+        if !lock_y && let Some((d, _)) = best([b.1, (b.1 + b.3) / 2.0, b.3], &ys) {
+            sy = d;
+        }
+        // Report every line the snapped box now touches, like PowerPoint.
+        let b = (b.0 + sx, b.1 + sy, b.2 + sx, b.3 + sy);
+        if sx != 0.0 || xs.iter().any(|t| [b.0, (b.0 + b.2) / 2.0, b.2].iter().any(|e| (t.0 - e).abs() < 1.0)) {
+            for t in &xs {
+                if [b.0, (b.0 + b.2) / 2.0, b.2].iter().any(|e| (t.0 - e).abs() < 1.0) {
+                    guides.push(Guide { vertical: true, pos: t.0, from: t.1.min(b.1), to: t.2.max(b.3) });
+                }
+            }
+        }
+        if sy != 0.0 || ys.iter().any(|t| [b.1, (b.1 + b.3) / 2.0, b.3].iter().any(|e| (t.0 - e).abs() < 1.0)) {
+            for t in &ys {
+                if [b.1, (b.1 + b.3) / 2.0, b.3].iter().any(|e| (t.0 - e).abs() < 1.0) {
+                    guides.push(Guide { vertical: false, pos: t.0, from: t.1.min(b.0), to: t.2.max(b.2) });
+                }
+            }
+        }
+        (sx, sy, guides)
+    }
+
+    /// Snaps the edges a resize handle moves (unrotated shapes only).
+    fn snap_resize(&mut self, id: ShapeId, mut x: Xfrm, handle: Handle, tol: f64) -> Xfrm {
+        let (xs, ys) = self.snap_targets(&[id]);
+        let (sx, sy) = handle.sign();
+        let nearest = |v: f64, targets: &[SnapLine]| {
+            targets.iter().map(|t| (t.0 - v, *t)).filter(|(d, _)| d.abs() <= tol).min_by(|a, b| a.0.abs().total_cmp(&b.0.abs()))
+        };
+        if sx != 0.0 {
+            let edge = if sx > 0.0 { (x.x + x.w) as f64 } else { x.x as f64 };
+            if let Some((d, t)) = nearest(edge, &xs) {
+                let d = d.round() as i64;
+                if sx > 0.0 { x.w += d } else { x.x += d; x.w -= d }
+                self.guides.push(Guide { vertical: true, pos: t.0, from: t.1.min(x.y as f64), to: t.2.max((x.y + x.h) as f64) });
+            }
+        }
+        if sy != 0.0 {
+            let edge = if sy > 0.0 { (x.y + x.h) as f64 } else { x.y as f64 };
+            if let Some((d, t)) = nearest(edge, &ys) {
+                let d = d.round() as i64;
+                if sy > 0.0 { x.h += d } else { x.y += d; x.h -= d }
+                self.guides.push(Guide { vertical: false, pos: t.0, from: t.1.min(x.x as f64), to: t.2.max((x.x + x.w) as f64) });
+            }
+        }
+        x
+    }
+
+    // --- Text editing ------------------------------------------------------
+
+    pub fn is_editing_text(&self) -> bool {
+        self.text.is_some()
+    }
+
+    fn begin_text_edit(&mut self, engine: &mut TextEngine, id: ShapeId, remove_if_empty: bool) {
+        let default_style = self.pres.default_run_style();
+        let text_defaults = self.pres.text_defaults.clone();
+        let Some(shape) = self.pres.shape_mut(self.slide, id) else { return };
+        let body = shape.text.get_or_insert_with(|| {
+            // Shapes without text get centered white text, like PowerPoint's default shape style.
+            let mut body = TextBody { anchor: Anchor::Middle, defaults: text_defaults, ..Default::default() };
+            body.paragraphs[0].align = Align::Center;
+            body.paragraphs[0].end_style = RunStyle { color: Color::WHITE, ..default_style };
+            body
+        });
+        let original = body.clone();
+        let width = text_width_pt(&shape.xfrm, body);
+        let rich = RichEdit::new(engine, original.clone(), width);
+        self.selection = vec![id];
+        self.text = Some(TextEdit { shape: id, rich, original, remove_if_empty });
+    }
+
+    /// Commits the edited text into the model and leaves text mode.
+    pub fn end_text_edit(&mut self, engine: &mut TextEngine) {
+        let Some(mut edit) = self.text.take() else { return };
+        edit.rich.clear_compose(engine);
+        let body = edit.rich.body;
+        if edit.remove_if_empty && body.is_empty() {
+            if let Some(slide) = self.pres.slides.get_mut(self.slide) {
+                slide.shapes.retain(|s| s.id != edit.shape);
+            }
+            self.selection.clear();
+            self.changed();
+            return;
+        }
+        if body == edit.original {
+            return;
+        }
+        // The snapshot must show the text as it was before editing.
+        let mut before = self.snapshot();
+        if let Some(s) = before.pres.shape_mut(self.slide, edit.shape) {
+            s.text = Some(edit.original.clone());
+        }
+        if let Some(shape) = self.pres.shape_mut(self.slide, edit.shape) {
+            shape.text = Some(body);
+            self.push_undo(before);
+        }
+    }
+
+    /// Maps a slide-space point to the edited text's layout space.
+    fn to_text_space(&self, x: f64, y: f64) -> Option<(f32, f32)> {
+        let edit = self.text.as_ref()?;
+        let shape = self.pres.shape(self.slide, edit.shape)?;
+        let p = text_affine(&shape.xfrm, &edit.rich.body, edit.rich.layout().height).inverse() * Point::new(x, y);
+        Some((p.x as f32, p.y as f32))
+    }
+
+    /// Starts editing the selected shape when the user just types, replacing its text.
+    fn ensure_text_edit_for_typing(&mut self, engine: &mut TextEngine) -> bool {
+        if self.text.is_some() {
+            return true;
+        }
+        let Some(shape) = self.selected_shape() else { return false };
+        if !can_hold_text(shape) {
+            return false;
+        }
+        let id = shape.id;
+        self.begin_text_edit(engine, id, false);
+        if let Some(edit) = &mut self.text {
+            edit.rich.select_all();
+        }
+        true
+    }
+
+    pub fn insert_text(&mut self, engine: &mut TextEngine, text: &str) -> bool {
+        if text.is_empty() || !self.ensure_text_edit_for_typing(engine) {
+            return false;
+        }
+        self.text.as_mut().expect("text edit active").rich.insert(engine, text);
+        self.fit_edited_shape(engine);
+        true
+    }
+
+    /// IME preedit update. `cursor` is a byte offset inside the preedit text.
+    pub fn compose_update(&mut self, engine: &mut TextEngine, text: &str, cursor: usize) -> bool {
+        if !self.ensure_text_edit_for_typing(engine) {
+            return false;
+        }
+        self.text.as_mut().expect("text edit active").rich.set_compose(engine, text, cursor);
+        self.fit_edited_shape(engine);
+        true
+    }
+
+    /// IME commit: the preedit is replaced by the final text.
+    pub fn compose_end(&mut self, engine: &mut TextEngine, text: &str) -> bool {
+        let Some(edit) = self.text.as_mut() else { return self.insert_text(engine, text) };
+        edit.rich.commit_compose(engine, text);
+        self.fit_edited_shape(engine);
+        true
+    }
+
+    pub fn is_composing(&self) -> bool {
+        self.text.as_ref().is_some_and(|t| t.rich.is_composing())
+    }
+
+    pub fn text_view(&self) -> Option<TextEditView<'_>> {
+        let edit = self.text.as_ref()?;
+        let shape = self.pres.shape(self.slide, edit.shape)?;
+        let layout = edit.rich.layout();
+        Some(TextEditView {
+            transform: text_affine(&shape.xfrm, &edit.rich.body, layout.height),
+            layout,
+            selection: edit.rich.selection_rects(),
+            caret: edit.rich.caret(),
+            compose: edit.rich.compose_rects(),
+            ime_area: edit.rich.ime_area(),
+        })
+    }
+
+    /// Grows or shrinks an auto-fit (`spAutoFit`) shape to the edited text's height.
+    fn fit_edited_shape(&mut self, engine: &mut TextEngine) {
+        let Some(edit) = &mut self.text else { return };
+        let id = edit.shape;
+        let Some(shape) = self.pres.slides.get_mut(self.slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) else { return };
+        edit.rich.set_width(engine, text_width_pt(&shape.xfrm, &edit.rich.body));
+        let body = &edit.rich.body;
+        if !body.auto_grow {
+            return;
+        }
+        let min_line = body.paragraphs.first().map(|p| p.first_style().size_pt * SINGLE_LINE_HEIGHT).unwrap_or(0.0);
+        let content = edit.rich.layout().height.max(min_line) as f64;
+        shape.xfrm.h = (content * EMU_PER_PT).round() as i64 + body.insets[1] + body.insets[3];
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        self.text.as_ref()?.rich.selected_text()
+    }
+
+    /// Deletes the text selection, used by cut.
+    pub fn delete_text_selection(&mut self, engine: &mut TextEngine) -> bool {
+        let Some(edit) = self.text.as_mut() else { return false };
+        edit.rich.delete_selection(engine);
+        self.fit_edited_shape(engine);
+        true
+    }
+
+    // --- Formatting --------------------------------------------------------
+
+    /// Applies a character format to the text selection, or to all text of the selected shapes.
+    pub fn apply_text_style(&mut self, engine: &mut TextEngine, f: impl Fn(&mut RunStyle)) -> bool {
+        if let Some(edit) = &mut self.text {
+            edit.rich.apply_style(engine, f);
+            self.fit_edited_shape(engine);
+            return true;
+        }
+        if !self.selected_shapes().iter().any(|s| s.text.is_some()) {
+            return false;
+        }
+        self.modify_selected(|shape| {
+            if let Some(body) = &mut shape.text {
+                let len = body.len();
+                body.apply_style(0..len, &f);
+            }
+        })
+    }
+
+    /// Bold/italic/underline toggle: turns it off only when the current text already has it.
+    pub fn toggle_style(&mut self, engine: &mut TextEngine, which: Toggle) -> bool {
+        let Some(current) = self.text_format().map(|f| f.style) else { return false };
+        let on = !match which {
+            Toggle::Bold => current.bold,
+            Toggle::Italic => current.italic,
+            Toggle::Underline => current.underline,
+        };
+        self.apply_text_style(engine, |s| match which {
+            Toggle::Bold => s.bold = on,
+            Toggle::Italic => s.italic = on,
+            Toggle::Underline => s.underline = on,
+        })
+    }
+
+    /// Applies a paragraph format to the selected paragraphs, or to all paragraphs of the selected shapes.
+    pub fn apply_paragraph(&mut self, engine: &mut TextEngine, f: impl Fn(&mut Paragraph)) -> bool {
+        if let Some(edit) = &mut self.text {
+            edit.rich.apply_paragraphs(engine, f);
+            self.fit_edited_shape(engine);
+            return true;
+        }
+        if !self.selected_shapes().iter().any(|s| s.text.is_some()) {
+            return false;
+        }
+        self.modify_selected(|shape| {
+            if let Some(body) = &mut shape.text {
+                let len = body.len();
+                body.apply_paragraphs(0..len, &f);
+            }
+        })
+    }
+
+    /// Toggles bullets on the affected paragraphs, with PowerPoint's default hanging indent.
+    pub fn toggle_bullets(&mut self, engine: &mut TextEngine) -> bool {
+        let on = !self.text_format().is_some_and(|f| f.bullet);
+        self.apply_paragraph(engine, |p| {
+            if on {
+                p.bullet = Some('•');
+                if p.indent >= 0 {
+                    p.mar_l = 285_750 * (p.level as i64 + 1);
+                    p.indent = -285_750;
+                }
+            } else {
+                p.bullet = None;
+                p.indent = 0;
+                p.mar_l = 0;
+            }
+        })
+    }
+
+    /// Changes the list level (indent) by `delta`.
+    pub fn change_level(&mut self, engine: &mut TextEngine, delta: i32) -> bool {
+        self.apply_paragraph(engine, |p| {
+            let level = (p.level as i32 + delta).clamp(0, 8);
+            let step = 457_200 * (level - p.level as i32) as i64;
+            p.level = level as u8;
+            p.mar_l = (p.mar_l + step).max(0);
+        })
+    }
+
+    /// Formatting at the caret (or of the selected shape's first character).
+    pub fn text_format(&self) -> Option<TextFormat> {
+        if let Some(edit) = &self.text {
+            let p = edit.rich.current_paragraph();
+            return Some(TextFormat { style: edit.rich.typing_style(), align: p.align, bullet: p.bullet.is_some(), level: p.level });
+        }
+        let body = self.selected_shapes().into_iter().find_map(|s| s.text.as_ref())?;
+        let p = body.paragraphs.first()?;
+        Some(TextFormat { style: body.style_at(0), align: p.align, bullet: p.bullet.is_some(), level: p.level })
+    }
+
+    pub fn set_fill(&mut self, fill: Option<Color>) -> bool {
+        self.modify_selected(|s| {
+            if !s.geometry.is_line() && matches!(s.kind, ShapeKind::Shape) {
+                s.fill = fill;
+            }
+        })
+    }
+
+    /// Sets the outline color (`None` = no outline), keeping the width.
+    pub fn set_line_color(&mut self, color: Option<Color>) -> bool {
+        self.modify_selected(|s| {
+            s.line = color.map(|color| Line { color, width: s.line.map(|l| l.width).unwrap_or(12_700) });
+        })
+    }
+
+    pub fn set_line_width(&mut self, width: i64) -> bool {
+        self.modify_selected(|s| {
+            let color = s.line.map(|l| l.color).unwrap_or(Color::BLACK);
+            s.line = Some(Line { color, width });
+        })
+    }
+
+    pub fn selection_fill(&self) -> Option<Option<Color>> {
+        self.selected_shapes().first().map(|s| s.fill)
+    }
+
+    pub fn selection_line(&self) -> Option<Option<Line>> {
+        self.selected_shapes().first().map(|s| s.line)
+    }
+
+    // --- Keyboard ----------------------------------------------------------
+
+    /// Returns true if the key was handled (the host should then prevent default).
+    pub fn key_down(&mut self, engine: &mut TextEngine, key: &str, m: Modifiers) -> bool {
+        if m.meta {
+            match key.to_lowercase().as_str() {
+                "z" => return if m.shift { self.redo(engine) } else { self.undo(engine) },
+                "b" => {
+                    self.toggle_style(engine, Toggle::Bold);
+                    return true;
+                }
+                "i" => {
+                    self.toggle_style(engine, Toggle::Italic);
+                    return true;
+                }
+                "u" => {
+                    self.toggle_style(engine, Toggle::Underline);
+                    return true;
+                }
+                "l" => return self.apply_paragraph(engine, |p| p.align = Align::Left),
+                "e" => return self.apply_paragraph(engine, |p| p.align = Align::Center),
+                "r" => return self.apply_paragraph(engine, |p| p.align = Align::Right),
+                "j" => return self.apply_paragraph(engine, |p| p.align = Align::Justify),
+                "]" | "}" => return self.apply_text_style(engine, |s| s.size_pt = grow_size(s.size_pt, true)),
+                "[" | "{" => return self.apply_text_style(engine, |s| s.size_pt = grow_size(s.size_pt, false)),
+                "d" if self.text.is_none() => return self.duplicate_selected(),
+                _ => {}
+            }
+        }
+        if self.text.is_some() {
+            return self.text_key(engine, key, m);
+        }
+        match key {
+            "Backspace" | "Delete" => self.delete_selected(),
+            "Escape" => {
+                let had = !self.selection.is_empty();
+                self.selection.clear();
+                had
+            }
+            "Enter" | "F2" => {
+                let Some(id) = self.selected_shape().filter(|s| can_hold_text(s)).map(|s| s.id) else { return false };
+                self.begin_text_edit(engine, id, false);
+                true
+            }
+            "Tab" => self.cycle_selection(!m.shift),
+            "a" if m.meta => {
+                self.selection = self.current_shapes().iter().filter(|s| selectable(s)).map(|s| s.id).collect();
+                true
+            }
+            "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" => {
+                let step = if m.shift { EMU_PER_INCH / 10.0 } else { EMU_PER_INCH / 100.0 } as i64;
+                let (dx, dy) = match key {
+                    "ArrowLeft" => (-step, 0),
+                    "ArrowRight" => (step, 0),
+                    "ArrowUp" => (0, -step),
+                    _ => (0, step),
+                };
+                self.nudge(dx, dy)
+            }
+            _ => false,
+        }
+    }
+
+    fn text_key(&mut self, engine: &mut TextEngine, key: &str, m: Modifiers) -> bool {
+        if key == "Escape" {
+            self.end_text_edit(engine);
+            return true;
+        }
+        let edit = self.text.as_mut().expect("text edit active");
+        let r = &mut edit.rich;
+        let mv = |r: &mut RichEdit, mv: Move| r.move_caret(mv, m.shift);
+        match key {
+            "ArrowLeft" => mv(r, if m.meta { Move::LineStart } else if m.alt { Move::WordLeft } else { Move::Left }),
+            "ArrowRight" => mv(r, if m.meta { Move::LineEnd } else if m.alt { Move::WordRight } else { Move::Right }),
+            "ArrowUp" => mv(r, if m.meta { Move::TextStart } else { Move::Up }),
+            "ArrowDown" => mv(r, if m.meta { Move::TextEnd } else { Move::Down }),
+            "Home" => mv(r, Move::LineStart),
+            "End" => mv(r, Move::LineEnd),
+            "Backspace" if m.meta => r.delete_to_line_start(engine),
+            "Backspace" => r.backspace(engine, m.alt),
+            "Delete" => r.delete_forward(engine, m.alt),
+            // Shift+Enter is a line break inside the paragraph.
+            "Enter" => r.insert(engine, if m.shift { "\u{2028}" } else { "\n" }),
+            "Tab" => {
+                // Tab at a paragraph start changes the list level, like PowerPoint.
+                let at_start = r.is_collapsed() && r.body.paragraph_ranges()[r.body.paragraph_at(r.range().start)].start == r.range().start;
+                if at_start || !r.is_collapsed() {
+                    return self.change_level(engine, if m.shift { -1 } else { 1 });
+                }
+                r.insert(engine, "\t");
+            }
+            "a" if m.meta => r.select_all(),
+            _ => return false,
+        }
+        self.fit_edited_shape(engine);
+        true
+    }
+
+    fn cycle_selection(&mut self, forward: bool) -> bool {
+        let shapes: Vec<&Shape> = self.current_shapes().iter().filter(|s| selectable(s)).collect();
+        if shapes.is_empty() {
+            return false;
+        }
+        let current = self.selection.last().and_then(|id| shapes.iter().position(|s| s.id == *id));
+        let n = shapes.len();
+        let next = match current {
+            Some(i) if forward => (i + 1) % n,
+            Some(i) => (i + n - 1) % n,
+            None if forward => 0,
+            None => n - 1,
+        };
+        self.selection = vec![shapes[next].id];
+        true
+    }
+
+    // --- Shape commands ----------------------------------------------------
+
+    pub fn delete_selected(&mut self) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        let before = self.snapshot();
+        let selection = std::mem::take(&mut self.selection);
+        let Some(slide) = self.pres.slides.get_mut(self.slide) else { return false };
+        slide.shapes.retain(|s| !selection.contains(&s.id));
+        self.push_undo(before);
+        true
+    }
+
+    pub fn nudge(&mut self, dx: i64, dy: i64) -> bool {
+        self.modify_selected(|s| {
+            s.xfrm.x += dx;
+            s.xfrm.y += dy;
+        })
+    }
+
+    /// Copies the selected shapes to the internal clipboard. Returns how many were copied.
+    pub fn copy(&mut self) -> usize {
+        self.clipboard = self.selected_shapes().into_iter().cloned().collect();
+        self.clipboard_slide = Some(self.slide);
+        self.paste_count = 0;
+        self.clipboard.len()
+    }
+
+    pub fn cut(&mut self) -> bool {
+        self.copy() > 0 && self.delete_selected()
+    }
+
+    pub fn has_clipboard(&self) -> bool {
+        !self.clipboard.is_empty()
+    }
+
+    /// Pastes the internal clipboard onto the current slide and selects the copies.
+    pub fn paste(&mut self, engine: &mut TextEngine) -> bool {
+        if self.clipboard.is_empty() || self.pres.slides.is_empty() {
+            return false;
+        }
+        self.end_text_edit(engine);
+        if self.clipboard_slide == Some(self.slide) {
+            self.paste_count += 1;
+        } else {
+            self.paste_count = 0;
+            self.clipboard_slide = Some(self.slide);
+        }
+        let offset = PASTE_OFFSET * self.paste_count;
+        let shapes = self.clipboard.clone();
+        self.insert_copies(shapes, offset)
+    }
+
+    pub fn duplicate_selected(&mut self) -> bool {
+        let shapes: Vec<Shape> = self.selected_shapes().into_iter().cloned().collect();
+        self.insert_copies(shapes, PASTE_OFFSET)
+    }
+
+    fn insert_copies(&mut self, shapes: Vec<Shape>, offset: i64) -> bool {
+        if shapes.is_empty() {
+            return false;
+        }
+        let before = self.snapshot();
+        let mut ids = Vec::new();
+        for mut shape in shapes {
+            shape.id = self.pres.alloc_id();
+            shape.xfrm.x += offset;
+            shape.xfrm.y += offset;
+            ids.push(shape.id);
+            self.pres.slides[self.slide].shapes.push(shape);
+        }
+        self.selection = ids;
+        self.push_undo(before);
+        true
+    }
+
+    /// Pastes plain text as a new text box (when the clipboard holds no shapes of ours).
+    pub fn paste_text_box(&mut self, engine: &mut TextEngine, text: &str) -> bool {
+        if !self.add_text_box(engine) {
+            return false;
+        }
+        self.insert_text(engine, text);
+        self.end_text_edit(engine);
+        true
+    }
+
+    pub fn reorder(&mut self, order: ZOrder) -> bool {
+        if self.selection.is_empty() {
+            return false;
+        }
+        let before = self.snapshot();
+        let selection = self.selection.clone();
+        let shapes = &mut self.pres.slides[self.slide].shapes;
+        let original = shapes.clone();
+        match order {
+            ZOrder::Front | ZOrder::Back => {
+                let (sel, rest): (Vec<Shape>, Vec<Shape>) = shapes.drain(..).partition(|s| selection.contains(&s.id));
+                *shapes = if order == ZOrder::Front { [rest, sel].concat() } else { [sel, rest].concat() };
+            }
+            ZOrder::Forward => {
+                for i in (0..shapes.len().saturating_sub(1)).rev() {
+                    if selection.contains(&shapes[i].id) && !selection.contains(&shapes[i + 1].id) {
+                        shapes.swap(i, i + 1);
+                    }
+                }
+            }
+            ZOrder::Backward => {
+                for i in 1..shapes.len() {
+                    if selection.contains(&shapes[i].id) && !selection.contains(&shapes[i - 1].id) {
+                        shapes.swap(i, i - 1);
+                    }
+                }
+            }
+        }
+        if *shapes == original {
+            return false;
+        }
+        self.push_undo(before);
+        true
+    }
+
+    /// Aligns the selection: to each other when several shapes are selected, else to the slide.
+    pub fn align(&mut self, to: AlignTo) -> bool {
+        let shapes = self.selected_shapes();
+        if shapes.is_empty() {
+            return false;
+        }
+        let frame = if shapes.len() == 1 {
+            (0.0, 0.0, self.pres.slide_width as f64, self.pres.slide_height as f64)
+        } else {
+            shapes.iter().map(|s| bounds(&s.xfrm)).fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+        };
+        self.modify_selected(|s| {
+            let b = bounds(&s.xfrm);
+            let (dx, dy) = match to {
+                AlignTo::Left => (frame.0 - b.0, 0.0),
+                AlignTo::Center => ((frame.0 + frame.2) / 2.0 - (b.0 + b.2) / 2.0, 0.0),
+                AlignTo::Right => (frame.2 - b.2, 0.0),
+                AlignTo::Top => (0.0, frame.1 - b.1),
+                AlignTo::Middle => (0.0, (frame.1 + frame.3) / 2.0 - (b.1 + b.3) / 2.0),
+                AlignTo::Bottom => (0.0, frame.3 - b.3),
+            };
+            s.xfrm.x += dx.round() as i64;
+            s.xfrm.y += dy.round() as i64;
+        })
+    }
+
+    /// Inserts an empty text box in the middle of the slide and starts editing it.
+    pub fn add_text_box(&mut self, engine: &mut TextEngine) -> bool {
+        self.end_text_edit(engine);
+        if self.pres.slides.is_empty() {
+            return false;
+        }
+        let before = self.snapshot();
+        let (w, h) = (4 * EMU_PER_INCH as i64, (0.6 * EMU_PER_INCH) as i64);
+        let xfrm = Xfrm::new((self.pres.slide_width - w) / 2, (self.pres.slide_height - h) / 2, w, h);
+        let id = self.pres.alloc_id();
+        let mut shape = Shape::new(id, format!("文字方塊 {}", id.0), xfrm);
+        let mut body = TextBody { auto_grow: true, defaults: self.pres.text_defaults.clone(), ..Default::default() };
+        body.paragraphs[0].end_style = self.pres.default_run_style();
+        shape.text = Some(body);
+        self.pres.slides[self.slide].shapes.push(shape);
+        self.push_undo(before);
+        self.begin_text_edit(engine, id, true);
+        self.fit_edited_shape(engine);
+        true
+    }
+
+    /// Inserts a preset shape with the default accent style and selects it.
+    pub fn add_shape(&mut self, engine: &mut TextEngine, preset: &str) -> bool {
+        self.end_text_edit(engine);
+        if self.pres.slides.is_empty() {
+            return false;
+        }
+        let before = self.snapshot();
+        let (w, h) = (2 * EMU_PER_INCH as i64, (1.5 * EMU_PER_INCH) as i64);
+        let xfrm = Xfrm::new((self.pres.slide_width - w) / 2, (self.pres.slide_height - h) / 2, w, h);
+        let id = self.pres.alloc_id();
+        let mut shape = Shape::new(id, format!("{preset} {}", id.0), xfrm);
+        shape.geometry = Geometry::preset(preset);
+        shape.fill = Some(Color::rgb(0x44, 0x72, 0xC4));
+        shape.line = Some(Line { color: Color::rgb(0x2F, 0x52, 0x8F), width: 12_700 });
+        self.pres.slides[self.slide].shapes.push(shape);
+        self.selection = vec![id];
+        self.push_undo(before);
+        true
+    }
+
+    /// Inserts a picture centered on the slide, scaled to fit 60% of it.
+    pub fn add_picture(&mut self, engine: &mut TextEngine, key: String, bytes: std::sync::Arc<Vec<u8>>, px_w: u32, px_h: u32) -> bool {
+        self.end_text_edit(engine);
+        if self.pres.slides.is_empty() || px_w == 0 || px_h == 0 {
+            return false;
+        }
+        let before = self.snapshot();
+        let (sw, sh) = (self.pres.slide_width as f64, self.pres.slide_height as f64);
+        // 96 dpi, capped to 60% of the slide.
+        let (mut w, mut h) = (px_w as f64 * EMU_PER_INCH / 96.0, px_h as f64 * EMU_PER_INCH / 96.0);
+        let scale = (sw * 0.6 / w).min(sh * 0.6 / h).min(1.0);
+        w *= scale;
+        h *= scale;
+        let xfrm = Xfrm::new(((sw - w) / 2.0) as i64, ((sh - h) / 2.0) as i64, w as i64, h as i64);
+        self.pres.media.insert(key.clone(), bytes);
+        let id = self.pres.alloc_id();
+        let mut shape = Shape::new(id, format!("圖片 {}", id.0), xfrm);
+        shape.kind = ShapeKind::Picture { media: Some(key), crop: Default::default() };
+        self.pres.slides[self.slide].shapes.push(shape);
+        self.selection = vec![id];
+        self.push_undo(before);
+        true
+    }
+
+    // --- Slide commands ----------------------------------------------------
+
+    /// Adds a slide after the current one. `layout` defaults to the current slide's layout.
+    pub fn add_slide(&mut self, engine: &mut TextEngine, layout: Option<usize>) -> bool {
+        self.end_text_edit(engine);
+        let before = self.snapshot();
+        let layout = layout
+            .or_else(|| self.pres.slides.get(self.slide).and_then(|s| s.layout))
+            .unwrap_or(if self.pres.layouts.len() > 1 { 1 } else { 0 });
+        let slide = self.pres.slide_from_layout(layout);
+        let at = if self.pres.slides.is_empty() { 0 } else { self.slide + 1 };
+        self.pres.slides.insert(at, slide);
+        self.slide = at;
+        self.selection.clear();
+        self.push_undo(before);
+        true
+    }
+
+    pub fn duplicate_slide(&mut self, engine: &mut TextEngine, index: usize) -> bool {
+        self.end_text_edit(engine);
+        let Some(src) = self.pres.slides.get(index).cloned() else { return false };
+        let before = self.snapshot();
+        let mut copy = Slide { background_shapes: Vec::new(), shapes: Vec::new(), ..src.clone() };
+        for s in src.background_shapes {
+            copy.background_shapes.push(Shape { id: self.pres.alloc_id(), ..s });
+        }
+        for s in src.shapes {
+            copy.shapes.push(Shape { id: self.pres.alloc_id(), ..s });
+        }
+        self.pres.slides.insert(index + 1, copy);
+        self.slide = index + 1;
+        self.selection.clear();
+        self.push_undo(before);
+        true
+    }
+
+    pub fn delete_slide(&mut self, engine: &mut TextEngine, index: usize) -> bool {
+        self.end_text_edit(engine);
+        if index >= self.pres.slides.len() || self.pres.slides.len() <= 1 {
+            return false;
+        }
+        let before = self.snapshot();
+        self.pres.slides.remove(index);
+        self.slide = self.slide.min(self.pres.slides.len() - 1);
+        self.selection.clear();
+        self.push_undo(before);
+        true
+    }
+
+    /// Moves slide `from` so it ends up at index `to`.
+    pub fn move_slide(&mut self, engine: &mut TextEngine, from: usize, to: usize) -> bool {
+        self.end_text_edit(engine);
+        let n = self.pres.slides.len();
+        if from >= n || to >= n || from == to {
+            return false;
+        }
+        let before = self.snapshot();
+        let slide = self.pres.slides.remove(from);
+        self.pres.slides.insert(to, slide);
+        self.slide = to;
+        self.selection.clear();
+        self.push_undo(before);
+        true
+    }
+}
+
+/// PowerPoint's font size steps for ⌘] / ⌘[.
+fn grow_size(size: f32, up: bool) -> f32 {
+    const STEPS: [f32; 22] = [8.0, 9.0, 10.0, 10.5, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0, 44.0, 48.0, 54.0, 60.0, 66.0, 72.0, 80.0];
+    if up {
+        STEPS.iter().copied().find(|s| *s > size + 0.01).unwrap_or(size + 8.0)
+    } else {
+        STEPS.iter().rev().copied().find(|s| *s < size - 0.01).unwrap_or((size - 1.0).max(1.0))
+    }
+}
+
+/// Hidden content kept only for saving is never selectable.
+fn selectable(shape: &Shape) -> bool {
+    !matches!(&shape.kind, ShapeKind::Opaque { label } if label == "hidden")
+}
+
+fn can_hold_text(shape: &Shape) -> bool {
+    !shape.geometry.is_line() && matches!(shape.kind, ShapeKind::Shape)
+}
+
+fn shape_contains(shape: &Shape, x: f64, y: f64, tol: f64) -> bool {
+    let xf = &shape.xfrm;
+    let (lx, ly) = xf.to_local(x, y);
+    let (w, h) = (xf.w as f64, xf.h as f64);
+    if shape.geometry.is_line() {
+        // Distance from the diagonal (0,0)-(w,h), honoring flips.
+        let (x0, y0, x1, y1) = match (xf.flip_h, xf.flip_v) {
+            (false, false) | (true, true) => (0.0, 0.0, w, h),
+            _ => (w, 0.0, 0.0, h),
+        };
+        return segment_distance((lx, ly), (x0, y0), (x1, y1)) <= tol;
+    }
+    lx >= -tol / 2.0 && ly >= -tol / 2.0 && lx <= w + tol / 2.0 && ly <= h + tol / 2.0
+}
+
+fn segment_distance(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 == 0.0 { 0.0 } else { (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0) };
+    (p.0 - (a.0 + t * dx)).hypot(p.1 - (a.1 + t * dy))
+}
+
+pub fn handle_points(xfrm: &Xfrm, is_line: bool, rotate_offset: f64) -> Vec<(Handle, (f64, f64))> {
+    let (w, h) = (xfrm.w as f64, xfrm.h as f64);
+    if is_line {
+        let (a, b) = match (xfrm.flip_h, xfrm.flip_v) {
+            (false, false) | (true, true) => ((0.0, 0.0), (w, h)),
+            _ => ((w, 0.0), (0.0, h)),
+        };
+        // Line endpoints act as the corner handles of their frame.
+        let ha = if a.0 == 0.0 { Handle::NW } else { Handle::NE };
+        let hb = if b.0 == w { Handle::SE } else { Handle::SW };
+        return vec![(ha, xfrm.to_slide(a.0, a.1)), (hb, xfrm.to_slide(b.0, b.1))];
+    }
+    let mut out: Vec<(Handle, (f64, f64))> = Handle::RESIZE
+        .iter()
+        .map(|&handle| {
+            let (sx, sy) = handle.sign();
+            (handle, xfrm.to_slide((sx + 1.0) / 2.0 * w, (sy + 1.0) / 2.0 * h))
+        })
+        .collect();
+    out.push((Handle::Rotate, xfrm.to_slide(w / 2.0, -rotate_offset)));
+    out
+}
+
+/// Resizes in the shape's own (rotated) frame, keeping the opposite edge fixed.
+fn resize(orig: &Xfrm, handle: Handle, dx: f64, dy: f64, keep_aspect: bool, min: f64) -> Xfrm {
+    let (sx, sy) = handle.sign();
+    let (s, c) = (-orig.rot).to_radians().sin_cos();
+    let (ldx, ldy) = (dx * c - dy * s, dx * s + dy * c);
+    let (ow, oh) = (orig.w as f64, orig.h as f64);
+    let mut w = (ow + sx * ldx).max(min);
+    let mut h = (oh + sy * ldy).max(min);
+    if keep_aspect && sx != 0.0 && sy != 0.0 && ow > 0.0 && oh > 0.0 {
+        let scale = (w / ow).max(h / oh);
+        w = ow * scale;
+        h = oh * scale;
+    }
+    // Shift the center so the opposite edges stay put.
+    let (lcx, lcy) = (sx * (w - ow) / 2.0, sy * (h - oh) / 2.0);
+    let (s, c) = orig.rot.to_radians().sin_cos();
+    let (ocx, ocy) = orig.center();
+    let (cx, cy) = (ocx + lcx * c - lcy * s, ocy + lcx * s + lcy * c);
+    Xfrm { x: (cx - w / 2.0).round() as i64, y: (cy - h / 2.0).round() as i64, w: w.round() as i64, h: h.round() as i64, ..*orig }
+}
+
+fn resize_cursor(handle: Handle, xfrm: &Xfrm) -> CursorIcon {
+    let (sx, sy) = handle.sign();
+    let base = sy.atan2(sx).to_degrees();
+    CursorIcon::Resize((base + xfrm.rot).rem_euclid(180.0))
+}
+
+/// Converts a UTF-16 offset (what the DOM reports) into a byte offset in `text`.
+pub fn utf16_to_byte_offset(text: &str, utf16: usize) -> usize {
+    let mut units = 0;
+    for (i, ch) in text.char_indices() {
+        if units >= utf16 {
+            return i;
+        }
+        units += ch.len_utf16();
+    }
+    text.len()
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,23 @@
+[package]
+name = "ppt-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ppt-model.workspace = true
+ppt-ooxml.workspace = true
+ppt-geometry.workspace = true
+ppt-text.workspace = true
+ppt-render.workspace = true
+ppt-editor.workspace = true
+vello.workspace = true
+# Must match the installed wasm-bindgen CLI exactly.
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "console"] }
+console_error_panic_hook = "0.1"

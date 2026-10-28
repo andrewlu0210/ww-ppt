@@ -1,0 +1,146 @@
+// Dev-only script driver (see src-tauri/src/automation.rs). Commands use CSS
+// pixels relative to the canvas, e.g. `click 400 300 2`, `drag 1 2 3 4`,
+// `text 你好`, `compose ㄋㄧˇ`, `commit 你`, `key Enter meta`, `shot name`.
+import { invoke } from "@tauri-apps/api/core";
+import type { App } from "../wasm/ppt_wasm";
+import { inTauri, writeFile } from "./backend";
+import type { Command } from "./commands";
+
+interface Hooks {
+  engine: () => App | null;
+  openPath: (path: string) => Promise<void>;
+  refresh: () => void;
+  run: (c: Command) => Promise<void>;
+}
+
+const log = (line: string) => invoke("automation_log", { line });
+
+async function capture(engine: App, name: string) {
+  const canvas = document.querySelector<HTMLCanvasElement>(".canvas-host canvas");
+  if (!canvas) throw new Error("no canvas");
+  // The WebGPU drawing buffer is only readable in the task that presented it.
+  engine.invalidate();
+  engine.render();
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("capture failed");
+  await invoke("automation_write", new Uint8Array(await blob.arrayBuffer()), { headers: { name } });
+}
+
+async function step(cmd: string, h: Hooks) {
+  const engine = h.engine();
+  if (!engine) throw new Error("engine not ready");
+  const [op, ...args] = cmd.split(" ");
+  const rest = cmd.slice(op.length + 1);
+  const num = (i: number) => Number(args[i]);
+  const has = (flag: string) => args.includes(flag);
+  switch (op) {
+    case "click":
+      engine.pointerDown(num(0), num(1), has("shift"), false, false, args[2] ? num(2) : 1);
+      engine.pointerUp(num(0), num(1), false, false, false);
+      break;
+    case "drag": {
+      const steps = 10;
+      engine.pointerDown(num(0), num(1), false, false, false, 1);
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        engine.pointerMove(num(0) + (num(2) - num(0)) * t, num(1) + (num(3) - num(1)) * t, has("shift"), false, false);
+      }
+      engine.pointerUp(num(2), num(3), false, false, false);
+      break;
+    }
+    // Split drags, to capture guides and the marquee mid-gesture.
+    case "down":
+      engine.pointerDown(num(0), num(1), has("shift"), false, false, 1);
+      break;
+    case "move":
+      engine.pointerMove(num(0), num(1), has("shift"), has("alt"), false);
+      break;
+    case "up":
+      engine.pointerUp(num(0), num(1), false, false, false);
+      break;
+    case "key":
+      engine.keyDown(args[0], has("shift"), has("alt"), has("meta"), false);
+      break;
+    case "text":
+      engine.insertText(rest);
+      break;
+    case "compose":
+      engine.composeUpdate(rest, -1);
+      break;
+    case "commit":
+      engine.composeEnd(rest);
+      break;
+    case "slide":
+      engine.setSlide(num(0));
+      break;
+    case "shape":
+      engine.addShape(args[0]);
+      break;
+    case "addtext":
+      engine.addTextBox();
+      break;
+    case "open":
+      await h.openPath(rest);
+      break;
+    case "zoom":
+      engine.setZoom(num(0));
+      break;
+    case "run":
+      await h.run(JSON.parse(rest) as Command);
+      break;
+    case "save":
+      await writeFile(rest, engine.savePptx());
+      break;
+    case "thumbinfo": {
+      const t = (await engine.renderThumbnail(num(0), 320, false)) as { width: number; height: number; pixels: Uint8Array };
+      let dark = 0;
+      for (let i = 0; i < t.pixels.length; i += 4) if (t.pixels[i] < 200) dark++;
+      const thumbs = document.querySelectorAll<HTMLCanvasElement>(".slide-thumb");
+      await log(`thumbinfo ${t.width}x${t.height} bytes=${t.pixels.length} darkPixels=${dark} domCanvases=${thumbs.length} sizes=${Array.from(thumbs).map((c) => `${c.width}x${c.height}`).join(",")}`);
+      break;
+    }
+    case "thumbs": {
+      // Captures the slide pane thumbnails as rendered in the DOM.
+      const canvases = Array.from(document.querySelectorAll<HTMLCanvasElement>(".slide-thumb"));
+      const sheet = document.createElement("canvas");
+      sheet.width = 320;
+      sheet.height = Math.max(1, canvases.length * 190);
+      const ctx = sheet.getContext("2d")!;
+      canvases.forEach((c, i) => c.width > 0 && ctx.drawImage(c, 0, i * 190, 320, 180));
+      const blob = await new Promise<Blob | null>((resolve) => sheet.toBlob(resolve, "image/png"));
+      if (blob) await invoke("automation_write", new Uint8Array(await blob.arrayBuffer()), { headers: { name: args[0] ?? "thumbs" } });
+      break;
+    }
+    case "shot":
+      await capture(engine, args[0] ?? "shot");
+      break;
+    case "status":
+      await log(`status ${JSON.stringify(engine.status())} ime=${JSON.stringify(Array.from(engine.imeRect()))}`);
+      break;
+    default:
+      throw new Error(`unknown command: ${op}`);
+  }
+  h.refresh();
+}
+
+export async function startAutomation(h: Hooks) {
+  if (!inTauri || !(await invoke<boolean>("automation_enabled"))) return;
+  await log("ready");
+  let busy = false;
+  window.setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      for (const cmd of await invoke<string[]>("automation_poll")) {
+        try {
+          await step(cmd, h);
+          await log(`ok ${cmd}`);
+        } catch (e) {
+          await log(`error ${cmd}: ${String(e)}`);
+        }
+      }
+    } finally {
+      busy = false;
+    }
+  }, 300);
+}

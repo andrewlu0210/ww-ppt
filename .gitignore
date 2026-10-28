@@ -1,0 +1,12 @@
+/target
+/node_modules
+/dist
+/ui/src/wasm
+/src-tauri/gen
+.DS_Store
+
+# Private sample decks (real work documents): never commit
+/test.pptx
+/test.pdf
+/samples/vr/test.pptx
+/samples/vr/test.pdf

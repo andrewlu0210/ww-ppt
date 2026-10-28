@@ -1,0 +1,18 @@
+[package]
+name = "ppt-vr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Visual regression: renders decks headlessly and compares them with reference PDFs"
+
+[dependencies]
+ppt-model.workspace = true
+ppt-ooxml.workspace = true
+ppt-text.workspace = true
+ppt-render.workspace = true
+ppt-fonts.workspace = true
+vello.workspace = true
+image.workspace = true
+pollster = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

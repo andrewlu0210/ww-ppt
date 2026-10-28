@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+ppt-model = { path = "crates/ppt-model" }
+ppt-ooxml = { path = "crates/ppt-ooxml" }
+ppt-geometry = { path = "crates/ppt-geometry" }
+ppt-text = { path = "crates/ppt-text" }
+ppt-render = { path = "crates/ppt-render" }
+ppt-editor = { path = "crates/ppt-editor" }
+ppt-fonts = { path = "crates/ppt-fonts" }
+
+vello = "0.11"
+parley = { version = "0.12", default-features = false, features = ["std"] }
+kurbo = "0.13"
+roxmltree = "0.21"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+
+# Keep wasm debug builds usable: layout and rendering are too slow unoptimized.
+[profile.dev.package."*"]
+opt-level = 2
