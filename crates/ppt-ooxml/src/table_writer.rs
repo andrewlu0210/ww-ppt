@@ -2,7 +2,7 @@
 //! widths and heights are rewritten, unless rows or columns were added or
 //! removed, in which case the whole `a:tbl` is regenerated.
 
-use ppt_model::table::{Border, CellFill, TableCell, TableFlags};
+use ppt_model::table::{Border, CellFill, StylePart, TableCell, TableFlags, TableStyle};
 use ppt_model::{Anchor, Table};
 use roxmltree::Node;
 
@@ -164,4 +164,52 @@ pub(crate) fn patch_table(src: &str, tbl: Node, old: &Table, new: &Table, links:
     let r = tbl.range();
     let edits = table_edits(src, tbl, old, new, links).into_iter().map(|(e, s)| (e.start - r.start..e.end - r.start, s)).collect();
     apply_edits(&src[r], edits)
+}
+
+fn style_border(tag: &str, b: Option<Border>) -> String {
+    match b {
+        None => String::new(),
+        Some(None) => format!("<a:{tag}><a:ln><a:noFill/></a:ln></a:{tag}>"),
+        Some(Some(l)) => format!(r#"<a:{tag}><a:ln w="{}"><a:solidFill>{}</a:solidFill></a:ln></a:{tag}>"#, l.width, color_xml(l.color)),
+    }
+}
+
+fn style_part_xml(tag: &str, p: &StylePart) -> String {
+    let mut tx = String::new();
+    if p.bold.is_some() || p.italic.is_some() || p.color.is_some() {
+        let on = |v: Option<bool>, name: &str| v.map(|b| format!(r#" {name}="{}""#, if b { "on" } else { "off" })).unwrap_or_default();
+        let color = p.color.map(color_xml).unwrap_or_default();
+        tx = format!("<a:tcTxStyle{}{}>{color}</a:tcTxStyle>", on(p.bold, "b"), on(p.italic, "i"));
+    }
+    let edges = [("left", p.left), ("right", p.right), ("top", p.top), ("bottom", p.bottom), ("insideH", p.inside_h), ("insideV", p.inside_v)]
+        .iter()
+        .map(|(t, b)| style_border(t, *b))
+        .collect::<String>();
+    let fill = match p.fill {
+        None | Some(CellFill::Inherit) => String::new(),
+        Some(CellFill::None) => "<a:fill><a:noFill/></a:fill>".to_string(),
+        Some(CellFill::Solid(c)) => format!("<a:fill><a:solidFill>{}</a:solidFill></a:fill>", color_xml(c)),
+    };
+    if tx.is_empty() && edges.is_empty() && fill.is_empty() {
+        return String::new();
+    }
+    format!("<a:{tag}>{tx}<a:tcStyle><a:tcBdr>{edges}</a:tcBdr>{fill}</a:tcStyle></a:{tag}>")
+}
+
+/// A `a:tblStyle` definition (colors resolved), for `ppt/tableStyles.xml`.
+pub(crate) fn style_xml(s: &TableStyle) -> String {
+    // Schema order of the parts.
+    let parts = [
+        ("wholeTbl", &s.whole),
+        ("band1H", &s.band1_h),
+        ("band2H", &s.band2_h),
+        ("band1V", &s.band1_v),
+        ("band2V", &s.band2_v),
+        ("lastCol", &s.last_col),
+        ("firstCol", &s.first_col),
+        ("lastRow", &s.last_row),
+        ("firstRow", &s.first_row),
+    ];
+    let body: String = parts.iter().map(|(t, p)| style_part_xml(t, p)).collect();
+    format!(r#"<a:tblStyle styleId="{}" styleName="{}">{body}</a:tblStyle>"#, esc(&s.id), esc(&s.name))
 }

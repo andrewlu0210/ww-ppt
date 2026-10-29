@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use ppt_geometry::{TextFrame, text_width_pt};
-use ppt_model::table::{TableCell, TableFlags, TableRow};
-use ppt_model::{Anchor, EMU_PER_INCH, ParaDefaults, Shape, ShapeId, ShapeKind, Table, TextBody, Xfrm};
+use ppt_model::table::{CellFill, TableCell, TableFlags, TableRow};
+use ppt_model::{Anchor, EMU_PER_INCH, Line, ParaDefaults, Shape, ShapeId, ShapeKind, Table, TextBody, Xfrm};
 use ppt_text::TextEngine;
 
 use crate::{CursorIcon, Drag, DragKind, Editor, PointerEvent, RichEdit, TextEdit, Tolerance};
@@ -152,6 +152,23 @@ impl Editor {
         }
     }
 
+    /// The cell a Shift+click or drag extends from: the range's anchor or the edited cell.
+    pub(crate) fn range_origin(&self) -> Option<(ShapeId, (usize, usize))> {
+        if let Some(r) = self.cell_range {
+            return Some((r.shape, r.anchor));
+        }
+        let edit = self.text.as_ref()?;
+        Some((edit.shape, edit.cell?))
+    }
+
+    /// The cell under the pointer on table `id`, if any.
+    pub(crate) fn cell_at(&self, id: ShapeId, x: f64, y: f64, tol: f64) -> Option<(usize, usize)> {
+        match self.table_hit(id, x, y, tol)? {
+            TableHit::Cell(r, c) => Some((r, c)),
+            _ => None,
+        }
+    }
+
     /// Clicks on a table: into a cell starts editing it; on a grid line starts a
     /// resize. Returns false to let the click select/move the table as a shape.
     pub(crate) fn table_pointer_down(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> bool {
@@ -271,6 +288,9 @@ impl Editor {
     /// The table being worked on and the current cell: the edited cell, or for a
     /// selected table (`fallback_last` picks its last cell instead of the first).
     fn table_target(&self, fallback_last: bool) -> Option<(ShapeId, usize, usize)> {
+        if let Some((id, (r0, c0, r1, c1))) = self.range_rect() {
+            return Some(if fallback_last { (id, r1, c1) } else { (id, r0, c0) });
+        }
         if let Some(edit) = &self.text {
             let (r, c) = edit.cell?;
             return Some((edit.shape, r, c));
@@ -289,7 +309,8 @@ impl Editor {
     /// the caret in cell `then(row, col)` of the result (when editing).
     fn change_table(&mut self, engine: &mut TextEngine, fallback_last: bool, f: impl FnOnce(&mut Table, usize, usize) -> Option<(usize, usize)>) -> bool {
         let Some((id, r, c)) = self.table_target(fallback_last) else { return false };
-        let editing = self.text.is_some();
+        let editing = self.text.is_some() || self.cell_range.is_some();
+        self.cell_range = None;
         self.end_text_edit(engine);
         let before = self.snapshot();
         let Some(table) = self.pres.shape_mut(self.slide, id).and_then(table_of_mut) else { return false };
@@ -375,8 +396,9 @@ impl Editor {
 
     /// Deletes the current row (all rows a merged cell spans).
     pub fn delete_table_row(&mut self, engine: &mut TextEngine) -> bool {
+        let range = self.range_rect().map(|(_, (r0, _, r1, _))| r1 - r0 + 1);
         self.change_table(engine, false, |t, r, c| {
-            let span = t.cell(r, c).map_or(1, |x| x.row_span.max(1) as usize);
+            let span = range.unwrap_or_else(|| t.cell(r, c).map_or(1, |x| x.row_span.max(1) as usize));
             for _ in 0..span {
                 remove_row(t, r);
             }
@@ -386,8 +408,9 @@ impl Editor {
 
     /// Deletes the current column (all columns a merged cell spans); the table narrows.
     pub fn delete_table_col(&mut self, engine: &mut TextEngine) -> bool {
+        let range = self.range_rect().map(|(_, (_, c0, _, c1))| c1 - c0 + 1);
         self.change_table(engine, false, |t, r, c| {
-            let span = t.cell(r, c).map_or(1, |x| x.grid_span.max(1) as usize);
+            let span = range.unwrap_or_else(|| t.cell(r, c).map_or(1, |x| x.grid_span.max(1) as usize));
             for _ in 0..span {
                 remove_col(t, c);
             }
@@ -482,4 +505,484 @@ fn remove_col(t: &mut Table, c: usize) {
         }
     }
     t.cols.remove(c);
+}
+
+/// A rectangular block of selected cells: from `anchor` (where the drag started) to `focus`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellRange {
+    pub shape: ShapeId,
+    pub anchor: (usize, usize),
+    pub focus: (usize, usize),
+}
+
+/// Inclusive grid rectangle (first row, first column, last row, last column).
+type GridRect = (usize, usize, usize, usize);
+
+/// A table, the visible cells a command acts on, and the rectangle they cover.
+type CellTarget = (ShapeId, Vec<(usize, usize)>, GridRect);
+
+/// Grid rectangle of the block from `a` to `b`, grown until it holds whole merged cells.
+pub(crate) fn range_rect(t: &Table, a: (usize, usize), b: (usize, usize)) -> GridRect {
+    let mut rect = (a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1));
+    // Grow until no merged cell sticks out.
+    loop {
+        let (r0, c0, r1, c1) = rect;
+        let mut grown = rect;
+        for r in r0..=r1 {
+            for c in c0..=c1 {
+                let (ar, ac) = t.anchor_of(r, c);
+                let Some(cell) = t.cell(ar, ac) else { continue };
+                grown.0 = grown.0.min(ar);
+                grown.1 = grown.1.min(ac);
+                grown.2 = grown.2.max(ar + cell.row_span.max(1) as usize - 1);
+                grown.3 = grown.3.max(ac + cell.grid_span.max(1) as usize - 1);
+            }
+        }
+        grown.2 = grown.2.min(t.rows.len().saturating_sub(1));
+        grown.3 = grown.3.min(t.cols.len().saturating_sub(1));
+        if grown == rect {
+            return rect;
+        }
+        rect = grown;
+    }
+}
+
+/// Visible cells whose top-left lies in the rectangle.
+fn anchors_in(t: &Table, (r0, c0, r1, c1): GridRect) -> Vec<(usize, usize)> {
+    t.visible_cells().into_iter().filter(|&(r, c)| (r0..=r1).contains(&r) && (c0..=c1).contains(&c)).collect()
+}
+
+/// Which edges a border command sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BorderSet {
+    All,
+    Outside,
+    Inside,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    /// Removes every border of the selection.
+    None,
+}
+
+impl BorderSet {
+    pub fn parse(s: &str) -> Option<BorderSet> {
+        Some(match s {
+            "all" => BorderSet::All,
+            "outside" => BorderSet::Outside,
+            "inside" => BorderSet::Inside,
+            "top" => BorderSet::Top,
+            "bottom" => BorderSet::Bottom,
+            "left" => BorderSet::Left,
+            "right" => BorderSet::Right,
+            "none" => BorderSet::None,
+            _ => return None,
+        })
+    }
+}
+
+/// Sets one edge of cell (`r`, `c`) and the facing edge of the cells across it.
+fn set_edge(t: &mut Table, r: usize, c: usize, edge: usize, value: Option<Line>) {
+    use ppt_model::table::{BOTTOM, LEFT, RIGHT, TOP};
+    let Some(cell) = t.cell(r, c) else { return };
+    let (rs, cs) = (cell.row_span.max(1) as usize, cell.grid_span.max(1) as usize);
+    if let Some(cell) = t.cell_mut(r, c) {
+        cell.borders[edge] = Some(value);
+    }
+    let neighbors: Vec<(usize, usize)> = match edge {
+        LEFT if c > 0 => (r..r + rs).map(|rr| t.anchor_of(rr, c - 1)).collect(),
+        RIGHT if c + cs < t.cols.len() => (r..r + rs).map(|rr| t.anchor_of(rr, c + cs)).collect(),
+        TOP if r > 0 => (c..c + cs).map(|cc| t.anchor_of(r - 1, cc)).collect(),
+        BOTTOM if r + rs < t.rows.len() => (c..c + cs).map(|cc| t.anchor_of(r + rs, cc)).collect(),
+        _ => Vec::new(),
+    };
+    let opposite = (edge + 2) % 4;
+    for (nr, nc) in neighbors {
+        if let Some(n) = t.cell_mut(nr, nc) {
+            n.borders[opposite] = Some(value);
+        }
+    }
+}
+
+/// Text formatting the table style gives cell (`r`, `c`): (bold, italic, color).
+fn text_look(t: &Table, r: usize, c: usize) -> (Option<bool>, Option<bool>, Option<ppt_model::Color>) {
+    let mut look = (None, None, None);
+    for p in t.parts_for(r, c) {
+        look = (p.bold.or(look.0), p.italic.or(look.1), p.color.or(look.2));
+    }
+    look
+}
+
+/// After a style or option change, text that followed the old style follows the new one.
+fn restyle(old: &Table, t: &mut Table, base: &ppt_model::RunStyle) {
+    for (r, c) in t.visible_cells() {
+        let (ob, oi, oc) = text_look(old, r, c);
+        let (nb, ni, nc) = text_look(t, r, c);
+        let fix = |s: &mut ppt_model::RunStyle| {
+            if s.bold == ob.unwrap_or(base.bold) {
+                s.bold = nb.unwrap_or(base.bold);
+            }
+            if s.italic == oi.unwrap_or(base.italic) {
+                s.italic = ni.unwrap_or(base.italic);
+            }
+            if s.color == oc.unwrap_or(base.color) {
+                s.color = nc.unwrap_or(base.color);
+            }
+        };
+        let Some(cell) = t.cell_mut(r, c) else { continue };
+        for p in cell.text.paragraphs.iter_mut() {
+            p.runs.iter_mut().for_each(|run| fix(&mut run.style));
+            fix(&mut p.end_style);
+        }
+        if let Some(d) = &cell.text.defaults {
+            let mut d = (**d).clone();
+            d.iter_mut().for_each(|p| fix(&mut p.style));
+            cell.text.defaults = Some(Arc::new(d));
+        }
+    }
+}
+
+/// Splits grid column `l` in two; whatever covered it now spans both halves.
+fn split_grid_col(t: &mut Table, l: usize) {
+    let anchors: Vec<(usize, usize)> = (0..t.rows.len()).map(|r| t.anchor_of(r, l)).collect();
+    let w = t.cols[l];
+    t.cols[l] = w / 2;
+    t.cols.insert(l + 1, w - w / 2);
+    for (r, &(ar, ac)) in anchors.iter().enumerate() {
+        let source = t.rows[r].cells[l].clone();
+        let mut new = blank_like(&source);
+        new.h_merge = true;
+        new.v_merge = r > ar;
+        t.rows[r].cells.insert(l + 1, new);
+        if r == ar
+            && let Some(a) = t.cell_mut(ar, ac)
+        {
+            a.grid_span += 1;
+        }
+    }
+}
+
+/// Splits grid row `l` in two; whatever covered it now spans both halves.
+fn split_grid_row(t: &mut Table, l: usize) {
+    let anchors: Vec<(usize, usize)> = (0..t.cols.len()).map(|c| t.anchor_of(l, c)).collect();
+    let h = t.rows[l].height;
+    t.rows[l].height = h / 2;
+    let mut cells = Vec::with_capacity(t.cols.len());
+    for (c, &(ar, ac)) in anchors.iter().enumerate() {
+        let mut new = blank_like(&t.rows[l].cells[c]);
+        new.v_merge = true;
+        new.h_merge = c > ac;
+        cells.push(new);
+        if c == ac
+            && let Some(a) = t.cell_mut(ar, ac)
+        {
+            a.row_span += 1;
+        }
+    }
+    t.rows.insert(l + 1, TableRow { height: h - h / 2, cells });
+}
+
+/// Sizes of `n` groups covering `total` tracks as evenly as possible.
+fn groups(total: usize, n: usize) -> Vec<usize> {
+    (0..n).map(|i| total / n + usize::from(i < total % n)).collect()
+}
+
+impl Editor {
+    /// Grid rectangle of the selected cells, if a cell range is selected on a table.
+    fn range_rect(&self) -> Option<(ShapeId, GridRect)> {
+        let range = self.cell_range?;
+        let t = self.pres.shape(self.slide, range.shape).and_then(table_of)?;
+        Some((range.shape, range_rect(t, range.anchor, range.focus)))
+    }
+
+    /// Slide-space frames of the selected cells, for the highlight.
+    pub fn cell_range_frames(&self) -> Vec<Xfrm> {
+        let Some((id, rect)) = self.range_rect() else { return Vec::new() };
+        let Some(shape) = self.pres.shape(self.slide, id) else { return Vec::new() };
+        let Some(t) = table_of(shape) else { return Vec::new() };
+        let heights = self.heights_of(id, t);
+        anchors_in(t, rect).into_iter().map(|(r, c)| t.cell_frame(&heights, &shape.xfrm, r, c)).collect()
+    }
+
+    /// Extends (or starts) a cell range on table `id` to `focus`, leaving text editing.
+    pub(crate) fn select_cells(&mut self, engine: &mut TextEngine, id: ShapeId, anchor: (usize, usize), focus: (usize, usize)) {
+        self.end_text_edit(engine);
+        self.selection = vec![id];
+        self.cell_range = Some(CellRange { shape: id, anchor, focus });
+    }
+
+    /// The table and cells formatting commands act on: the cell range, the
+    /// edited cell, or every cell of a selected table.
+    fn target_cells(&self) -> Option<CellTarget> {
+        if let Some((id, rect)) = self.range_rect() {
+            let t = self.pres.shape(self.slide, id).and_then(table_of)?;
+            return Some((id, anchors_in(t, rect), rect));
+        }
+        if let Some(edit) = &self.text {
+            let (r, c) = edit.cell?;
+            let t = self.pres.shape(self.slide, edit.shape).and_then(table_of)?;
+            let cell = t.cell(r, c)?;
+            return Some((edit.shape, vec![(r, c)], (r, c, r + cell.row_span.max(1) as usize - 1, c + cell.grid_span.max(1) as usize - 1)));
+        }
+        let shape = self.selected_shape()?;
+        let t = table_of(shape)?;
+        let rect = (0, 0, t.rows.len().saturating_sub(1), t.cols.len().saturating_sub(1));
+        Some((shape.id, t.visible_cells(), rect))
+    }
+
+    /// Runs `f` on the target table as one undo step, keeping text editing state.
+    fn edit_table(&mut self, engine: &mut TextEngine, f: impl FnOnce(&mut Table, &[(usize, usize)], GridRect, &ppt_model::RunStyle)) -> bool {
+        let Some((id, cells, rect)) = self.target_cells() else { return false };
+        let editing = self.text.as_ref().and_then(|t| t.cell);
+        self.end_text_edit(engine);
+        let before = self.snapshot();
+        let base = self.pres.text_defaults.as_ref().and_then(|d| d.first()).map(|d| d.style.clone()).unwrap_or_else(|| self.pres.default_run_style());
+        let Some(t) = self.pres.shape_mut(self.slide, id).and_then(table_of_mut) else { return false };
+        let old = t.clone();
+        f(t, &cells, rect, &base);
+        if *t == old {
+            if let Some((r, c)) = editing {
+                self.begin_cell_edit(engine, id, r, c);
+            }
+            return false;
+        }
+        self.layout_table(engine, id);
+        self.push_undo(before);
+        if let Some((r, c)) = editing {
+            self.begin_cell_edit(engine, id, r, c);
+        }
+        true
+    }
+
+    /// Applies a run format to every selected cell's text.
+    pub(crate) fn style_cells(&mut self, engine: &mut TextEngine, f: &dyn Fn(&mut ppt_model::RunStyle)) -> bool {
+        self.edit_table(engine, |t, cells, _, _| {
+            for &(r, c) in cells {
+                if let Some(cell) = t.cell_mut(r, c) {
+                    let len = cell.text.len();
+                    cell.text.apply_style(0..len, f);
+                }
+            }
+        })
+    }
+
+    /// Applies a paragraph format to every selected cell's text.
+    pub(crate) fn paragraph_cells(&mut self, engine: &mut TextEngine, f: &dyn Fn(&mut ppt_model::Paragraph)) -> bool {
+        self.edit_table(engine, |t, cells, _, _| {
+            for &(r, c) in cells {
+                if let Some(cell) = t.cell_mut(r, c) {
+                    let len = cell.text.len();
+                    cell.text.apply_paragraphs(0..len, f);
+                }
+            }
+        })
+    }
+
+    /// Text format of the first selected cell, for the toolbar.
+    pub(crate) fn range_text_body(&self) -> Option<&TextBody> {
+        let (id, rect) = self.range_rect()?;
+        let t = self.pres.shape(self.slide, id).and_then(table_of)?;
+        let (r, c) = *anchors_in(t, rect).first()?;
+        t.cell(r, c).map(|cell| &cell.text)
+    }
+
+    /// Clears the text of every selected cell.
+    pub(crate) fn clear_cells(&mut self, engine: &mut TextEngine) -> bool {
+        self.edit_table(engine, |t, cells, _, _| {
+            for &(r, c) in cells {
+                if let Some(cell) = t.cell_mut(r, c) {
+                    let blank = blank_like(cell);
+                    cell.text = blank.text;
+                }
+            }
+        })
+    }
+
+    pub fn can_merge_cells(&self) -> bool {
+        self.range_rect().is_some_and(|(_, (r0, c0, r1, c1))| r1 > r0 || c1 > c0)
+    }
+
+    /// Merges the selected cells into one, keeping all their text.
+    pub fn merge_cells(&mut self, engine: &mut TextEngine) -> bool {
+        if !self.can_merge_cells() {
+            return false;
+        }
+        let Some((id, (r0, c0, r1, c1))) = self.range_rect() else { return false };
+        let changed = self.edit_table(engine, |t, _, _, _| {
+            let mut paragraphs = Vec::new();
+            for (r, c) in anchors_in(t, (r0, c0, r1, c1)) {
+                let cell = &t.rows[r].cells[c];
+                if !cell.text.is_empty() {
+                    paragraphs.extend(cell.text.paragraphs.iter().cloned());
+                }
+            }
+            for r in r0..=r1 {
+                for c in c0..=c1 {
+                    let cell = &mut t.rows[r].cells[c];
+                    if (r, c) == (r0, c0) {
+                        cell.grid_span = (c1 - c0 + 1) as u32;
+                        cell.row_span = (r1 - r0 + 1) as u32;
+                        cell.h_merge = false;
+                        cell.v_merge = false;
+                        if !paragraphs.is_empty() {
+                            cell.text.paragraphs = std::mem::take(&mut paragraphs);
+                        }
+                    } else {
+                        *cell = TableCell { h_merge: c > c0, v_merge: r > r0, ..blank_like(cell) };
+                    }
+                }
+            }
+        });
+        if changed {
+            self.cell_range = None;
+            self.begin_cell_edit(engine, id, r0, c0);
+        }
+        changed
+    }
+
+    /// Splits the current cell into `rows` × `cols` cells; merged cells are
+    /// divided along their grid, plain cells add grid lines (other rows span them).
+    pub fn split_cell(&mut self, engine: &mut TextEngine, rows: usize, cols: usize) -> bool {
+        if rows == 0 || cols == 0 || (rows == 1 && cols == 1) {
+            return false;
+        }
+        let Some((id, cells, _)) = self.target_cells() else { return false };
+        let Some(&(r, c)) = cells.first() else { return false };
+        self.cell_range = None;
+        let changed = self.edit_table(engine, |t, _, _, _| {
+            let Some(cell) = t.cell(r, c) else { return };
+            let (mut rs, mut cs) = (cell.row_span.max(1) as usize, cell.grid_span.max(1) as usize);
+            while cs < cols {
+                split_grid_col(t, c + cs - 1);
+                cs += 1;
+            }
+            while rs < rows {
+                split_grid_row(t, r + rs - 1);
+                rs += 1;
+            }
+            let (row_groups, col_groups) = (groups(rs, rows), groups(cs, cols));
+            let template = t.rows[r].cells[c].clone();
+            let mut gr = r;
+            for (gi, &h) in row_groups.iter().enumerate() {
+                let mut gc = c;
+                for (gj, &w) in col_groups.iter().enumerate() {
+                    for rr in gr..gr + h {
+                        for cc in gc..gc + w {
+                            let cell = &mut t.rows[rr].cells[cc];
+                            let keep_text = gi == 0 && gj == 0 && rr == r && cc == c;
+                            let mut new = if keep_text { template.clone() } else { blank_like(&template) };
+                            if (rr, cc) == (gr, gc) {
+                                new.grid_span = w as u32;
+                                new.row_span = h as u32;
+                                new.h_merge = false;
+                                new.v_merge = false;
+                            } else {
+                                new = TableCell { h_merge: cc > gc, v_merge: rr > gr, grid_span: 1, row_span: 1, ..new };
+                            }
+                            *cell = new;
+                        }
+                    }
+                    gc += w;
+                }
+                gr += h;
+            }
+        });
+        if changed {
+            self.begin_cell_edit(engine, id, r, c);
+        }
+        changed
+    }
+
+    /// Shading of the selected cells (`None`: no fill).
+    pub fn set_cell_fill(&mut self, engine: &mut TextEngine, fill: Option<ppt_model::Color>) -> bool {
+        self.edit_table(engine, |t, cells, _, _| {
+            for &(r, c) in cells {
+                if let Some(cell) = t.cell_mut(r, c) {
+                    cell.fill = fill.map_or(CellFill::None, CellFill::Solid);
+                }
+            }
+        })
+    }
+
+    /// Sets the borders of the selection picked by `which` to `line`.
+    pub fn set_cell_borders(&mut self, engine: &mut TextEngine, which: BorderSet, line: Line) -> bool {
+        use ppt_model::table::{BOTTOM, LEFT, RIGHT, TOP};
+        self.edit_table(engine, |t, cells, (r0, c0, r1, c1), _| {
+            for &(r, c) in cells {
+                let Some(cell) = t.cell(r, c) else { continue };
+                let (re, ce) = (r + cell.row_span.max(1) as usize - 1, c + cell.grid_span.max(1) as usize - 1);
+                let outer = [c == c0, r == r0, ce == c1, re == r1];
+                for edge in [LEFT, TOP, RIGHT, BOTTOM] {
+                    let apply = match which {
+                        BorderSet::All | BorderSet::None => true,
+                        BorderSet::Outside => outer[edge],
+                        BorderSet::Inside => !outer[edge],
+                        BorderSet::Top => edge == TOP && outer[edge],
+                        BorderSet::Bottom => edge == BOTTOM && outer[edge],
+                        BorderSet::Left => edge == LEFT && outer[edge],
+                        BorderSet::Right => edge == RIGHT && outer[edge],
+                    };
+                    if apply {
+                        set_edge(t, r, c, edge, if which == BorderSet::None { None } else { Some(line) });
+                    }
+                }
+            }
+        })
+    }
+
+    /// Vertical alignment of the selected cells' text.
+    pub fn set_cell_anchor(&mut self, engine: &mut TextEngine, anchor: Anchor) -> bool {
+        self.edit_table(engine, |t, cells, _, _| {
+            for &(r, c) in cells {
+                if let Some(cell) = t.cell_mut(r, c) {
+                    cell.text.anchor = anchor;
+                }
+            }
+        })
+    }
+
+    /// Switches the table to one of the gallery styles.
+    pub fn set_table_style(&mut self, engine: &mut TextEngine, id: &str) -> bool {
+        let Some(style) = self.pres.table_styles.iter().find(|s| s.id == id).cloned() else { return false };
+        self.cell_range = None;
+        self.edit_table(engine, |t, _, _, base| {
+            let old = t.clone();
+            t.style = Some(style);
+            restyle(&old, t, base);
+        })
+    }
+
+    /// Turns a table style option on or off: `firstRow`, `lastRow`, `firstCol`,
+    /// `lastCol`, `bandRow`, `bandCol`.
+    pub fn set_table_flag(&mut self, engine: &mut TextEngine, flag: &str, on: bool) -> bool {
+        self.cell_range = None;
+        self.edit_table(engine, |t, _, _, base| {
+            let old = t.clone();
+            let f = &mut t.flags;
+            match flag {
+                "firstRow" => f.first_row = on,
+                "lastRow" => f.last_row = on,
+                "firstCol" => f.first_col = on,
+                "lastCol" => f.last_col = on,
+                "bandRow" => f.band_row = on,
+                "bandCol" => f.band_col = on,
+                _ => return,
+            }
+            restyle(&old, t, base);
+        })
+    }
+
+    /// The current table, for its style, options and the cell alignment shown in the ribbon.
+    pub fn current_table(&self) -> Option<&Table> {
+        let (id, _, _) = self.target_cells()?;
+        self.pres.shape(self.slide, id).and_then(table_of)
+    }
+
+    /// Vertical alignment of the first target cell.
+    pub fn current_cell_anchor(&self) -> Option<Anchor> {
+        let (id, cells, _) = self.target_cells()?;
+        let (r, c) = *cells.first()?;
+        Some(self.pres.shape(self.slide, id).and_then(table_of)?.cell(r, c)?.text.anchor)
+    }
 }

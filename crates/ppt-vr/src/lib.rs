@@ -27,6 +27,8 @@ pub struct SlideRenderer {
     fonts: FontService,
     loaded_paths: HashSet<String>,
     resolved: HashSet<String>,
+    /// Decoded media, kept across slides like the app does (see [`SlideRenderer::new_deck`]).
+    images: ImageCache,
 }
 
 impl SlideRenderer {
@@ -46,6 +48,7 @@ impl SlideRenderer {
             fonts: FontService::new(),
             loaded_paths: HashSet::new(),
             resolved: HashSet::new(),
+            images: ImageCache::default(),
         };
         // The emoji family is in the stack but only registered for decks that need it.
         this.engine.set_fallbacks(FALLBACK_FAMILIES.iter().copied().chain([ppt_model::EMOJI_FAMILY]).map(str::to_string).collect());
@@ -73,16 +76,24 @@ impl SlideRenderer {
         }
     }
 
+    /// The text engine, for diagnostics.
+    pub fn engine(&mut self) -> &mut TextEngine {
+        &mut self.engine
+    }
+
+    /// Forgets decoded media; call before rendering a different deck (media keys repeat across decks).
+    pub fn new_deck(&mut self) {
+        self.images.clear();
+    }
+
     /// Renders one slide `width` pixels wide, as the app would show it (no edit chrome).
     pub fn render(&mut self, pres: &Presentation, slide: &Slide, width: u32) -> Result<RgbaImage, String> {
         let height = ((width as f64) * pres.slide_height as f64 / pres.slide_width as f64).round().max(1.0) as u32;
         let scale = width as f64 / pres.slide_width as f64;
         let mut scene = Scene::new();
         {
-            // A fresh image cache per deck: media keys are only unique within one package.
-            let mut images = ImageCache::default();
             let opts = DrawOptions { editing: false, emu_per_px: 1.0 / scale, ..Default::default() };
-            let mut cx = RenderCtx { engine: &mut self.engine, images: &mut images };
+            let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
             draw_slide(&mut scene, &mut cx, pres, slide, Affine::scale(scale), &opts);
         }
 

@@ -18,7 +18,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::Error;
-use crate::table_writer::{TABLE_URI, patch_table, table_xml};
+use crate::table_writer::{TABLE_URI, patch_table, style_xml as table_style_xml, table_xml};
 use crate::package::{REL_NS, resolve};
 
 const NS_DECLS: &str = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#;
@@ -946,6 +946,60 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
         next_sld_id += 1;
     }
 
+    // Table styles used by new or edited tables must be defined in the package.
+    let mut needed: Vec<std::sync::Arc<ppt_model::table::TableStyle>> = Vec::new();
+    for shape in pres.slides.iter().flat_map(|s| &s.shapes) {
+        let ShapeKind::Table(t) = &shape.kind else { continue };
+        let edited = shape.source.as_ref().is_none_or(|src| src.parsed.kind != shape.kind);
+        if let Some(style) = t.style.as_ref().filter(|_| edited)
+            && !needed.iter().any(|n| n.id == style.id)
+        {
+            needed.push(style.clone());
+        }
+    }
+    let styles_part = pres_rels.iter().find(|r| r.kind.ends_with("/tableStyles")).map(|r| r.target.clone());
+    let styles_xml = styles_part.as_ref().and_then(|p| read_part(&mut zip, p));
+    let defined: HashSet<String> = styles_xml
+        .as_deref()
+        .and_then(|x| Document::parse(x).ok().map(|d| d.root_element().children().filter_map(|n| n.attribute("styleId").map(str::to_string)).collect()))
+        .unwrap_or_default();
+    needed.retain(|s| !defined.contains(&s.id));
+    let mut styles_update: Option<(String, String)> = None;
+    if !needed.is_empty() {
+        let added: String = needed.iter().map(|s| table_style_xml(s)).collect();
+        let (part, xml) = match (&styles_part, &styles_xml) {
+            (Some(part), Some(xml)) => {
+                let doc = Document::parse(xml).map_err(|e| Error::Xml(e.to_string()))?;
+                let root = doc.root_element();
+                let r = root.range();
+                let new_root = if xml[r.clone()].ends_with("/>") {
+                    let open = open_tag(xml, root);
+                    let tag = open[1..].split_whitespace().next().unwrap_or("a:tblStyleLst").to_string();
+                    format!("{open}>{added}</{tag}>")
+                } else {
+                    let at = close_tag_start(xml, root);
+                    format!("{}{added}{}", &xml[r.start..at], &xml[at..r.end])
+                };
+                (part.clone(), apply_edits(xml, vec![(r, new_root)]))
+            }
+            _ => {
+                let def = pres.table_style.as_ref().map(|s| s.id.clone()).unwrap_or_else(|| needed[0].id.clone());
+                let xml = format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" def="{}">{added}</a:tblStyleLst>"#,
+                    esc(&def)
+                );
+                let part = "ppt/tableStyles.xml".to_string();
+                let mut n = pres_rels.len() + 1;
+                while pres_rels.iter().any(|r| r.id == format!("rId{n}")) {
+                    n += 1;
+                }
+                pres_rels.push(RelEntry { id: format!("rId{n}"), kind: format!("{REL_BASE}tableStyles"), target: part.clone(), external: false });
+                (part, xml)
+            }
+        };
+        styles_update = Some((part, xml));
+    }
+
     // Parts of deleted slides (and their notes) are dropped.
     let mut dropped: HashSet<String> = HashSet::new();
     for part in originals.keys().filter(|p| !claimed.contains(*p)) {
@@ -991,6 +1045,12 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
             overrides.push((name, CT_SLIDE.to_string()));
         }
     }
+    if let Some((part, _)) = &styles_update {
+        let name = format!("/{part}");
+        if !overrides.iter().any(|(p, _)| *p == name) {
+            overrides.push((name, "application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml".to_string()));
+        }
+    }
     for (part, _) in &media.new_files {
         let ext = part.rsplit('.').next().unwrap_or("png").to_string();
         if !defaults.iter().any(|(e, _)| e.eq_ignore_ascii_case(&ext)) {
@@ -1031,6 +1091,13 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
                 new_parts.push((plan.part.clone(), xml.clone().into_bytes()));
                 new_parts.push((rels_part, rels.clone().into_bytes()));
             }
+        }
+    }
+    if let Some((part, xml)) = styles_update {
+        if all_names.contains(&part) {
+            replaced.insert(part, xml.into_bytes());
+        } else {
+            new_parts.push((part, xml.into_bytes()));
         }
     }
     new_parts.extend(media.new_files);

@@ -8,6 +8,10 @@ export interface Status {
   /** A table or one of its cells is the target (shows the table layout tab). */
   inTable: boolean;
   canGroup?: boolean;
+  canMerge?: boolean;
+  tableStyle?: string;
+  tableFlags?: Record<string, boolean>;
+  cellAnchor?: "top" | "middle" | "bottom";
   canUngroup?: boolean;
   canUndo: boolean;
   canRedo: boolean;

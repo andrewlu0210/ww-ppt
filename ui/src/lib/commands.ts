@@ -17,6 +17,13 @@ export type Command =
   | { kind: "insertTable"; rows: number; cols: number }
   | { kind: "group"; on: boolean }
   | { kind: "link"; url: string }
+  | { kind: "tableMerge" }
+  | { kind: "tableSplit"; rows: number; cols: number }
+  | { kind: "cellFill"; color: string }
+  | { kind: "cellBorders"; which: string; color: string; width: number }
+  | { kind: "cellAnchor"; anchor: "top" | "middle" | "bottom" }
+  | { kind: "tableStyle"; id: string }
+  | { kind: "tableFlag"; flag: string; on: boolean }
   | { kind: "table"; command: "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" }
   | { kind: "newSlide"; layout?: number }
   | { kind: "duplicateSlide"; index?: number }
@@ -37,6 +44,16 @@ export type Command =
   | { kind: "reorder"; order: "front" | "forward" | "backward" | "back" }
   | { kind: "alignShapes"; to: "left" | "center" | "right" | "top" | "middle" | "bottom" }
   | { kind: "zoom"; factor: number | "fit" };
+
+/** A gallery table style with the colors its preview needs (`App::tableStyles()`). */
+export interface TableStyleInfo {
+  id: string;
+  name: string;
+  header: string;
+  band: string;
+  body: string;
+  line: string;
+}
 
 /** Put on the system clipboard when shapes are copied, so paste knows to use the internal clipboard. */
 export const SHAPES_MARKER = "\u2063ww-ppt-shapes";

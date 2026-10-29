@@ -3,6 +3,7 @@
 //! Resolves the OOXML inheritance chain (slide → layout → master → theme) into
 //! the flat [`ppt_model`] representation. Export arrives in M1.
 
+mod chart;
 mod package;
 mod style;
 mod table;
@@ -20,7 +21,7 @@ use std::sync::Arc;
 
 use package::{Package, REL_NS, Rel};
 use ppt_model::{
-    Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
+    Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
     PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
 use ppt_model::table::TableStyle;
@@ -93,6 +94,8 @@ struct Parser<'p> {
     layouts: HashMap<String, Rc<Layout>>,
     /// `ppt/tableStyles.xml`, read on first use.
     table_styles_xml: Option<Option<String>>,
+    /// Fill of the group being parsed, for members with `a:grpFill`.
+    group_fill: Option<Paint>,
     /// Resolved table styles by (master, style id); colors depend on the master's theme.
     table_styles: HashMap<(usize, String), Option<Arc<TableStyle>>>,
 }
@@ -161,6 +164,7 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
         layouts: HashMap::new(),
         table_styles_xml: None,
         table_styles: HashMap::new(),
+        group_fill: None,
     };
 
     let slide_parts = {
@@ -216,6 +220,7 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
         let def = table::default_style_id(parser.table_styles_xml());
         parser.pres.table_style = parser.table_style(master, &def);
         parser.pres.link_color = master.ctx.scheme("hlink");
+        parser.pres.table_styles = table::resolved_builtins(&master.ctx).into_iter().map(Arc::new).collect();
     }
     Ok(parser.pres)
 }
@@ -388,7 +393,15 @@ impl Parser<'_> {
                     let mut inner_out = Vec::new();
                     if name == "grpSp" {
                         let inner = path(n, &["grpSpPr", "xfrm"]).map(group_tf).unwrap_or(GroupTf::IDENTITY);
+                        // Members with `a:grpFill` take this group's fill (which may itself come from outside).
+                        let own = match child(n, "grpSpPr").map(|p| fill_spec(p, &cx.master.ctx)).unwrap_or(FillSpec::Unset) {
+                            FillSpec::Paint(p) => Some(p),
+                            FillSpec::Group => self.group_fill.clone(),
+                            FillSpec::None | FillSpec::Unset => None,
+                        };
+                        let outer = std::mem::replace(&mut self.group_fill, own);
                         self.sp_tree(n, cx, inner.then(group), include_placeholders, &mut inner_out);
+                        self.group_fill = outer;
                     } else if let Some(fallback) = child(n, "Fallback") {
                         self.sp_tree(fallback, cx, group, include_placeholders, &mut inner_out);
                     }
@@ -431,6 +444,17 @@ impl Parser<'_> {
                         "物件"
                     };
                     let mut shape = self.opaque(n, cx, group, label);
+                    if uri.ends_with("/chart")
+                        && let Some(s) = &mut shape
+                        && let Some(chart) = self.chart(n, cx)
+                    {
+                        s.kind = ShapeKind::Chart(Box::new(chart));
+                        if let Some(src) = &s.source {
+                            let mut src = (**src).clone();
+                            src.parsed.kind = s.kind.clone();
+                            s.source = Some(Arc::new(src));
+                        }
+                    }
                     if uri.ends_with("/diagram")
                         && let Some(s) = &mut shape
                         && let Some(shapes) = self.diagram_drawing(n, cx)
@@ -449,6 +473,14 @@ impl Parser<'_> {
                 _ => out.extend(self.opaque(n, cx, group, "hidden")),
             }
         }
+    }
+
+    /// The chart a graphic frame refers to (`c:chart r:id`).
+    fn chart(&mut self, frame: Node, cx: &ShapeCx) -> Option<ppt_model::chart::Chart> {
+        let id = path(frame, &["graphic", "graphicData", "chart"])?.attribute((REL_NS, "id"))?;
+        let part = cx.rels.get(id)?.target.clone();
+        let xml = self.pkg.read_string(&part).ok()?;
+        chart::chart(&xml, &cx.master.ctx, &cx.master.ctx.theme.minor)
     }
 
     /// Shapes of a SmartArt's stored drawing (`dsp:drawing`), relative to its frame.
@@ -587,6 +619,7 @@ impl Parser<'_> {
         let fill = match sp_pr.map(|p| fill_spec(p, ctx)).unwrap_or(FillSpec::Unset) {
             FillSpec::Paint(p) => Some(p),
             FillSpec::None => None,
+            FillSpec::Group => self.group_fill.clone(),
             FillSpec::Unset => style_ref("fillRef").and_then(|r| theme_fill(r, ctx)),
         };
         let line = parse_line(sp_pr.and_then(|p| child(p, "ln")), style_ref("lnRef"), ctx);
@@ -650,6 +683,14 @@ impl Parser<'_> {
             text,
             placeholder,
             group: None,
+            shadow: sp_pr.and_then(|p| path(p, &["effectLst", "outerShdw"])).and_then(|s| {
+                Some(Shadow {
+                    color: ctx.color_in(s, None)?,
+                    blur: attr_i64(s, "blurRad").unwrap_or(0),
+                    dist: attr_i64(s, "dist").unwrap_or(0),
+                    dir: attr_f64(s, "dir").unwrap_or(0.0) / 60_000.0,
+                })
+            }),
             source: None,
         };
         shape.source = self.source_of(n, cx, &shape);
@@ -822,6 +863,8 @@ enum FillSpec {
     Unset,
     None,
     Paint(Paint),
+    /// `a:grpFill`: the enclosing group's fill.
+    Group,
 }
 
 impl FillSpec {
@@ -830,7 +873,7 @@ impl FillSpec {
         match self {
             FillSpec::Paint(p) => FillSpecColor::Solid(p.color()),
             FillSpec::None => FillSpecColor::None,
-            FillSpec::Unset => FillSpecColor::Unset,
+            FillSpec::Unset | FillSpec::Group => FillSpecColor::Unset,
         }
     }
 }
@@ -896,7 +939,8 @@ fn fill_spec(n: Node, ctx: &ColorCtx) -> FillSpec {
             "gradFill" => return gradient(c, ctx, None).map(|g| FillSpec::Paint(Paint::Gradient(Arc::new(g)))).unwrap_or(FillSpec::None),
             // Patterns show as their foreground color.
             "pattFill" => return child(c, "fgClr").and_then(|f| ctx.color_in(f, None)).map(|c| FillSpec::Paint(Paint::Solid(c))).unwrap_or(FillSpec::None),
-            "blipFill" | "grpFill" => return FillSpec::None,
+            "grpFill" => return FillSpec::Group,
+            "blipFill" => return FillSpec::None,
             _ => {}
         }
     }

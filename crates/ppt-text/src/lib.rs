@@ -20,6 +20,9 @@ pub use parley;
 /// Single line spacing in PowerPoint is about 1.2× the font size for typical fonts.
 pub const SINGLE_LINE_HEIGHT: f32 = 1.2;
 
+/// Font size of the layout's default style when every character has its own style.
+const STRUT_SIZE: f32 = 1.0;
+
 pub struct TextEngine {
     pub font_cx: FontContext,
     pub layout_cx: LayoutContext<Color>,
@@ -107,13 +110,18 @@ impl TextEngine {
         let first_style = body.paragraphs.first().map(|p| p.first_style().clone()).unwrap_or_default();
 
         // Style properties are computed up front: the builder borrows the contexts mutably.
-        let default_props = self.run_properties(&first_style, scale);
+        // parley sizes every line at least by the default style (a CSS-like strut), so a
+        // non-empty body gets a negligible one; an empty body keeps its paragraph's size.
+        let strut = if text.is_empty() { first_style.clone() } else { RunStyle { size_pt: STRUT_SIZE, ..first_style.clone() } };
+        let default_props = self.run_properties(&strut, 1.0);
         let mut span_props: Vec<(Range<usize>, Vec<StyleProperty<'static, Color>>)> = Vec::new();
         for (i, (p, range)) in body.paragraphs.iter().zip(&ranges).enumerate() {
             let line_height = SINGLE_LINE_HEIGHT * p.line_spacing * (1.0 - body.line_spacing_reduction);
-            // The paragraph's `\n` (if any) carries its end style so empty lines get the right height.
+            // The paragraph's `\n` (if any) ends its last line: it takes the last run's style
+            // (an empty paragraph's comes from its end style), so it never makes a line taller.
             let para_end = if i + 1 < ranges.len() { range.end + 1 } else { range.end };
-            let mut props = self.run_properties(&p.end_style, scale);
+            let break_style = p.runs.iter().rev().find(|r| !r.text.is_empty()).map_or(&p.end_style, |r| &r.style);
+            let mut props = self.run_properties(break_style, scale);
             props.push(StyleProperty::LineHeight(LineHeight::FontSizeRelative(line_height)));
             span_props.push((range.start..para_end.max(range.start), props));
             let mut pos = range.start;
@@ -472,6 +480,23 @@ mod tests {
     }
 
     #[test]
+    fn smaller_lines_after_a_large_one_keep_their_own_height() {
+        let mut engine = engine();
+        let para = |size: f32| Paragraph {
+            runs: vec![Run { text: "Ab".into(), style: RunStyle { size_pt: size, ..Default::default() } }],
+            end_style: RunStyle { size_pt: size, ..Default::default() },
+            ..Default::default()
+        };
+        let body = TextBody { paragraphs: vec![para(18.0), para(10.0), para(10.0)], ..Default::default() };
+        let l = engine.layout_body(&body, 400.0);
+        let heights: Vec<f32> = l.layout.lines().map(|line| line.metrics().line_height).collect();
+        assert!((heights[0] - 21.6).abs() < 0.1 && (heights[1] - 12.0).abs() < 0.1 && (heights[2] - 12.0).abs() < 0.1, "{heights:?}");
+        // An empty body still has a line as tall as its paragraph's text would be.
+        let empty = TextBody { paragraphs: vec![Paragraph { end_style: RunStyle { size_pt: 20.0, ..Default::default() }, ..Default::default() }], ..Default::default() };
+        assert!((engine.layout_body(&empty, 400.0).height - 24.0).abs() < 0.5);
+    }
+
+    #[test]
     fn numbered_lists_count_per_level() {
         let num = |level: u8| Paragraph {
             level,
@@ -493,4 +518,3 @@ mod tests {
     }
 
 }
-

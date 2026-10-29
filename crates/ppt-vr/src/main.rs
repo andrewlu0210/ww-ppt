@@ -96,6 +96,8 @@ fn run_deck(r: &mut SlideRenderer, pptx: &Path, pdf: &Path, dir: &Path, width: u
         return Err(format!("resaved deck has {} slides, expected {}", reopened.slides.len(), pres.slides.len()));
     }
     r.ensure_fonts(pres.font_families());
+    // The resaved deck has the same media as the original, so one cache serves both.
+    r.new_deck();
 
     let height = ((width as f64) * pres.slide_height as f64 / pres.slide_width as f64).round() as u32;
     let refs = reference_pages(pdf, dir, width, height)?;

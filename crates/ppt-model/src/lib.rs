@@ -11,6 +11,7 @@ pub use bullet::{Bullet, BulletKind};
 pub use table::Table;
 
 pub mod bullet;
+pub mod chart;
 pub mod table;
 mod text;
 
@@ -551,6 +552,18 @@ impl Placeholder {
     }
 }
 
+/// An outer shadow: a blurred copy of the shape offset by `dist` toward `dir`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shadow {
+    pub color: Color,
+    /// Blur radius, in EMU.
+    pub blur: Emu,
+    /// Offset distance, in EMU.
+    pub dist: Emu,
+    /// Offset direction in degrees, clockwise from the x axis.
+    pub dir: f64,
+}
+
 /// Picture cropping (`a:srcRect`): fractions of the image trimmed from each
 /// edge. Negative values pad the image instead.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -574,6 +587,8 @@ pub enum ShapeKind {
     Picture { media: Option<String>, crop: Crop },
     /// `a:tbl` in a graphic frame.
     Table(Box<Table>),
+    /// A chart, drawn from the values cached in its part; saved unchanged.
+    Chart(Box<chart::Chart>),
     /// SmartArt, drawn from the pre-rendered drawing PowerPoint stores with it
     /// and saved verbatim. `shapes` are relative to a `w` × `h` frame at the origin.
     Diagram { shapes: Arc<Vec<Shape>>, w: Emu, h: Emu },
@@ -596,6 +611,8 @@ pub struct Shape {
     /// The (outermost) group the shape belongs to, identified by an id of its
     /// own. Group members are kept contiguous in z-order.
     pub group: Option<ShapeId>,
+    /// Drop shadow (`a:outerShdw`); drawn only, saved with the shape's XML.
+    pub shadow: Option<Shadow>,
     /// Where the shape came from in the opened file, for lossless saving.
     pub source: Option<Arc<ShapeSource>>,
 }
@@ -684,6 +701,7 @@ impl Shape {
             text: None,
             placeholder: None,
             group: None,
+            shadow: None,
             source: None,
         }
     }
@@ -740,6 +758,8 @@ pub struct Presentation {
     pub package: Option<Arc<Vec<u8>>>,
     /// Style for new tables (the deck's default table style).
     pub table_style: Option<Arc<table::TableStyle>>,
+    /// Built-in table styles offered in the style gallery, resolved against the theme.
+    pub table_styles: Vec<Arc<table::TableStyle>>,
     /// The theme's hyperlink color, for links added in the editor.
     pub link_color: Option<Color>,
     next_id: u32,
@@ -757,6 +777,7 @@ impl Default for Presentation {
             text_defaults: None,
             package: None,
             table_style: None,
+            table_styles: Vec::new(),
             link_color: None,
             next_id: 1,
         }
@@ -854,6 +875,11 @@ impl Presentation {
         }
         if emoji {
             out.push(EMOJI_FAMILY.to_string());
+        }
+        for shape in self.slides.iter().flat_map(|s| &s.shapes) {
+            if let ShapeKind::Chart(c) = &shape.kind {
+                out.extend(c.font_families());
+            }
         }
         out.retain(|f| !f.is_empty());
         out.sort();

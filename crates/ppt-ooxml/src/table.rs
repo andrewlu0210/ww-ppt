@@ -66,21 +66,54 @@ fn style_part(n: Option<Node>, ctx: &ColorCtx) -> StylePart {
     part
 }
 
+/// Built-in styles offered in the gallery: (id, name, definition).
+/// The "Medium Style 2" family differs only in its theme color.
+pub(crate) fn builtin_styles() -> Vec<(&'static str, String, String)> {
+    const MEDIUM2: [(&str, &str, &str); 7] = [
+        ("{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}", "Medium Style 2", "dk1"),
+        (MEDIUM_STYLE_2, "Medium Style 2 - Accent 1", "accent1"),
+        ("{21E4AEA4-8DFA-4A89-87EB-49C32662AFE8}", "Medium Style 2 - Accent 2", "accent2"),
+        ("{F5AB1C69-6EDB-4FF4-983F-18BD219EF322}", "Medium Style 2 - Accent 3", "accent3"),
+        ("{00A15C55-8517-42AA-B614-E9B94910E393}", "Medium Style 2 - Accent 4", "accent4"),
+        ("{7DF18680-E054-41AD-8BC1-D1AEF772440D}", "Medium Style 2 - Accent 5", "accent5"),
+        ("{93296810-A885-4BE3-A3E7-6D5BEEA58F35}", "Medium Style 2 - Accent 6", "accent6"),
+    ];
+    let mut out: Vec<(&str, String, String)> = vec![
+        ("{2D5ABB26-0587-4C30-8999-92F81FD0307C}", "No Style, No Grid".into(), r#"<a:tblStyle styleId="{2D5ABB26-0587-4C30-8999-92F81FD0307C}" styleName="No Style, No Grid"><a:wholeTbl><a:tcTxStyle><a:fontRef idx="minor"/><a:schemeClr val="tx1"/></a:tcTxStyle><a:tcStyle><a:tcBdr><a:left><a:ln><a:noFill/></a:ln></a:left><a:right><a:ln><a:noFill/></a:ln></a:right><a:top><a:ln><a:noFill/></a:ln></a:top><a:bottom><a:ln><a:noFill/></a:ln></a:bottom><a:insideH><a:ln><a:noFill/></a:ln></a:insideH><a:insideV><a:ln><a:noFill/></a:ln></a:insideV></a:tcBdr><a:fill><a:noFill/></a:fill></a:tcStyle></a:wholeTbl></a:tblStyle>"#.into()),
+        ("{5940675A-B579-460E-94D1-54222C63F5DA}", "No Style, Table Grid".into(), r#"<a:tblStyle styleId="{5940675A-B579-460E-94D1-54222C63F5DA}" styleName="No Style, Table Grid"><a:wholeTbl><a:tcTxStyle><a:fontRef idx="minor"/><a:schemeClr val="tx1"/></a:tcTxStyle><a:tcStyle><a:tcBdr><a:left><a:ln w="12700"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:ln></a:left><a:right><a:ln w="12700"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:ln></a:right><a:top><a:ln w="12700"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:ln></a:top><a:bottom><a:ln w="12700"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:ln></a:bottom><a:insideH><a:ln w="12700"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:ln></a:insideH><a:insideV><a:ln w="12700"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:ln></a:insideV></a:tcBdr><a:fill><a:noFill/></a:fill></a:tcStyle></a:wholeTbl></a:tblStyle>"#.into()),
+    ];
+    for (id, name, color) in MEDIUM2 {
+        let xml = MEDIUM_STYLE_2_XML
+            .replace(MEDIUM_STYLE_2, id)
+            .replace("Medium Style 2 - Accent 1", name)
+            .replace(r#"val="accent1""#, &format!(r#"val="{color}""#));
+        out.push((id, name.to_string(), xml));
+    }
+    out
+}
+
+fn parse_style_xml(xml: &str, id: &str, ctx: &ColorCtx) -> Option<TableStyle> {
+    let wrapped = format!(r#"<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{xml}</a:tblStyleLst>"#);
+    let doc = roxmltree::Document::parse(&wrapped).ok()?;
+    let n = doc.root_element().first_element_child()?;
+    Some(parse_style(n, id, ctx))
+}
+
+/// The gallery's built-in styles resolved against a theme.
+pub(crate) fn resolved_builtins(ctx: &ColorCtx) -> Vec<TableStyle> {
+    builtin_styles().into_iter().filter_map(|(id, _, xml)| parse_style_xml(&xml, id, ctx)).collect()
+}
+
 /// Finds and resolves style `id` in a `tableStyles.xml` document, falling back
-/// to the built-in definition of [`MEDIUM_STYLE_2`].
+/// to the built-in definitions (PowerPoint knows its built-in styles by id).
 pub(crate) fn table_style(xml: Option<&str>, id: &str, ctx: &ColorCtx) -> Option<TableStyle> {
     let doc = xml.and_then(|x| roxmltree::Document::parse(x).ok());
     let found = doc.as_ref().and_then(|d| children(d.root_element(), "tblStyle").find(|s| s.attribute("styleId") == Some(id)));
     if let Some(n) = found {
         return Some(parse_style(n, id, ctx));
     }
-    if id != MEDIUM_STYLE_2 {
-        return None;
-    }
-    let wrapped = format!(r#"<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{MEDIUM_STYLE_2_XML}</a:tblStyleLst>"#);
-    let doc = roxmltree::Document::parse(&wrapped).ok()?;
-    let n = doc.root_element().first_element_child()?;
-    Some(parse_style(n, id, ctx))
+    let (_, _, xml) = builtin_styles().into_iter().find(|(b, _, _)| *b == id)?;
+    parse_style_xml(&xml, id, ctx)
 }
 
 /// Default table style id of a `tableStyles.xml` (`a:tblStyleLst@def`).
@@ -94,6 +127,7 @@ fn parse_style(n: Node, id: &str, ctx: &ColorCtx) -> TableStyle {
     let part = |name| style_part(child(n, name), ctx);
     TableStyle {
         id: id.to_string(),
+        name: n.attribute("styleName").unwrap_or_default().to_string(),
         whole: part("wholeTbl"),
         band1_h: part("band1H"),
         band2_h: part("band2H"),

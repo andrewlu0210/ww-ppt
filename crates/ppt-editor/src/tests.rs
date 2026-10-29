@@ -689,3 +689,156 @@ fn numbering_toggles_and_switches_scheme() {
     assert!(e.text_format().unwrap().bullet);
     assert_eq!(e.text_format().unwrap().numbering, None);
 }
+
+fn styled_table_editor(eng: &mut TextEngine, rows: usize, cols: usize) -> (Editor, ShapeId) {
+    use ppt_model::table::{CellFill, StylePart, TableStyle};
+    let mut pres = Presentation::default();
+    pres.slides.push(Slide::default());
+    let style = |id: &str, header: Color| {
+        std::sync::Arc::new(TableStyle {
+            id: id.into(),
+            name: id.into(),
+            first_row: StylePart { fill: Some(CellFill::Solid(header)), color: Some(Color::WHITE), bold: Some(true), ..Default::default() },
+            ..Default::default()
+        })
+    };
+    pres.table_styles = vec![style("blue", Color::rgb(0, 0, 200)), style("plain", Color::rgb(250, 250, 250))];
+    pres.table_style = Some(pres.table_styles[0].clone());
+    pres.table_styles[1] = std::sync::Arc::new(TableStyle { first_row: StylePart::default(), ..(*pres.table_styles[1]).clone() });
+    let mut e = Editor::new(pres);
+    e.insert_table(eng, rows, cols);
+    e.end_text_edit(eng);
+    let id = e.pres.slides[0].shapes[0].id;
+    (e, id)
+}
+
+#[test]
+fn dragging_across_cells_selects_a_block_and_merges_it() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 3, 3);
+    for (r, c, s) in [(0, 0, "甲"), (0, 1, "乙"), (1, 1, "丙")] {
+        e.begin_cell_edit(&mut eng, id, r, c);
+        e.insert_text(&mut eng, s);
+        e.end_text_edit(&mut eng);
+    }
+    let (a, b) = (cell_center(&e, id, 0, 0), cell_center(&e, id, 1, 1));
+    e.pointer_down(&mut eng, &ev(a.0, a.1), &TOL);
+    e.pointer_move(&mut eng, &PointerEvent { alt: true, ..ev(b.0, b.1) }, &TOL);
+    e.pointer_up(&mut eng, &ev(b.0, b.1));
+    assert!(e.text.is_none());
+    assert_eq!(e.cell_range_frames().len(), 4);
+    assert!(e.can_merge_cells());
+    assert!(e.merge_cells(&mut eng));
+    let t = table(&e, id);
+    assert_eq!((t.rows[0].cells[0].grid_span, t.rows[0].cells[0].row_span), (2, 2));
+    assert!(t.rows[0].cells[1].h_merge && t.rows[1].cells[0].v_merge && t.rows[1].cells[1].h_merge && t.rows[1].cells[1].v_merge);
+    assert_eq!(cell_text(&e, id, 0, 0), "甲\n乙\n丙");
+    assert_eq!(e.text.as_ref().unwrap().cell, Some((0, 0)));
+    e.undo(&mut eng);
+    assert_eq!(table(&e, id).rows[0].cells[0].grid_span, 1);
+}
+
+#[test]
+fn shift_click_extends_over_merged_cells() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 3, 3);
+    if let ShapeKind::Table(t) = &mut e.pres.slides[0].shapes[0].kind {
+        t.rows[1].cells[1].grid_span = 2;
+        t.rows[1].cells[2].h_merge = true;
+    }
+    e.refresh_tables(&mut eng);
+    e.begin_cell_edit(&mut eng, id, 0, 0);
+    let (x, y) = cell_center(&e, id, 1, 1);
+    e.pointer_down(&mut eng, &PointerEvent { shift: true, ..ev(x, y) }, &TOL);
+    e.pointer_up(&mut eng, &ev(x, y));
+    // (0,0)..(1,1) grows to take the whole merged cell (1,1)-(1,2).
+    assert_eq!(e.cell_range_frames().len(), 5);
+}
+
+#[test]
+fn splitting_cells_adds_grid_lines_and_undoes_merges() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 2, 2);
+    let w = table(&e, id).cols.clone();
+    e.begin_cell_edit(&mut eng, id, 0, 0);
+    e.insert_text(&mut eng, "原文");
+    assert!(e.split_cell(&mut eng, 1, 2));
+    let t = table(&e, id);
+    assert_eq!(t.cols.len(), 3);
+    assert_eq!(t.cols[0] + t.cols[1], w[0]);
+    // The other row spans the new grid line.
+    assert_eq!(t.rows[1].cells[0].grid_span, 2);
+    assert!(t.rows[1].cells[1].h_merge);
+    assert_eq!(cell_text(&e, id, 0, 0), "原文");
+    // Merge the two halves back, then split the merged cell into rows instead.
+    e.end_text_edit(&mut eng);
+    e.cell_range = Some(CellRange { shape: id, anchor: (0, 0), focus: (0, 1) });
+    e.merge_cells(&mut eng);
+    assert!(e.split_cell(&mut eng, 2, 1));
+    let t = table(&e, id);
+    assert_eq!(t.rows.len(), 3);
+    assert_eq!(t.rows[0].cells[0].grid_span, 2);
+    assert_eq!(t.rows[1].cells[0].grid_span, 2);
+    assert!(t.visible_cells().iter().all(|&(r, c)| !t.rows[r].cells[c].is_covered()));
+}
+
+#[test]
+fn cell_fill_borders_and_alignment() {
+    use ppt_model::table::{BOTTOM, CellFill, LEFT, RIGHT, TOP};
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 3, 3);
+    e.cell_range = Some(CellRange { shape: id, anchor: (0, 0), focus: (1, 1) });
+    e.selection = vec![id];
+    assert!(e.set_cell_fill(&mut eng, Some(Color::rgb(1, 2, 3))));
+    let red = Line::new(Color::rgb(255, 0, 0), 25_400);
+    assert!(e.set_cell_borders(&mut eng, BorderSet::Outside, red));
+    let t = table(&e, id);
+    assert_eq!(t.rows[1].cells[1].fill, CellFill::Solid(Color::rgb(1, 2, 3)));
+    assert_eq!(t.rows[2].cells[2].fill, CellFill::Inherit);
+    assert_eq!(t.rows[0].cells[0].borders[TOP], Some(Some(red)));
+    assert_eq!(t.rows[0].cells[0].borders[RIGHT], None, "an inside edge is untouched");
+    // The cell to the right of the block gets the facing edge too.
+    assert_eq!(t.rows[1].cells[2].borders[LEFT], Some(Some(red)));
+    assert_eq!(t.rows[2].cells[0].borders[TOP], Some(Some(red)));
+    assert!(e.set_cell_borders(&mut eng, BorderSet::None, red));
+    assert_eq!(table(&e, id).rows[1].cells[1].borders[BOTTOM], Some(None));
+    assert!(e.set_cell_anchor(&mut eng, Anchor::Middle));
+    assert_eq!(table(&e, id).rows[0].cells[1].text.anchor, Anchor::Middle);
+}
+
+#[test]
+fn switching_style_and_options_restyles_header_text() {
+    let mut eng = engine();
+    let (mut e, id) = styled_table_editor(&mut eng, 2, 2);
+    e.begin_cell_edit(&mut eng, id, 0, 0);
+    e.insert_text(&mut eng, "標題");
+    e.end_text_edit(&mut eng);
+    let header = |e: &Editor| table(e, id).rows[0].cells[0].text.paragraphs[0].runs[0].style.clone();
+    assert!(header(&e).bold && header(&e).color == Color::WHITE);
+    e.selection = vec![id];
+    assert!(e.set_table_style(&mut eng, "plain"));
+    assert_eq!(table(&e, id).style.as_ref().unwrap().id, "plain");
+    assert!(!header(&e).bold && header(&e).color != Color::WHITE, "white header text would vanish");
+    assert!(e.set_table_style(&mut eng, "blue"));
+    assert!(e.set_table_flag(&mut eng, "firstRow", false));
+    assert!(!table(&e, id).flags.first_row);
+    assert!(!header(&e).bold);
+}
+
+#[test]
+fn bold_applies_to_every_selected_cell() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 2, 2);
+    for (r, c) in [(0, 0), (1, 1)] {
+        e.begin_cell_edit(&mut eng, id, r, c);
+        e.insert_text(&mut eng, "字");
+        e.end_text_edit(&mut eng);
+    }
+    e.cell_range = Some(CellRange { shape: id, anchor: (0, 0), focus: (1, 1) });
+    e.selection = vec![id];
+    assert!(e.toggle_style(&mut eng, Toggle::Bold));
+    let bold = |r: usize, c: usize| table(&e, id).rows[r].cells[c].text.style_at(0).bold;
+    assert!(bold(0, 0) && bold(1, 1));
+    assert!(e.key_down(&mut eng, "Delete", Modifiers::default()));
+    assert_eq!(cell_text(&e, id, 1, 1), "");
+}

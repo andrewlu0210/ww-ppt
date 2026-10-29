@@ -84,6 +84,7 @@ pub const BOTTOM: usize = 3;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableStyle {
     pub id: String,
+    pub name: String,
     pub whole: StylePart,
     pub band1_h: StylePart,
     pub band2_h: StylePart,

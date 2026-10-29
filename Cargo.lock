@@ -2883,6 +2883,7 @@ dependencies = [
  "image",
  "pollster",
  "ppt-fonts",
+ "ppt-geometry",
  "ppt-model",
  "ppt-ooxml",
  "ppt-render",

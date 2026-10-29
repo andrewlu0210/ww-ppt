@@ -16,10 +16,35 @@ use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Cap, Circle, Line, ParamCurve, PathEl, PathSeg, Point, Rect, Shape as _, Stroke, Vec2};
 use vello::peniko::{Blob, Color as PColor, ColorStop, Fill, Gradient as PGradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat, StyleRef};
 
+mod chart;
+
 pub use vello;
 
 pub fn color(c: Color) -> PColor {
     PColor::from_rgba8(c.r, c.g, c.b, c.a)
+}
+
+/// A shape's drop shadow, for rectangular shapes and pictures (a blurred rounded rectangle).
+/// Other outlines are skipped rather than drawn with a wrong silhouette.
+fn draw_shadow(scene: &mut Scene, shape: &Shape, shadow: &ppt_model::Shadow, view: Affine) {
+    let xf = &shape.xfrm;
+    let (w, h) = (xf.w as f64, xf.h as f64);
+    let radius = match &shape.geometry {
+        ppt_model::Geometry::Preset { name, adjust } if name == "rect" => 0.0,
+        ppt_model::Geometry::Preset { name, adjust } if name == "roundRect" => {
+            w.min(h) * adjust.iter().find(|(k, _)| k == "adj").map_or(16_667.0, |(_, v)| *v) / 100_000.0
+        }
+        _ => return,
+    };
+    // Shapes without any visible paint cast no shadow.
+    let visible = shape.fill.is_some() || matches!(shape.kind, ShapeKind::Picture { .. });
+    if !visible {
+        return;
+    }
+    let (sin, cos) = shadow.dir.to_radians().sin_cos();
+    let offset = Affine::translate((cos * shadow.dist as f64, sin * shadow.dist as f64));
+    let tf = view * offset * shape_affine(xf, false);
+    scene.draw_blurred_rounded_rect(tf, Rect::new(0.0, 0.0, w, h), color(shadow.color), radius, shadow.blur as f64 / 2.0);
 }
 
 /// Strokes `path` with the line's width and dash pattern, plus arrowheads on open paths.
@@ -138,6 +163,9 @@ fn gradient_brush(g: &Gradient, w: f64, h: f64) -> (PGradient, Affine) {
     }
 }
 
+/// Longest side decoded images are kept at.
+const MAX_IMAGE_SIDE: u32 = 2560;
+
 /// Decoded images keyed by media part name. Failed decodes are cached as `None`.
 #[derive(Default)]
 pub struct ImageCache {
@@ -150,7 +178,15 @@ impl ImageCache {
             .entry(key.to_string())
             .or_insert_with(|| {
                 let bytes = pres.media.get(key)?;
-                let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+                let mut img = image::load_from_memory(bytes).ok()?.to_rgba8();
+                // Photos far larger than any slide display would crowd the GPU image atlas
+                // (images can then fail to draw) and memory; slides never need more.
+                let (w, h) = img.dimensions();
+                if w.max(h) > MAX_IMAGE_SIDE {
+                    let s = MAX_IMAGE_SIDE as f64 / w.max(h) as f64;
+                    let (nw, nh) = (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1));
+                    img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+                }
                 let (width, height) = img.dimensions();
                 Some(ImageData {
                     data: Blob::new(Arc::new(img.into_raw())),
@@ -238,9 +274,17 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
         }
         return;
     }
+    if let ShapeKind::Chart(chart) = &shape.kind {
+        chart::draw_chart(scene, cx.engine, chart, xf, view);
+        return;
+    }
     if let ShapeKind::Table(table) = &shape.kind {
         draw_table(scene, cx.engine, table, xf, view, opts.skip_cell.filter(|_| !with_text));
         return;
+    }
+
+    if let Some(shadow) = &shape.shadow {
+        draw_shadow(scene, shape, shadow, view);
     }
 
     if let ShapeKind::Picture { media, crop } = &shape.kind {

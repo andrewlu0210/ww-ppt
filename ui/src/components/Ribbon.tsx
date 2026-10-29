@@ -4,14 +4,16 @@ import { ColorPicker } from "./ColorPicker";
 import { LayoutPicker } from "./LayoutPicker";
 import { TablePicker } from "./TablePicker";
 import { Popover } from "./Popover";
+import { TableDesignTab, TableLayoutTab } from "./TableTabs";
 import { LinkPicker } from "./LinkPicker";
-import { FONT_SIZES, type Command } from "../lib/commands";
+import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { Status } from "../lib/status";
 
 const TABS = ["常用", "插入", "圖形格式", "檢視"] as const;
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
-const TABLE_TAB = "表格版面配置";
-type Tab = (typeof TABS)[number] | typeof TABLE_TAB;
+const TABLE_TABS = ["表格設計", "版面配置"] as const;
+type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number];
+const isTableTab = (t: Tab) => (TABLE_TABS as readonly string[]).includes(t);
 
 const SHAPES: [string, string][] = [
   ["rect", "矩形"],
@@ -67,12 +69,13 @@ interface Props {
   run: (c: Command) => void;
   /** Bumped by the ⌘K menu item to open the link panel. */
   linkRequest: number;
+  tableStyles: TableStyleInfo[];
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
-  const tab = chosen === TABLE_TAB && !status.inTable ? "常用" : chosen;
-  const tabs: Tab[] = status.inTable ? [...TABS, TABLE_TAB] : [...TABS];
+  const tab = isTableTab(chosen) && !status.inTable ? "常用" : chosen;
+  const tabs: Tab[] = status.inTable ? [...TABS, ...TABLE_TABS] : [...TABS];
   useEffect(() => {
     if (linkRequest > 0) setTab("插入");
   }, [linkRequest]);
@@ -102,7 +105,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
     <div className="ribbon">
       <div className="rb-tabs" role="tablist">
         {tabs.map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", t === TABLE_TAB && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
+          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", isTableTab(t) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
             {t}
           </button>
         ))}
@@ -341,22 +344,8 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
             </Group>
           </>
         )}
-        {tab === TABLE_TAB && (
-          <>
-            <Group label="列與欄">
-              <Button large icon={icons.rowAbove} label="插入上方列" onClick={() => run({ kind: "table", command: "rowAbove" })} />
-              <Button large icon={icons.rowBelow} label="插入下方列" onClick={() => run({ kind: "table", command: "rowBelow" })} />
-              <Button large icon={icons.colLeft} label="插入左方欄" onClick={() => run({ kind: "table", command: "colLeft" })} />
-              <Button large icon={icons.colRight} label="插入右方欄" onClick={() => run({ kind: "table", command: "colRight" })} />
-            </Group>
-            <Group label="刪除">
-              <div className="rb-col">
-                <Button icon={icons.deleteRow} label="刪除列" onClick={() => run({ kind: "table", command: "deleteRow" })} />
-                <Button icon={icons.deleteCol} label="刪除欄" onClick={() => run({ kind: "table", command: "deleteCol" })} />
-              </div>
-            </Group>
-          </>
-        )}
+        {tab === "表格設計" && <TableDesignTab status={status} styles={tableStyles} run={run} />}
+        {tab === "版面配置" && <TableLayoutTab status={status} run={run} />}
         {tab === "檢視" && (
           <Group label="縮放">
             <Button icon={icons.zoomIn} label="放大" onClick={() => run({ kind: "zoom", factor: 1.25 })} />

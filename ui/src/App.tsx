@@ -19,7 +19,7 @@ import {
   writeFile,
 } from "./lib/backend";
 import { startAutomation } from "./lib/automation";
-import { SHAPES_MARKER, type Command } from "./lib/commands";
+import { SHAPES_MARKER, type Command, type TableStyleInfo } from "./lib/commands";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import { EMPTY_STATUS, type Status } from "./lib/status";
 
@@ -42,6 +42,7 @@ export function App() {
   const [layoutThumbs, setLayoutThumbs] = useState<(ImageData | undefined)[]>([]);
   const [thumbs, setThumbs] = useState<Map<number, ImageData>>(new Map());
   const [linkRequest, setLinkRequest] = useState(0);
+  const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
 
   const dirty = status.revision !== doc.savedRevision;
   const docRef = useRef(doc);
@@ -142,6 +143,7 @@ export function App() {
       if (!engine) return;
       setDoc({ name, path, savedRevision: engine.revision() });
       setLayoutNames(engine.layoutNames() as string[]);
+      setTableStyles(engine.tableStyles() as TableStyleInfo[]);
       setLayoutThumbs([]);
       setThumbs(new Map());
       refresh();
@@ -269,6 +271,27 @@ export function App() {
           if (!engine.insertPicture(await readFile(path), ext)) setError("無法讀取這個圖片檔。");
           break;
         }
+        case "tableMerge":
+          engine.tableMerge();
+          break;
+        case "tableSplit":
+          engine.tableSplit(c.rows, c.cols);
+          break;
+        case "cellFill":
+          engine.setCellFill(c.color);
+          break;
+        case "cellBorders":
+          engine.setCellBorders(c.which, c.color, c.width);
+          break;
+        case "cellAnchor":
+          engine.setCellAnchor(c.anchor);
+          break;
+        case "tableStyle":
+          engine.setTableStyle(c.id);
+          break;
+        case "tableFlag":
+          engine.setTableFlag(c.flag, c.on);
+          break;
         case "link":
           engine.setLink(c.url);
           break;
@@ -427,7 +450,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}

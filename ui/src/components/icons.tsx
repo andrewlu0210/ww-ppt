@@ -8,6 +8,40 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  borders: (
+    <Svg>
+      <rect x="4" y="4" width="16" height="16" />
+      <path d="M12 4v16M4 12h16" strokeDasharray="2 2" />
+    </Svg>
+  ),
+  merge: (
+    <Svg>
+      <rect x="3.5" y="5" width="17" height="14" rx="1" />
+      <path d="M7 12h10M14.5 9.5 17 12l-2.5 2.5M9.5 9.5 7 12l2.5 2.5" />
+    </Svg>
+  ),
+  split: (
+    <Svg>
+      <rect x="3.5" y="5" width="17" height="14" rx="1" />
+      <path d="M12 5v14" />
+      <path d="M9 12H6M15 12h3" strokeDasharray="1.5 1.5" />
+    </Svg>
+  ),
+  alignTop: (
+    <Svg>
+      <path d="M5 4.5h14M8 9h8M8 12.5h8" />
+    </Svg>
+  ),
+  alignMiddle: (
+    <Svg>
+      <path d="M8 10h8M8 13.5h8M5 4.5h14M5 19.5h14" strokeOpacity="1" />
+    </Svg>
+  ),
+  alignBottom: (
+    <Svg>
+      <path d="M5 19.5h14M8 11h8M8 14.5h8" />
+    </Svg>
+  ),
   numberList: (
     <Svg>
       <path d="M10 6.5h10M10 12h10M10 17.5h10" />

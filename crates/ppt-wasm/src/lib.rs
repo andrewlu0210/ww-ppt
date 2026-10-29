@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use js_sys::{Array, Object, Reflect, Uint8Array};
-use ppt_editor::{AlignTo, CursorIcon, Editor, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
+use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
 use ppt_model::{Align, Color, EMU_PER_PT, Presentation};
 use ppt_render::vello::kurbo::{Affine, Point, Rect, Vec2};
@@ -197,6 +197,11 @@ impl App {
                 editing: false,
             };
             draw_selection(&mut self.scene, &overlay);
+        }
+        // Selected table cells.
+        for frame in self.editor.cell_range_frames() {
+            let rect = Rect::new(frame.x as f64, frame.y as f64, (frame.x + frame.w) as f64, (frame.y + frame.h) as f64);
+            self.scene.fill(ppt_render::vello::peniko::Fill::NonZero, view, PColor::from_rgba8(0x43, 0x7E, 0xC9, 0x40), None, &rect);
         }
         let shapes = if self.editor.selection_group().is_some() { Vec::new() } else { self.editor.selected_shapes() };
         for shape in shapes {
@@ -644,6 +649,81 @@ impl App {
         self.touch(changed)
     }
 
+    #[wasm_bindgen(js_name = tableMerge)]
+    pub fn table_merge(&mut self) -> bool {
+        let changed = self.editor.merge_cells(&mut self.engine);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = tableSplit)]
+    pub fn table_split(&mut self, rows: usize, cols: usize) -> bool {
+        let changed = self.editor.split_cell(&mut self.engine, rows, cols);
+        self.touch(changed)
+    }
+
+    /// Shading of the selected cells; "" removes it.
+    #[wasm_bindgen(js_name = setCellFill)]
+    pub fn set_cell_fill(&mut self, color: &str) -> bool {
+        let changed = self.editor.set_cell_fill(&mut self.engine, parse_hex(color));
+        self.touch(changed)
+    }
+
+    /// `which`: all, outside, inside, top, bottom, left, right, none.
+    #[wasm_bindgen(js_name = setCellBorders)]
+    pub fn set_cell_borders(&mut self, which: &str, color: &str, width_pt: f64) -> bool {
+        let Some(which) = BorderSet::parse(which) else { return false };
+        let line = ppt_model::Line::new(parse_hex(color).unwrap_or(Color::BLACK), (width_pt * EMU_PER_PT).round() as i64);
+        let changed = self.editor.set_cell_borders(&mut self.engine, which, line);
+        self.touch(changed)
+    }
+
+    /// `anchor`: top, middle, bottom.
+    #[wasm_bindgen(js_name = setCellAnchor)]
+    pub fn set_cell_anchor(&mut self, anchor: &str) -> bool {
+        let anchor = match anchor {
+            "middle" => ppt_model::Anchor::Middle,
+            "bottom" => ppt_model::Anchor::Bottom,
+            _ => ppt_model::Anchor::Top,
+        };
+        let changed = self.editor.set_cell_anchor(&mut self.engine, anchor);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = setTableStyle)]
+    pub fn set_table_style(&mut self, id: &str) -> bool {
+        let changed = self.editor.set_table_style(&mut self.engine, id);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = setTableFlag)]
+    pub fn set_table_flag(&mut self, flag: &str, on: bool) -> bool {
+        let changed = self.editor.set_table_flag(&mut self.engine, flag, on);
+        self.touch(changed)
+    }
+
+    /// Gallery styles with the colors a preview needs: `{id, name, header, band, body, line}`.
+    #[wasm_bindgen(js_name = tableStyles)]
+    pub fn table_styles(&self) -> Array {
+        use ppt_model::table::{CellFill, StylePart};
+        let fill = |p: &StylePart| match p.fill {
+            Some(CellFill::Solid(c)) => hex(c),
+            _ => String::new(),
+        };
+        let line = |p: &StylePart| p.inside_h.or(p.bottom).flatten().map(|l| hex(l.color)).unwrap_or_default();
+        self.editor
+            .pres
+            .table_styles
+            .iter()
+            .map(|s| {
+                let o = Object::new();
+                for (k, v) in [("id", s.id.clone()), ("name", s.name.clone()), ("header", fill(&s.first_row)), ("band", fill(&s.band1_h)), ("body", fill(&s.whole)), ("line", line(&s.whole))] {
+                    let _ = Reflect::set(&o, &k.into(), &v.into());
+                }
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
     #[wasm_bindgen(js_name = insertTable)]
     pub fn insert_table(&mut self, rows: usize, cols: usize) -> bool {
         let changed = self.editor.insert_table(&mut self.engine, rows, cols);
@@ -819,6 +899,24 @@ impl App {
         set("hasSelection", (!e.selection.is_empty()).into());
         set("editingText", e.is_editing_text().into());
         set("inTable", e.in_table().into());
+        set("canMerge", e.can_merge_cells().into());
+        if let Some(t) = e.current_table() {
+            set("tableStyle", t.style.as_ref().map(|s| s.id.clone()).unwrap_or_default().into());
+            let f = t.flags;
+            let flags = Object::new();
+            for (k, v) in [("firstRow", f.first_row), ("lastRow", f.last_row), ("firstCol", f.first_col), ("lastCol", f.last_col), ("bandRow", f.band_row), ("bandCol", f.band_col)] {
+                let _ = Reflect::set(&flags, &k.into(), &v.into());
+            }
+            set("tableFlags", flags.into());
+        }
+        if let Some(a) = e.current_cell_anchor() {
+            let a = match a {
+                ppt_model::Anchor::Top => "top",
+                ppt_model::Anchor::Middle => "middle",
+                ppt_model::Anchor::Bottom => "bottom",
+            };
+            set("cellAnchor", a.into());
+        }
         set("canGroup", (e.selection.len() > 1 && e.selection_group().is_none()).into());
         set("canUngroup", (e.selection_group().is_some() || e.selected_shape().is_some_and(|s| s.group.is_some())).into());
         set("canUndo", e.can_undo().into());

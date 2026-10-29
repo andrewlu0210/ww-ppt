@@ -406,3 +406,30 @@ fn hyperlinks_survive_saving_and_text_edits() {
     let re = parse_pptx(&save_pptx(&re).unwrap()).unwrap();
     assert_eq!(link_of(&re).map(|l| l.0), Some("範例網站".to_string()));
 }
+
+#[test]
+fn gallery_styles_are_written_to_table_styles() {
+    let mut pres = parse_pptx(&template_package()).unwrap();
+    assert!(pres.table_styles.len() >= 9, "{}", pres.table_styles.len());
+    let accent3 = pres.table_styles.iter().find(|s| s.name == "Medium Style 2 - Accent 3").cloned().unwrap();
+    let mut shape = table_shape(&mut pres, 2, 2);
+    let ShapeKind::Table(t) = &mut shape.kind else { panic!() };
+    t.style = Some(accent3.clone());
+    pres.slides[0].shapes.push(shape);
+    let saved = save_pptx(&pres).unwrap();
+    let p = parts(&saved);
+    let styles = String::from_utf8(p.get("ppt/tableStyles.xml").expect("tableStyles part created").clone()).unwrap();
+    assert!(styles.contains(&accent3.id) && styles.contains("Medium Style 2 - Accent 3"));
+    let ct = String::from_utf8(p["[Content_Types].xml"].clone()).unwrap();
+    assert!(ct.contains("/ppt/tableStyles.xml"));
+    let re = parse_pptx(&saved).unwrap();
+    let t = table_of(re.slides[0].shapes.last().unwrap());
+    assert_eq!(t.style.as_ref().unwrap().id, accent3.id);
+    assert_eq!(t.look(0, 0).fill, accent3.first_row.fill.and_then(|f| match f {
+        ppt_model::table::CellFill::Solid(c) => Some(c),
+        _ => None,
+    }));
+    // Saving again adds nothing: the style is defined now.
+    let again = save_pptx(&re).unwrap();
+    assert_eq!(parts(&again)["ppt/tableStyles.xml"], p["ppt/tableStyles.xml"]);
+}

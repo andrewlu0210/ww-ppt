@@ -19,6 +19,7 @@ use ppt_model::{
 use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
 
 pub use richedit::{Move, RichEdit};
+pub use table::{BorderSet, CellRange};
 
 /// Smallest width/height a resize can produce (2pt), except for lines.
 const MIN_SIZE: f64 = 25_400.0;
@@ -157,6 +158,8 @@ enum DragKind {
     Rotate,
     TextSelect,
     Marquee { additive: bool },
+    /// Selecting a block of cells on a table.
+    CellSelect(ShapeId),
     /// Dragging the border after table column / row `index`.
     TableCol(usize),
     TableRow(usize),
@@ -220,6 +223,8 @@ pub struct Editor {
     table_heights: HashMap<ShapeId, Vec<i64>>,
     /// The group whose members are being selected individually.
     pub entered_group: Option<ShapeId>,
+    /// Selected block of table cells (instead of text in one cell).
+    pub cell_range: Option<CellRange>,
     /// A click on a member of the selected group enters the group on release,
     /// unless the pointer moved (then it was a move): (group, member).
     pending_enter: Option<(ShapeId, ShapeId)>,
@@ -254,6 +259,7 @@ impl Editor {
             table_heights: HashMap::new(),
             entered_group: None,
             pending_enter: None,
+            cell_range: None,
         }
     }
 
@@ -274,6 +280,7 @@ impl Editor {
         self.slide = index.min(self.pres.slides.len().saturating_sub(1));
         self.selection.clear();
         self.entered_group = None;
+        self.cell_range = None;
         self.refresh_tables(engine);
     }
 
@@ -356,6 +363,7 @@ impl Editor {
         let slide = self.slide;
         self.selection = snap.selection.into_iter().filter(|id| self.pres.shape(slide, *id).is_some()).collect();
         self.entered_group = None;
+        self.cell_range = None;
         self.changed();
     }
 
@@ -411,6 +419,7 @@ impl Editor {
                 DragKind::TextSelect => CursorIcon::Text,
                 DragKind::Marquee { .. } => CursorIcon::Default,
                 DragKind::Resize(h) => resize_cursor(h, &drag.origs.first().map(|o| o.1).unwrap_or_default()),
+                DragKind::CellSelect(_) => CursorIcon::Text,
                 DragKind::TableCol(_) => CursorIcon::Resize(0.0),
                 DragKind::TableRow(_) => CursorIcon::Resize(90.0),
             };
@@ -440,6 +449,17 @@ impl Editor {
 
     /// Returns true when the view needs to be redrawn.
     pub fn pointer_down(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> bool {
+        // Shift+click on another cell of the same table selects the block of cells in between.
+        if ev.shift
+            && let Some((id, from)) = self.range_origin()
+            && let Some(to) = self.cell_at(id, ev.x, ev.y, tol.handle)
+            && (self.cell_range.is_some() || Some(to) != self.text.as_ref().and_then(|t| t.cell))
+        {
+            self.select_cells(engine, id, from, to);
+            self.drag = Some(Drag { kind: DragKind::CellSelect(id), start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: None, moved: false });
+            return true;
+        }
+        self.cell_range = None;
         // Clicks inside the text being edited move the caret.
         if let Some(frame) = self.text.as_ref().map(|t| t.frame.xfrm) {
             let inside = frame_contains(&frame, ev.x, ev.y, tol.handle);
@@ -541,12 +561,29 @@ impl Editor {
         let origs = drag.origs.clone();
         match kind {
             DragKind::TextSelect => {
+                // Dragging out of the edited cell into another one selects cells instead of text.
+                if let Some((id, from)) = self.range_origin()
+                    && let Some(to) = self.cell_at(id, ev.x, ev.y, tol.handle)
+                    && to != from
+                {
+                    self.select_cells(engine, id, from, to);
+                    if let Some(d) = &mut self.drag {
+                        d.kind = DragKind::CellSelect(id);
+                    }
+                    return true;
+                }
                 if let Some((x, y)) = self.to_text_space(ev.x, ev.y)
                     && let Some(edit) = &mut self.text
                 {
                     edit.rich.pointer_drag(x, y);
                 }
-                let _ = engine;
+            }
+            DragKind::CellSelect(id) => {
+                if let Some(to) = self.cell_at(id, ev.x, ev.y, tol.handle)
+                    && let Some(range) = &mut self.cell_range
+                {
+                    range.focus = to;
+                }
             }
             DragKind::TableCol(index) | DragKind::TableRow(index) => {
                 let col = matches!(kind, DragKind::TableCol(_));
@@ -915,6 +952,9 @@ impl Editor {
 
     /// Applies a character format to the text selection, or to all text of the selected shapes.
     pub fn apply_text_style(&mut self, engine: &mut TextEngine, f: impl Fn(&mut RunStyle)) -> bool {
+        if self.cell_range.is_some() {
+            return self.style_cells(engine, &f);
+        }
         if let Some(edit) = &mut self.text {
             edit.rich.apply_style(engine, f);
             self.fit_edited_shape(engine);
@@ -954,6 +994,9 @@ impl Editor {
 
     /// Applies a paragraph format to the selected paragraphs, or to all paragraphs of the selected shapes.
     pub fn apply_paragraph(&mut self, engine: &mut TextEngine, f: impl Fn(&mut Paragraph)) -> bool {
+        if self.cell_range.is_some() {
+            return self.paragraph_cells(engine, &f);
+        }
         if let Some(edit) = &mut self.text {
             edit.rich.apply_paragraphs(engine, f);
             self.fit_edited_shape(engine);
@@ -1032,7 +1075,10 @@ impl Editor {
                 level: p.level,
             });
         }
-        let body = self.selected_shapes().into_iter().find_map(|s| s.text_bodies().next())?;
+        let body = match self.range_text_body() {
+            Some(b) => b,
+            None => self.selected_shapes().into_iter().find_map(|s| s.text_bodies().next())?,
+        };
         let p = body.paragraphs.first()?;
         Some(TextFormat {
             style: body.style_at(0),
@@ -1105,6 +1151,16 @@ impl Editor {
         }
         if self.text.is_some() {
             return self.text_key(engine, key, m);
+        }
+        if self.cell_range.is_some() {
+            match key {
+                "Backspace" | "Delete" => return self.clear_cells(engine),
+                "Escape" => {
+                    self.cell_range = None;
+                    return true;
+                }
+                _ => {}
+            }
         }
         match key {
             "Backspace" | "Delete" => self.delete_selected(),
