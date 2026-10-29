@@ -211,3 +211,112 @@ fn new_deck_from_template_round_trips() {
     assert_eq!(tb.fill, None);
     assert_eq!(re.slides[1].layout, Some(5));
 }
+
+fn table_shape(pres: &mut Presentation, rows: usize, cols: usize) -> Shape {
+    use ppt_model::table::{TableCell, TableFlags, TableRow};
+    let mut rows_v = Vec::new();
+    for r in 0..rows {
+        let cells = (0..cols)
+            .map(|c| {
+                let mut text = TextBody { insets: [91_440, 45_720, 91_440, 45_720], ..Default::default() };
+                text.set_plain_text(&format!("格{r}{c}"));
+                TableCell { text, ..Default::default() }
+            })
+            .collect();
+        rows_v.push(TableRow { height: 370_840, cells });
+    }
+    let table = ppt_model::Table {
+        cols: vec![2_000_000; cols],
+        rows: rows_v,
+        flags: TableFlags { first_row: true, band_row: true, ..Default::default() },
+        style: pres.table_style.clone(),
+    };
+    let id = pres.alloc_id();
+    let mut shape = Shape::new(id, "表格", Xfrm::new(914_400, 914_400, 2_000_000 * cols as i64, 370_840 * rows as i64));
+    shape.kind = ShapeKind::Table(Box::new(table));
+    shape
+}
+
+fn table_of(shape: &Shape) -> &ppt_model::Table {
+    match &shape.kind {
+        ShapeKind::Table(t) => t,
+        other => panic!("expected a table, got {other:?}"),
+    }
+}
+
+fn cell_texts(t: &ppt_model::Table) -> Vec<Vec<String>> {
+    t.rows.iter().map(|r| r.cells.iter().map(|c| c.text.plain_text()).collect()).collect()
+}
+
+fn slide_xml(bytes: &[u8], n: usize) -> String {
+    String::from_utf8(parts(bytes)[&format!("ppt/slides/slide{n}.xml")].clone()).unwrap()
+}
+
+#[test]
+fn new_table_round_trips_with_default_style() {
+    let mut pres = parse_pptx(&template_package()).unwrap();
+    assert!(pres.table_style.is_some(), "template should get the built-in default table style");
+    let shape = table_shape(&mut pres, 3, 2);
+    pres.slides[0].shapes.push(shape);
+    let saved = save_pptx(&pres).unwrap();
+    let re = parse_pptx(&saved).unwrap();
+    let t = table_of(re.slides[0].shapes.last().unwrap());
+    assert_eq!(t.cols, vec![2_000_000; 2]);
+    assert_eq!(cell_texts(t), vec![vec!["格00", "格01"], vec!["格10", "格11"], vec!["格20", "格21"]]);
+    assert!(t.flags.first_row && t.flags.band_row);
+    assert_eq!(t.style.as_ref().unwrap().id, "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}");
+    // Header cells take the style's white bold text.
+    assert!(t.look(0, 0).fill.is_some());
+    assert_eq!(t.rows[0].cells[0].text.style_at(0).color, Color::WHITE);
+}
+
+#[test]
+fn editing_one_cell_rewrites_only_that_cell() {
+    let mut pres = parse_pptx(&template_package()).unwrap();
+    let shape = table_shape(&mut pres, 2, 2);
+    pres.slides[0].shapes.push(shape);
+    let first = save_pptx(&pres).unwrap();
+    let mut pres = parse_pptx(&first).unwrap();
+    let ShapeKind::Table(t) = &mut pres.slides[0].shapes.last_mut().unwrap().kind else { panic!() };
+    t.rows[1].cells[1].text.set_plain_text("改過 & <新>");
+    t.cols[0] = 2_500_000;
+    let second = save_pptx(&pres).unwrap();
+
+    let (a, b) = (slide_xml(&first, 1), slide_xml(&second, 1));
+    // Untouched cells keep their XML byte for byte.
+    for text in ["格00", "格01", "格10"] {
+        let cell = |xml: &str| {
+            let at = xml.find(text).unwrap();
+            let start = xml[..at].rfind("<a:tc>").unwrap();
+            let end = at + xml[at..].find("</a:tc>").unwrap();
+            xml[start..end].to_string()
+        };
+        assert_eq!(cell(&a), cell(&b), "{text}");
+    }
+    assert!(b.contains("改過 &amp; &lt;新&gt;"));
+    let re = parse_pptx(&second).unwrap();
+    let t = table_of(re.slides[0].shapes.last().unwrap());
+    assert_eq!(t.cols[0], 2_500_000);
+    assert_eq!(cell_texts(t)[1], vec!["格10", "改過 & <新>"]);
+}
+
+#[test]
+fn table_rows_and_merges_survive_structural_edits() {
+    let mut pres = parse_pptx(&template_package()).unwrap();
+    let shape = table_shape(&mut pres, 2, 3);
+    pres.slides[0].shapes.push(shape);
+    let mut pres = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
+    let ShapeKind::Table(t) = &mut pres.slides[0].shapes.last_mut().unwrap().kind else { panic!() };
+    let mut row = t.rows[1].clone();
+    row.cells[0].text.set_plain_text("新列");
+    row.cells[0].grid_span = 2;
+    row.cells[1].h_merge = true;
+    t.rows.push(row);
+    let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
+    let t = table_of(re.slides[0].shapes.last().unwrap());
+    assert_eq!(t.rows.len(), 3);
+    assert_eq!(t.rows[2].cells[0].grid_span, 2);
+    assert!(t.rows[2].cells[1].h_merge);
+    assert_eq!(t.rows[2].cells[0].text.plain_text(), "新列");
+    assert_eq!(t.style.as_ref().unwrap().id, "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}");
+}

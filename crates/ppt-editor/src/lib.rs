@@ -4,6 +4,9 @@
 //! screen coordinates and passes tolerances already scaled to EMU.
 
 mod richedit;
+mod table;
+
+use std::collections::HashMap;
 
 use parley::BoundingBox;
 use ppt_geometry::kurbo::{Affine, Point};
@@ -151,6 +154,9 @@ enum DragKind {
     Rotate,
     TextSelect,
     Marquee { additive: bool },
+    /// Dragging the border after table column / row `index`.
+    TableCol(usize),
+    TableRow(usize),
 }
 
 struct Drag {
@@ -164,8 +170,14 @@ struct Drag {
 
 pub struct TextEdit {
     pub shape: ShapeId,
+    /// The table cell (row, column) being edited, for tables.
+    pub cell: Option<(usize, usize)>,
+    /// Slide-space frame the text sits in: the shape, or the table cell.
+    frame: Xfrm,
     pub rich: RichEdit,
     original: TextBody,
+    /// The shape's frame before editing (tables grow while typing).
+    original_xfrm: Xfrm,
     /// Remove the shape when editing ends with no text (new text boxes).
     remove_if_empty: bool,
 }
@@ -201,6 +213,8 @@ pub struct Editor {
     clipboard_slide: Option<usize>,
     /// Bumped on every document change; lets hosts cache thumbnails and know about unsaved edits.
     revision: u64,
+    /// Laid-out row heights of the current slide's tables, for hit testing without a text engine.
+    table_heights: HashMap<ShapeId, Vec<i64>>,
 }
 
 /// A snap target: (position, extent start, extent end).
@@ -229,6 +243,7 @@ impl Editor {
             paste_count: 0,
             clipboard_slide: None,
             revision: 0,
+            table_heights: HashMap::new(),
         }
     }
 
@@ -248,6 +263,7 @@ impl Editor {
         self.end_text_edit(engine);
         self.slide = index.min(self.pres.slides.len().saturating_sub(1));
         self.selection.clear();
+        self.refresh_tables(engine);
     }
 
     fn current_shapes(&self) -> &[Shape] {
@@ -304,6 +320,7 @@ impl Editor {
         let Some(snap) = self.undo.pop() else { return false };
         self.redo.push(self.snapshot());
         self.restore(snap);
+        self.refresh_tables(engine);
         true
     }
 
@@ -318,6 +335,7 @@ impl Editor {
         let Some(snap) = self.redo.pop() else { return false };
         self.undo.push(self.snapshot());
         self.restore(snap);
+        self.refresh_tables(engine);
         true
     }
 
@@ -377,13 +395,19 @@ impl Editor {
                 DragKind::TextSelect => CursorIcon::Text,
                 DragKind::Marquee { .. } => CursorIcon::Default,
                 DragKind::Resize(h) => resize_cursor(h, &drag.origs.first().map(|o| o.1).unwrap_or_default()),
+                DragKind::TableCol(_) => CursorIcon::Resize(0.0),
+                DragKind::TableRow(_) => CursorIcon::Resize(90.0),
             };
         }
         if let Some(edit) = &self.text
-            && let Some(shape) = self.pres.shape(self.slide, edit.shape)
-            && shape_contains(shape, ev.x, ev.y, tol.handle)
+            && frame_contains(&edit.frame, ev.x, ev.y, tol.handle)
         {
             return CursorIcon::Text;
+        }
+        if self.handle_at(ev.x, ev.y, tol).is_none()
+            && let Some(cursor) = self.table_cursor(ev, tol)
+        {
+            return cursor;
         }
         if let Some(h) = self.handle_at(ev.x, ev.y, tol) {
             let xfrm = self.selected_shape().map(|s| s.xfrm).unwrap_or_default();
@@ -400,9 +424,9 @@ impl Editor {
 
     /// Returns true when the view needs to be redrawn.
     pub fn pointer_down(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> bool {
-        // Clicks inside the shape being edited move the caret.
-        if let Some(edit_id) = self.text.as_ref().map(|t| t.shape) {
-            let inside = self.pres.shape(self.slide, edit_id).is_some_and(|s| shape_contains(s, ev.x, ev.y, tol.handle));
+        // Clicks inside the text being edited move the caret.
+        if let Some(frame) = self.text.as_ref().map(|t| t.frame) {
+            let inside = frame_contains(&frame, ev.x, ev.y, tol.handle);
             if inside {
                 if let Some((x, y)) = self.to_text_space(ev.x, ev.y)
                     && let Some(edit) = &mut self.text
@@ -425,6 +449,10 @@ impl Editor {
         if let Some(handle) = self.handle_at(ev.x, ev.y, tol) {
             let kind = if handle == Handle::Rotate { DragKind::Rotate } else { DragKind::Resize(handle) };
             self.drag = Some(Drag { kind, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+            return true;
+        }
+
+        if !ev.shift && !ev.meta && self.table_pointer_down(engine, ev, tol) {
             return true;
         }
 
@@ -489,6 +517,10 @@ impl Editor {
                 }
                 let _ = engine;
             }
+            DragKind::TableCol(index) | DragKind::TableRow(index) => {
+                let col = matches!(kind, DragKind::TableCol(_));
+                self.drag_table_border(engine, col, index, if col { dx } else { dy });
+            }
             DragKind::Marquee { additive } => {
                 let rect = (start.0.min(ev.x), start.1.min(ev.y), start.0.max(ev.x), start.1.max(ev.y));
                 self.marquee = Some(rect);
@@ -534,8 +566,13 @@ impl Editor {
                 if !ev.alt && !ev.shift && orig.rot == 0.0 && !is_line {
                     new = self.snap_resize(id, new, handle, tol.snap);
                 }
+                let before = self.drag.as_ref().and_then(|d| d.before.as_ref()).and_then(|b| b.pres.shape(self.slide, id).cloned());
                 if let Some(shape) = self.pres.shape_mut(self.slide, id) {
                     shape.xfrm = new;
+                    // Tables scale their grid with the frame.
+                    if let (ShapeKind::Table(t), Some(ShapeKind::Table(before))) = (&mut shape.kind, before.map(|b| b.kind)) {
+                        table::scale_grid(t, &before, new.w as f64 / orig.w.max(1) as f64, new.h as f64 / orig.h.max(1) as f64);
+                    }
                 }
             }
             DragKind::Rotate => {
@@ -669,10 +706,11 @@ impl Editor {
             body
         });
         let original = body.clone();
-        let width = text_width_pt(&shape.xfrm, body);
+        let frame = shape.xfrm;
+        let width = text_width_pt(&frame, body);
         let rich = RichEdit::new(engine, original.clone(), width);
         self.selection = vec![id];
-        self.text = Some(TextEdit { shape: id, rich, original, remove_if_empty });
+        self.text = Some(TextEdit { shape: id, cell: None, frame, rich, original, original_xfrm: frame, remove_if_empty });
     }
 
     /// Commits the edited text into the model and leaves text mode.
@@ -693,11 +731,24 @@ impl Editor {
         }
         // The snapshot must show the text as it was before editing.
         let mut before = self.snapshot();
+        let put = |shape: &mut Shape, body: TextBody| match edit.cell {
+            Some((r, c)) => {
+                if let ShapeKind::Table(t) = &mut shape.kind
+                    && let Some(cell) = t.cell_mut(r, c)
+                {
+                    cell.text = body;
+                }
+            }
+            None => shape.text = Some(body),
+        };
         if let Some(s) = before.pres.shape_mut(self.slide, edit.shape) {
-            s.text = Some(edit.original.clone());
+            put(s, edit.original.clone());
+            if edit.cell.is_some() {
+                s.xfrm = edit.original_xfrm;
+            }
         }
         if let Some(shape) = self.pres.shape_mut(self.slide, edit.shape) {
-            shape.text = Some(body);
+            put(shape, body);
             self.push_undo(before);
         }
     }
@@ -705,8 +756,7 @@ impl Editor {
     /// Maps a slide-space point to the edited text's layout space.
     fn to_text_space(&self, x: f64, y: f64) -> Option<(f32, f32)> {
         let edit = self.text.as_ref()?;
-        let shape = self.pres.shape(self.slide, edit.shape)?;
-        let p = text_affine(&shape.xfrm, &edit.rich.body, edit.rich.layout().height).inverse() * Point::new(x, y);
+        let p = text_affine(&edit.frame, &edit.rich.body, edit.rich.layout().height).inverse() * Point::new(x, y);
         Some((p.x as f32, p.y as f32))
     }
 
@@ -760,10 +810,9 @@ impl Editor {
 
     pub fn text_view(&self) -> Option<TextEditView<'_>> {
         let edit = self.text.as_ref()?;
-        let shape = self.pres.shape(self.slide, edit.shape)?;
         let layout = edit.rich.layout();
         Some(TextEditView {
-            transform: text_affine(&shape.xfrm, &edit.rich.body, layout.height),
+            transform: text_affine(&edit.frame, &edit.rich.body, layout.height),
             layout,
             selection: edit.rich.selection_rects(),
             caret: edit.rich.caret(),
@@ -774,6 +823,9 @@ impl Editor {
 
     /// Grows or shrinks an auto-fit (`spAutoFit`) shape to the edited text's height.
     fn fit_edited_shape(&mut self, engine: &mut TextEngine) {
+        if self.text.as_ref().is_some_and(|t| t.cell.is_some()) {
+            return self.fit_edited_cell(engine);
+        }
         let Some(edit) = &mut self.text else { return };
         let id = edit.shape;
         let Some(shape) = self.pres.slides.get_mut(self.slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) else { return };
@@ -785,6 +837,7 @@ impl Editor {
         let min_line = body.paragraphs.first().map(|p| p.first_style().size_pt * SINGLE_LINE_HEIGHT).unwrap_or(0.0);
         let content = edit.rich.layout().height.max(min_line) as f64;
         shape.xfrm.h = (content * EMU_PER_PT).round() as i64 + body.insets[1] + body.insets[3];
+        edit.frame = shape.xfrm;
     }
 
     pub fn selected_text(&self) -> Option<String> {
@@ -808,11 +861,11 @@ impl Editor {
             self.fit_edited_shape(engine);
             return true;
         }
-        if !self.selected_shapes().iter().any(|s| s.text.is_some()) {
+        if !self.selected_shapes().iter().any(|s| s.text_bodies().next().is_some()) {
             return false;
         }
         self.modify_selected(|shape| {
-            if let Some(body) = &mut shape.text {
+            for body in shape.text_bodies_mut() {
                 let len = body.len();
                 body.apply_style(0..len, &f);
             }
@@ -841,11 +894,11 @@ impl Editor {
             self.fit_edited_shape(engine);
             return true;
         }
-        if !self.selected_shapes().iter().any(|s| s.text.is_some()) {
+        if !self.selected_shapes().iter().any(|s| s.text_bodies().next().is_some()) {
             return false;
         }
         self.modify_selected(|shape| {
-            if let Some(body) = &mut shape.text {
+            for body in shape.text_bodies_mut() {
                 let len = body.len();
                 body.apply_paragraphs(0..len, &f);
             }
@@ -886,7 +939,7 @@ impl Editor {
             let p = edit.rich.current_paragraph();
             return Some(TextFormat { style: edit.rich.typing_style(), align: p.align, bullet: p.bullet.is_some(), level: p.level });
         }
-        let body = self.selected_shapes().into_iter().find_map(|s| s.text.as_ref())?;
+        let body = self.selected_shapes().into_iter().find_map(|s| s.text_bodies().next())?;
         let p = body.paragraphs.first()?;
         Some(TextFormat { style: body.style_at(0), align: p.align, bullet: p.bullet.is_some(), level: p.level })
     }
@@ -961,6 +1014,10 @@ impl Editor {
                 had
             }
             "Enter" | "F2" => {
+                if let Some(id) = self.selected_shape().filter(|s| matches!(s.kind, ShapeKind::Table(_))).map(|s| s.id) {
+                    self.begin_cell_edit(engine, id, 0, 0);
+                    return true;
+                }
                 let Some(id) = self.selected_shape().filter(|s| can_hold_text(s)).map(|s| s.id) else { return false };
                 self.begin_text_edit(engine, id, false);
                 true
@@ -1004,6 +1061,7 @@ impl Editor {
             "Delete" => r.delete_forward(engine, m.alt),
             // Shift+Enter is a line break inside the paragraph.
             "Enter" => r.insert(engine, if m.shift { "\u{2028}" } else { "\n" }),
+            "Tab" if edit.cell.is_some() => return self.next_cell(engine, !m.shift),
             "Tab" => {
                 // Tab at a paragraph start changes the list level, like PowerPoint.
                 let at_start = r.is_collapsed() && r.body.paragraph_ranges()[r.body.paragraph_at(r.range().start)].start == r.range().start;
@@ -1332,6 +1390,11 @@ fn selectable(shape: &Shape) -> bool {
 
 fn can_hold_text(shape: &Shape) -> bool {
     !shape.geometry.is_line() && matches!(shape.kind, ShapeKind::Shape)
+}
+
+fn frame_contains(frame: &Xfrm, x: f64, y: f64, tol: f64) -> bool {
+    let (lx, ly) = frame.to_local(x, y);
+    lx >= -tol / 2.0 && ly >= -tol / 2.0 && lx <= frame.w as f64 + tol / 2.0 && ly <= frame.h as f64 + tol / 2.0
 }
 
 fn shape_contains(shape: &Shape, x: f64, y: f64, tol: f64) -> bool {

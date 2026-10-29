@@ -18,13 +18,14 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::Error;
+use crate::table_writer::{TABLE_URI, patch_table, table_xml};
 use crate::package::{REL_NS, resolve};
 
 const NS_DECLS: &str = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#;
 const REL_BASE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
 const CT_SLIDE: &str = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
 
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -97,7 +98,7 @@ fn rels_xml(entries: &[RelEntry], owner: &str) -> String {
 }
 
 /// Applies non-overlapping `(range, replacement)` edits to `s`.
-fn apply_edits(s: &str, mut edits: Vec<(Range<usize>, String)>) -> String {
+pub(crate) fn apply_edits(s: &str, mut edits: Vec<(Range<usize>, String)>) -> String {
     edits.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
     let mut out = s.to_string();
     for (r, text) in edits {
@@ -106,12 +107,12 @@ fn apply_edits(s: &str, mut edits: Vec<(Range<usize>, String)>) -> String {
     out
 }
 
-fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
+pub(crate) fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
     n.children().find(|c| c.is_element() && c.tag_name().name() == name)
 }
 
 /// Start tag of `n` without its closing `>` or `/>`, e.g. `<p:spPr bwMode="auto"`.
-fn open_tag(src: &str, n: Node) -> String {
+pub(crate) fn open_tag(src: &str, n: Node) -> String {
     let tag = &src[n.range()];
     let end = tag.find('>').unwrap_or(tag.len());
     tag[..end].trim_end_matches('/').trim_end().to_string()
@@ -133,7 +134,7 @@ fn xfrm_xml(tag: &str, x: &Xfrm) -> String {
     format!(r#"<{tag}{attrs}><a:off x="{}" y="{}"/><a:ext cx="{}" cy="{}"/></{tag}>"#, x.x, x.y, x.w.max(0), x.h.max(0))
 }
 
-fn color_xml(c: Color) -> String {
+pub(crate) fn color_xml(c: Color) -> String {
     let alpha = if c.a < 255 { format!(r#"<a:alpha val="{}"/>"#, (c.a as f64 / 255.0 * 100_000.0).round() as i64) } else { String::new() };
     if alpha.is_empty() {
         format!(r#"<a:srgbClr val="{:02X}{:02X}{:02X}"/>"#, c.r, c.g, c.b)
@@ -297,7 +298,7 @@ fn paragraph_xml(p: &Paragraph, d: &ParaDefaults) -> String {
     out
 }
 
-fn paragraphs_xml(body: &TextBody) -> String {
+pub(crate) fn paragraphs_xml(body: &TextBody) -> String {
     let fallback = fallback_defaults();
     body.paragraphs.iter().map(|p| paragraph_xml(p, body.defaults_for(p.level).unwrap_or(&fallback))).collect()
 }
@@ -395,7 +396,7 @@ impl SlideOut<'_> {
 
 fn shape_unchanged(shape: &Shape, src: &ShapeSource) -> bool {
     let p = &src.parsed;
-    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text
+    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind
 }
 
 /// Parses a shape's XML out of context by wrapping it with its namespace declarations.
@@ -489,9 +490,15 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
                 }
             }
         }
-        "graphicFrame" if xfrm_changed => {
-            if let Some(x) = child(el, "xfrm") {
+        "graphicFrame" => {
+            if xfrm_changed && let Some(x) = child(el, "xfrm") {
                 edits.push((x.range(), xfrm_xml("p:xfrm", &shape.xfrm)));
+            }
+            if let (ShapeKind::Table(new), ShapeKind::Table(old)) = (&shape.kind, &p.kind)
+                && new != old
+                && let Some(tbl) = el.descendants().find(|n| n.is_element() && n.tag_name().name() == "tbl")
+            {
+                edits.push((tbl.range(), patch_table(&wrapped, tbl, old, new)));
             }
         }
         _ => {}
@@ -566,6 +573,11 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             let tx = shape.text.as_ref().map(new_tx_body_xml).unwrap_or_default();
             Some(format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{name}"/>{c_nv_sp_pr}{nv_pr}</p:nvSpPr>{sp_pr}{tx}</p:sp>"#))
         }
+        ShapeKind::Table(table) => Some(format!(
+            r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="{id}" name="{name}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>{}<a:graphic><a:graphicData uri="{TABLE_URI}">{}</a:graphicData></a:graphic></p:graphicFrame>"#,
+            xfrm_xml("p:xfrm", &shape.xfrm),
+            table_xml(table, None)
+        )),
         ShapeKind::Picture { media: Some(key), crop } => {
             let part = out.media.part_for(out.pres, key)?;
             let rid = out.rel_for(&format!("{REL_BASE}image"), &part, false);

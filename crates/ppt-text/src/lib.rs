@@ -13,7 +13,7 @@ use parley::{
     Alignment, AlignmentOptions, BreakReason, FontContext, FontFamily, FontFamilyName, FontStyle, FontWeight, Layout,
     LayoutContext, LineHeight, StyleProperty, YieldData,
 };
-use ppt_model::{Align, Color, EMU_PER_PT, RunStyle, TextBody};
+use ppt_model::{Align, Color, EMU_PER_PT, Emu, RunStyle, Table, TextBody};
 
 pub use parley;
 
@@ -236,6 +236,46 @@ impl TextEngine {
         let mut layout = builder.build(&text);
         layout.break_all_lines(None);
         layout
+    }
+}
+
+impl TextEngine {
+    /// Row heights of `table` in EMU: each row's minimum height, grown so every
+    /// cell's text (plus margins) fits. Merged cells grow their last row.
+    pub fn table_row_heights(&mut self, table: &Table) -> Vec<Emu> {
+        let mut heights: Vec<Emu> = table.rows.iter().map(|r| r.height.max(0)).collect();
+        let cols = table.col_offsets();
+        let mut spanning = Vec::new();
+        for (r, row) in table.rows.iter().enumerate() {
+            for (c, cell) in row.cells.iter().enumerate() {
+                if cell.is_covered() || c >= table.cols.len() {
+                    continue;
+                }
+                let end = (c + cell.grid_span.max(1) as usize).min(table.cols.len());
+                let [l, t, rt, b] = cell.text.insets;
+                let width = ((cols[end] - cols[c] - l - rt).max(0) as f64 / EMU_PER_PT) as f32;
+                let text_h = if cell.text.is_empty() {
+                    // An empty cell still holds one line at its end-of-paragraph size.
+                    cell.text.paragraphs.first().map_or(18.0, |p| p.end_style.size_pt) * SINGLE_LINE_HEIGHT
+                } else {
+                    self.layout_body(&cell.text, width).height
+                };
+                let need = (text_h as f64 * EMU_PER_PT).ceil() as Emu + t + b;
+                let span = cell.row_span.max(1) as usize;
+                if span == 1 {
+                    heights[r] = heights[r].max(need);
+                } else {
+                    spanning.push((r, (r + span).min(heights.len()), need));
+                }
+            }
+        }
+        for (start, end, need) in spanning {
+            let have: Emu = heights[start..end].iter().sum();
+            if need > have {
+                heights[end - 1] += need - have;
+            }
+        }
+        heights
     }
 }
 

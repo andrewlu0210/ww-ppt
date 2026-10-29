@@ -8,6 +8,48 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  table: (
+    <Svg>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1" />
+      <path d="M3.5 9.5h17M3.5 14.5h17M9.5 4.5v15M15 4.5v15" />
+    </Svg>
+  ),
+  rowAbove: (
+    <Svg>
+      <rect x="4" y="11" width="16" height="9" rx="1" />
+      <path d="M4 15.5h16M12 3v6M9 6h6" />
+    </Svg>
+  ),
+  rowBelow: (
+    <Svg>
+      <rect x="4" y="4" width="16" height="9" rx="1" />
+      <path d="M4 8.5h16M12 15v6M9 18h6" />
+    </Svg>
+  ),
+  colLeft: (
+    <Svg>
+      <rect x="11" y="4" width="9" height="16" rx="1" />
+      <path d="M15.5 4v16M3 12h6M6 9v6" />
+    </Svg>
+  ),
+  colRight: (
+    <Svg>
+      <rect x="4" y="4" width="9" height="16" rx="1" />
+      <path d="M8.5 4v16M15 12h6M18 9v6" />
+    </Svg>
+  ),
+  deleteRow: (
+    <Svg>
+      <rect x="4" y="8" width="16" height="8" rx="1" />
+      <path d="M9 10.5l6 3M15 10.5l-6 3" />
+    </Svg>
+  ),
+  deleteCol: (
+    <Svg>
+      <rect x="8" y="4" width="8" height="16" rx="1" />
+      <path d="M10.5 9l3 6M13.5 9l-3 6" />
+    </Svg>
+  ),
   save: (
     <Svg>
       <path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z" />

@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use parley::{Layout, PositionedLayoutItem};
 use ppt_geometry::{outlines, shape_affine, text_affine, text_width_pt};
-use ppt_model::{Color, Presentation, Shape, ShapeId, ShapeKind, Slide, TextBody, Xfrm};
+use ppt_model::table::CellLook;
+use ppt_model::{Color, Presentation, Shape, ShapeId, ShapeKind, Slide, Table, TextBody, Xfrm};
 use ppt_text::{BodyLayout, TextEngine};
 use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, Shape as _, Stroke, Vec2};
@@ -66,6 +67,8 @@ pub struct RenderCtx<'a> {
 pub struct DrawOptions {
     /// Leave out this shape's text; the caller draws it from a live editor layout.
     pub skip_text: Option<ShapeId>,
+    /// With `skip_text` on a table: the (row, column) of the cell being edited.
+    pub skip_cell: Option<(usize, usize)>,
     /// Editing view: show prompts in empty placeholders and frames for unsupported content.
     pub editing: bool,
     /// Slide units (EMU) per device pixel, for hairlines and dashes.
@@ -110,6 +113,11 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
         return;
     }
     let with_text = opts.skip_text != Some(shape.id);
+
+    if let ShapeKind::Table(table) = &shape.kind {
+        draw_table(scene, cx.engine, table, xf, view, opts.skip_cell.filter(|_| !with_text));
+        return;
+    }
 
     if let ShapeKind::Picture { media, crop } = &shape.kind {
         match media.as_deref().and_then(|m| cx.images.get(pres, m)) {
@@ -172,6 +180,39 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
             hint.apply_style(0..hint.len(), |s| s.color = Color::rgb(0x80, 0x80, 0x80));
             hint.apply_paragraphs(0..hint.len(), |p| p.bullet = None);
             draw_body(scene, cx.engine, &hint, xf, view);
+        }
+    }
+}
+
+/// Draws a table: cell fills, then text, then borders on top.
+pub fn draw_table(scene: &mut Scene, engine: &mut TextEngine, table: &Table, xf: &Xfrm, view: Affine, skip_cell: Option<(usize, usize)>) {
+    let heights = engine.table_row_heights(table);
+    let cells: Vec<(usize, usize, Xfrm)> = table.visible_cells().into_iter().map(|(r, c)| (r, c, table.cell_frame(&heights, xf, r, c))).collect();
+    let looks: Vec<CellLook> = cells.iter().map(|&(r, c, _)| table.look(r, c)).collect();
+    for ((_, _, cx), look) in cells.iter().zip(&looks) {
+        if let Some(fill) = look.fill {
+            let rect = Rect::new(cx.x as f64, cx.y as f64, (cx.x + cx.w) as f64, (cx.y + cx.h) as f64);
+            scene.fill(Fill::NonZero, view, color(fill), None, &rect);
+        }
+    }
+    for &(r, c, ref cx) in &cells {
+        let body = &table.rows[r].cells[c].text;
+        if !body.is_empty() && skip_cell != Some((r, c)) {
+            draw_body(scene, engine, body, cx, view);
+        }
+    }
+    for ((_, _, cx), look) in cells.iter().zip(&looks) {
+        let (x0, y0, x1, y1) = (cx.x as f64, cx.y as f64, (cx.x + cx.w) as f64, (cx.y + cx.h) as f64);
+        let edges = [
+            Line::new((x0, y0), (x0, y1)),
+            Line::new((x0, y0), (x1, y0)),
+            Line::new((x1, y0), (x1, y1)),
+            Line::new((x0, y1), (x1, y1)),
+        ];
+        for (edge, border) in edges.iter().zip(look.borders) {
+            if let Some(line) = border.filter(|l| l.width > 0) {
+                scene.stroke(&Stroke::new(line.width as f64), view, color(line.color), None, edge);
+            }
         }
     }
 }

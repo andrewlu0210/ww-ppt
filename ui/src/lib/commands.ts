@@ -14,6 +14,8 @@ export type Command =
   | { kind: "textBox" }
   | { kind: "shape"; preset: string }
   | { kind: "picture" }
+  | { kind: "insertTable"; rows: number; cols: number }
+  | { kind: "table"; command: "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" }
   | { kind: "newSlide"; layout?: number }
   | { kind: "duplicateSlide"; index?: number }
   | { kind: "deleteSlide"; index?: number }

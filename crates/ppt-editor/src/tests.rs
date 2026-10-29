@@ -385,3 +385,164 @@ fn utf16_offsets() {
     assert_eq!(utf16_to_byte_offset("你好a", 3), 7);
     assert_eq!(utf16_to_byte_offset("😀a", 2), 4);
 }
+
+fn table_editor(eng: &mut TextEngine, rows: usize, cols: usize) -> (Editor, ShapeId) {
+    let mut pres = Presentation::default();
+    pres.slides.push(Slide::default());
+    let mut e = Editor::new(pres);
+    assert!(e.insert_table(eng, rows, cols));
+    e.end_text_edit(eng);
+    let id = e.pres.slides[0].shapes[0].id;
+    (e, id)
+}
+
+fn table(e: &Editor, id: ShapeId) -> &ppt_model::Table {
+    match &e.pres.shape(0, id).unwrap().kind {
+        ShapeKind::Table(t) => t,
+        _ => panic!("not a table"),
+    }
+}
+
+fn cell_text(e: &Editor, id: ShapeId, r: usize, c: usize) -> String {
+    table(e, id).rows[r].cells[c].text.plain_text()
+}
+
+/// Center of cell (r, c) of an unrotated table, from the editor's own frame.
+fn cell_center(e: &Editor, id: ShapeId, r: usize, c: usize) -> (f64, f64) {
+    let shape = e.pres.shape(0, id).unwrap();
+    let t = table(e, id);
+    let heights = e.table_heights[&id].clone();
+    let f = t.cell_frame(&heights, &shape.xfrm, r, c);
+    ((f.x + f.w / 2) as f64, (f.y + f.h / 2) as f64)
+}
+
+#[test]
+fn insert_table_edits_first_cell_and_tab_moves_on() {
+    let mut eng = engine();
+    let mut pres = Presentation::default();
+    pres.slides.push(Slide::default());
+    let mut e = Editor::new(pres);
+    e.insert_table(&mut eng, 2, 2);
+    let id = e.pres.slides[0].shapes[0].id;
+    assert_eq!(e.text.as_ref().map(|t| t.cell), Some(Some((0, 0))));
+    e.insert_text(&mut eng, "標題");
+    e.key_down(&mut eng, "Tab", Modifiers::default());
+    assert_eq!(e.text.as_ref().unwrap().cell, Some((0, 1)));
+    e.insert_text(&mut eng, "B");
+    e.key_down(&mut eng, "Tab", Modifiers { shift: true, ..Default::default() });
+    assert_eq!(e.text.as_ref().unwrap().cell, Some((0, 0)));
+    // Tab selects the cell's text, so typing replaces it.
+    e.insert_text(&mut eng, "A");
+    e.key_down(&mut eng, "Escape", Modifiers::default());
+    assert_eq!((cell_text(&e, id, 0, 0), cell_text(&e, id, 0, 1)), ("A".to_string(), "B".to_string()));
+}
+
+#[test]
+fn tab_in_last_cell_adds_a_row() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 2, 2);
+    let h0 = xfrm(&e, id).h;
+    let (x, y) = cell_center(&e, id, 1, 1);
+    e.pointer_down(&mut eng, &ev(x, y), &TOL);
+    e.pointer_up(&mut eng, &ev(x, y));
+    assert_eq!(e.text.as_ref().unwrap().cell, Some((1, 1)));
+    e.key_down(&mut eng, "Tab", Modifiers::default());
+    assert_eq!(table(&e, id).rows.len(), 3);
+    assert_eq!(e.text.as_ref().unwrap().cell, Some((2, 0)));
+    assert!(xfrm(&e, id).h > h0, "the frame follows the new row");
+    e.undo(&mut eng);
+    assert_eq!(table(&e, id).rows.len(), 2);
+}
+
+#[test]
+fn rows_grow_while_typing_and_undo_restores_the_cell() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 2, 2);
+    let h0 = xfrm(&e, id).h;
+    let (x, y) = cell_center(&e, id, 0, 0);
+    e.pointer_down(&mut eng, &ev(x, y), &TOL);
+    e.pointer_up(&mut eng, &ev(x, y));
+    e.insert_text(&mut eng, "一\n二\n三\n四");
+    assert!(xfrm(&e, id).h > h0);
+    e.end_text_edit(&mut eng);
+    assert_eq!(cell_text(&e, id, 0, 0), "一\n二\n三\n四");
+    e.undo(&mut eng);
+    assert_eq!(cell_text(&e, id, 0, 0), "");
+    assert_eq!(xfrm(&e, id).h, h0);
+}
+
+#[test]
+fn dragging_a_column_line_trades_width() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 2, 3);
+    let cols = table(&e, id).cols.clone();
+    let shape = xfrm(&e, id);
+    let line_x = (shape.x + cols[0]) as f64;
+    let mid_y = (shape.y + shape.h / 2) as f64;
+    drag(&mut e, &mut eng, (line_x, mid_y), (line_x + 200_000.0, mid_y), false);
+    let after = &table(&e, id).cols;
+    assert_eq!(after[0], cols[0] + 200_000);
+    assert_eq!(after[1], cols[1] - 200_000);
+    assert_eq!(after.iter().sum::<i64>(), cols.iter().sum::<i64>());
+    assert!(e.text.is_none(), "a grid line drag is not a click into a cell");
+}
+
+#[test]
+fn insert_and_delete_rows_and_columns() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 2, 2);
+    let w0 = xfrm(&e, id).w;
+    let (x, y) = cell_center(&e, id, 0, 0);
+    e.pointer_down(&mut eng, &ev(x, y), &TOL);
+    e.pointer_up(&mut eng, &ev(x, y));
+    e.insert_text(&mut eng, "左上");
+    assert!(e.insert_table_col(&mut eng, true));
+    assert_eq!(table(&e, id).cols.len(), 3);
+    assert!(xfrm(&e, id).w > w0);
+    assert_eq!(e.text.as_ref().unwrap().cell, Some((0, 1)));
+    assert!(e.insert_table_row(&mut eng, false));
+    assert_eq!(table(&e, id).rows.len(), 3);
+    assert_eq!(cell_text(&e, id, 1, 0), "左上");
+    assert!(e.delete_table_row(&mut eng));
+    assert!(e.delete_table_col(&mut eng));
+    assert_eq!((table(&e, id).rows.len(), table(&e, id).cols.len()), (2, 2));
+    assert_eq!(cell_text(&e, id, 0, 0), "左上");
+}
+
+#[test]
+fn merged_cells_follow_row_and_column_edits() {
+    let mut eng = engine();
+    let (mut e, id) = table_editor(&mut eng, 3, 3);
+    // Merge (0,0)-(1,0) vertically and (2,0)-(2,1) horizontally.
+    if let ShapeKind::Table(t) = &mut e.pres.slides[0].shapes[0].kind {
+        t.rows[0].cells[0].row_span = 2;
+        t.rows[1].cells[0].v_merge = true;
+        t.rows[2].cells[0].grid_span = 2;
+        t.rows[2].cells[1].h_merge = true;
+    }
+    e.refresh_tables(&mut eng);
+    // A click on the covered cell edits the merged one.
+    let (x, y) = cell_center(&e, id, 0, 0);
+    e.pointer_down(&mut eng, &ev(x, y), &TOL);
+    e.pointer_up(&mut eng, &ev(x, y));
+    assert_eq!(e.text.as_ref().unwrap().cell, Some((0, 0)));
+    // A row inserted inside the vertical merge extends it.
+    e.end_text_edit(&mut eng);
+    e.begin_cell_edit(&mut eng, id, 0, 1);
+    e.insert_table_row(&mut eng, true);
+    let t = table(&e, id);
+    assert_eq!(t.rows[0].cells[0].row_span, 3);
+    assert!(t.rows[1].cells[0].v_merge);
+    // Deleting the first column (from a one-column cell) moves the horizontal merge's text along.
+    e.end_text_edit(&mut eng);
+    e.begin_cell_edit(&mut eng, id, 3, 0);
+    e.insert_text(&mut eng, "合併");
+    e.end_text_edit(&mut eng);
+    e.begin_cell_edit(&mut eng, id, 0, 0);
+    e.delete_table_col(&mut eng);
+    let t = table(&e, id);
+    assert_eq!(t.cols.len(), 2);
+    assert_eq!(t.rows[3].cells[0].grid_span, 1);
+    assert_eq!(t.rows[3].cells[0].text.plain_text(), "合併");
+    assert!(t.visible_cells().iter().all(|&(r, c)| !t.rows[r].cells[c].is_covered()));
+}

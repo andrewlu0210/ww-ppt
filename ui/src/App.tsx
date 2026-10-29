@@ -20,7 +20,7 @@ import {
 } from "./lib/backend";
 import { startAutomation } from "./lib/automation";
 import { SHAPES_MARKER, type Command } from "./lib/commands";
-import { ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
+import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import { EMPTY_STATUS, type Status } from "./lib/status";
 
 const THUMB_WIDTH = 320;
@@ -268,6 +268,12 @@ export function App() {
           if (!engine.insertPicture(await readFile(path), ext)) setError("無法讀取這個圖片檔。");
           break;
         }
+        case "insertTable":
+          engine.insertTable(c.rows, c.cols);
+          break;
+        case "table":
+          engine.tableCommand(c.command);
+          break;
         case "newSlide":
           engine.addSlide(c.layout ?? -1);
           structural = true;
@@ -384,7 +390,7 @@ export function App() {
   const onReady = useCallback(
     async (engine: Engine) => {
       engineRef.current = engine;
-      engine.setFallbackFonts(FALLBACK_FAMILIES);
+      engine.setFallbackFonts([...FALLBACK_FAMILIES, EMOJI_FAMILY]);
       if (!inTauri) setError("目前在瀏覽器中執行：沒有原生字型與檔案存取，請用 npm run tauri dev 啟動。");
       void listFonts().then(setFonts);
       await loadFonts(FALLBACK_FAMILIES);

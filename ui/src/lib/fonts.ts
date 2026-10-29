@@ -4,6 +4,9 @@ import { inTauri, readFile, resolveFont } from "./backend";
 
 /// Always available for missing glyphs: a Latin UI face and Traditional Chinese.
 export const FALLBACK_FAMILIES = ["Helvetica Neue", "PingFang TC"];
+/// Color emoji: in every font stack, but its file (~190MB) is only loaded for decks with emoji
+/// (`fontFamilies()` lists it then). Must match `EMOJI_FAMILY` in ppt-model.
+export const EMOJI_FAMILY = "Apple Color Emoji";
 
 interface FontState {
   loadedPaths: Set<string>;

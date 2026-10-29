@@ -150,7 +150,7 @@ impl App {
         {
             let pres = &self.editor.pres;
             if let Some(slide) = pres.slides.get(self.editor.slide) {
-                let opts = DrawOptions { skip_text: self.editor.text.as_ref().map(|t| t.shape), editing: true, emu_per_px: 1.0 / s };
+                let opts = DrawOptions { skip_text: self.editor.text.as_ref().map(|t| t.shape), skip_cell: self.editor.text.as_ref().and_then(|t| t.cell), editing: true, emu_per_px: 1.0 / s };
                 let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
                 draw_slide(&mut self.scene, &mut cx, pres, slide, view, &opts);
             }
@@ -213,6 +213,7 @@ impl App {
 
     fn reset_document(&mut self, pres: Presentation) {
         self.editor.load(pres);
+        self.editor.refresh_tables(&mut self.engine);
         self.images.clear();
         self.zoom = 1.0;
         self.dirty = true;
@@ -227,6 +228,8 @@ impl App {
     #[wasm_bindgen(js_name = registerFont)]
     pub fn register_font(&mut self, bytes: Vec<u8>) -> Array {
         let names = self.engine.register_font(bytes);
+        // Table rows are measured with the fonts; new faces can change their heights.
+        self.editor.refresh_tables(&mut self.engine);
         self.dirty = true;
         names.into_iter().map(JsValue::from).collect()
     }
@@ -235,6 +238,7 @@ impl App {
     #[wasm_bindgen(js_name = setFontAlias)]
     pub fn set_font_alias(&mut self, requested: &str, actual: &str) {
         self.engine.set_alias(requested, actual);
+        self.editor.refresh_tables(&mut self.engine);
         self.dirty = true;
     }
 
@@ -595,6 +599,29 @@ impl App {
         self.touch(changed)
     }
 
+    #[wasm_bindgen(js_name = insertTable)]
+    pub fn insert_table(&mut self, rows: usize, cols: usize) -> bool {
+        let changed = self.editor.insert_table(&mut self.engine, rows, cols);
+        self.touch(changed)
+    }
+
+    /// Row/column commands on the current table: `rowAbove`, `rowBelow`,
+    /// `colLeft`, `colRight`, `deleteRow`, `deleteCol`.
+    #[wasm_bindgen(js_name = tableCommand)]
+    pub fn table_command(&mut self, command: &str) -> bool {
+        let (e, eng) = (&mut self.editor, &mut self.engine);
+        let changed = match command {
+            "rowAbove" => e.insert_table_row(eng, false),
+            "rowBelow" => e.insert_table_row(eng, true),
+            "colLeft" => e.insert_table_col(eng, false),
+            "colRight" => e.insert_table_col(eng, true),
+            "deleteRow" => e.delete_table_row(eng),
+            "deleteCol" => e.delete_table_col(eng),
+            _ => false,
+        };
+        self.touch(changed)
+    }
+
     /// Inserts an image file (`ext`: png, jpg, ...). Returns false if it cannot be decoded.
     #[wasm_bindgen(js_name = insertPicture)]
     pub fn insert_picture(&mut self, bytes: Vec<u8>, ext: &str) -> bool {
@@ -671,7 +698,7 @@ impl App {
         let mut scene = Scene::new();
         {
             // Layout previews show the placeholder prompts so they are recognizable.
-            let opts = DrawOptions { skip_text: None, editing: layout, emu_per_px: 1.0 / scale };
+            let opts = DrawOptions { editing: layout, emu_per_px: 1.0 / scale, ..Default::default() };
             let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
             draw_slide(&mut scene, &mut cx, pres, &slide, Affine::scale(scale), &opts);
         }
@@ -746,6 +773,7 @@ impl App {
         set("selectionCount", (e.selection.len() as u32).into());
         set("hasSelection", (!e.selection.is_empty()).into());
         set("editingText", e.is_editing_text().into());
+        set("inTable", e.in_table().into());
         set("canUndo", e.can_undo().into());
         set("canRedo", e.can_redo().into());
         set("canPaste", e.has_clipboard().into());

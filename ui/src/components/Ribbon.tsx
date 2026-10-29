@@ -2,11 +2,14 @@ import { useState, type ReactNode } from "react";
 import { icons } from "./icons";
 import { ColorPicker } from "./ColorPicker";
 import { LayoutPicker } from "./LayoutPicker";
+import { TablePicker } from "./TablePicker";
 import { FONT_SIZES, type Command } from "../lib/commands";
 import type { Status } from "../lib/status";
 
 const TABS = ["常用", "插入", "圖形格式", "檢視"] as const;
-type Tab = (typeof TABS)[number];
+/** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
+const TABLE_TAB = "表格版面配置";
+type Tab = (typeof TABS)[number] | typeof TABLE_TAB;
 
 const SHAPES: [string, string][] = [
   ["rect", "矩形"],
@@ -50,7 +53,9 @@ interface Props {
 }
 
 export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run }: Props) {
-  const [tab, setTab] = useState<Tab>("常用");
+  const [chosen, setTab] = useState<Tab>("常用");
+  const tab = chosen === TABLE_TAB && !status.inTable ? "常用" : chosen;
+  const tabs: Tab[] = status.inTable ? [...TABS, TABLE_TAB] : [...TABS];
   const text = status.hasText;
   const shapes = status.hasSelection && !status.editingText;
   const [sizeDraft, setSizeDraft] = useState<string | null>(null);
@@ -76,8 +81,8 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
   return (
     <div className="ribbon">
       <div className="rb-tabs" role="tablist">
-        {TABS.map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "active" : ""} onClick={() => setTab(t)} onMouseDown={keepFocus}>
+        {tabs.map((t) => (
+          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", t === TABLE_TAB && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
             {t}
           </button>
         ))}
@@ -202,6 +207,12 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "插入" && (
           <>
             <Group label="投影片">{newSlide(true)}</Group>
+            <Group label="表格">
+              <TablePicker
+                onPick={(rows, cols) => run({ kind: "insertTable", rows, cols })}
+                button={(open, toggle) => <Button large active={open} icon={icons.table} label="表格" onClick={toggle} />}
+              />
+            </Group>
             <Group label="影像">
               <Button large icon={icons.picture} label="圖片" onClick={() => run({ kind: "picture" })} />
             </Group>
@@ -266,6 +277,22 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               ).map(([to, label]) => (
                 <Button key={to} icon={icons.alignShapes} label={label} disabled={!shapes} onClick={() => run({ kind: "alignShapes", to })} />
               ))}
+            </Group>
+          </>
+        )}
+        {tab === TABLE_TAB && (
+          <>
+            <Group label="列與欄">
+              <Button large icon={icons.rowAbove} label="插入上方列" onClick={() => run({ kind: "table", command: "rowAbove" })} />
+              <Button large icon={icons.rowBelow} label="插入下方列" onClick={() => run({ kind: "table", command: "rowBelow" })} />
+              <Button large icon={icons.colLeft} label="插入左方欄" onClick={() => run({ kind: "table", command: "colLeft" })} />
+              <Button large icon={icons.colRight} label="插入右方欄" onClick={() => run({ kind: "table", command: "colRight" })} />
+            </Group>
+            <Group label="刪除">
+              <div className="rb-col">
+                <Button icon={icons.deleteRow} label="刪除列" onClick={() => run({ kind: "table", command: "deleteRow" })} />
+                <Button icon={icons.deleteCol} label="刪除欄" onClick={() => run({ kind: "table", command: "deleteCol" })} />
+              </div>
             </Group>
           </>
         )}

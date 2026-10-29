@@ -7,6 +7,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
+pub use table::Table;
+
+pub mod table;
 mod text;
 
 pub type Emu = i64;
@@ -376,7 +379,9 @@ pub enum ShapeKind {
     Shape,
     /// `p:pic`; `media` is a key into [`Presentation::media`].
     Picture { media: Option<String>, crop: Crop },
-    /// Content the editor cannot edit yet (tables, charts, SmartArt, ...).
+    /// `a:tbl` in a graphic frame.
+    Table(Box<Table>),
+    /// Content the editor cannot edit yet (charts, SmartArt, ...).
     /// Kept verbatim on save; drawn as a labelled frame.
     Opaque { label: String },
 }
@@ -430,6 +435,7 @@ pub struct ParsedShape {
     pub fill: Option<Color>,
     pub line: Option<Line>,
     pub text: Option<TextBody>,
+    pub kind: ShapeKind,
 }
 
 impl ShapeSource {
@@ -438,7 +444,33 @@ impl ShapeSource {
     }
 }
 
+/// Color emoji font; large, so it is only loaded for decks that use emoji.
+pub const EMOJI_FAMILY: &str = "Apple Color Emoji";
+
+/// Characters that need the emoji font (pictographs, symbols, flags).
+pub fn is_emoji(c: char) -> bool {
+    matches!(c as u32, 0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2B50 | 0x2B55)
+}
+
 impl Shape {
+    /// The shape's own text plus, for tables, every cell's text.
+    pub fn text_bodies(&self) -> Box<dyn Iterator<Item = &TextBody> + '_> {
+        let cells: Box<dyn Iterator<Item = &TextBody>> = match &self.kind {
+            ShapeKind::Table(t) => Box::new(t.rows.iter().flat_map(|r| r.cells.iter().map(|c| &c.text))),
+            _ => Box::new(std::iter::empty()),
+        };
+        Box::new(self.text.iter().chain(cells))
+    }
+
+    /// Mutable version of [`Shape::text_bodies`].
+    pub fn text_bodies_mut(&mut self) -> Box<dyn Iterator<Item = &mut TextBody> + '_> {
+        let cells: Box<dyn Iterator<Item = &mut TextBody>> = match &mut self.kind {
+            ShapeKind::Table(t) => Box::new(t.rows.iter_mut().flat_map(|r| r.cells.iter_mut().map(|c| &mut c.text))),
+            _ => Box::new(std::iter::empty()),
+        };
+        Box::new(self.text.iter_mut().chain(cells))
+    }
+
     pub fn new(id: ShapeId, name: impl Into<String>, xfrm: Xfrm) -> Self {
         Self {
             id,
@@ -504,6 +536,8 @@ pub struct Presentation {
     pub text_defaults: Option<Arc<Vec<ParaDefaults>>>,
     /// The package the deck was loaded from; saving copies untouched parts from it.
     pub package: Option<Arc<Vec<u8>>>,
+    /// Style for new tables (the deck's default table style).
+    pub table_style: Option<Arc<table::TableStyle>>,
     next_id: u32,
 }
 
@@ -518,6 +552,7 @@ impl Default for Presentation {
             minor_font: ("Calibri".to_string(), String::new()),
             text_defaults: None,
             package: None,
+            table_style: None,
             next_id: 1,
         }
     }
@@ -591,19 +626,24 @@ impl Presentation {
         self.slides.get_mut(slide)?.shapes.iter_mut().find(|s| s.id == id)
     }
 
-    /// Every font family referenced by text on slides and layouts.
+    /// Every font family referenced by text on slides and layouts, plus
+    /// [`EMOJI_FAMILY`] when some text contains emoji.
     pub fn font_families(&self) -> Vec<String> {
         let mut out = vec![self.minor_font.0.clone(), self.minor_font.1.clone()];
         let slides = self.slides.iter().flat_map(|s| s.background_shapes.iter().chain(&s.shapes));
         let layouts = self.layouts.iter().flat_map(|l| l.background_shapes.iter().chain(&l.placeholders));
-        for shape in slides.chain(layouts) {
-            let Some(text) = &shape.text else { continue };
+        let mut emoji = false;
+        for text in slides.chain(layouts).flat_map(Shape::text_bodies) {
             for p in &text.paragraphs {
                 for style in p.runs.iter().map(|r| &r.style).chain([&p.end_style]) {
                     out.push(style.latin_font.clone());
                     out.push(style.ea_font.clone());
                 }
+                emoji = emoji || p.runs.iter().any(|r| r.text.chars().any(is_emoji));
             }
+        }
+        if emoji {
+            out.push(EMOJI_FAMILY.to_string());
         }
         out.retain(|f| !f.is_empty());
         out.sort();

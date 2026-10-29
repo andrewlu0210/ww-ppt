@@ -5,6 +5,8 @@
 
 mod package;
 mod style;
+mod table;
+mod table_writer;
 mod template;
 mod writer;
 
@@ -21,6 +23,7 @@ use ppt_model::{
     Color, ContainerSource, Crop, CustomPath, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
     PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
+use ppt_model::table::TableStyle;
 use roxmltree::{Document, Node};
 use style::{BodyProps, ColorCtx, LevelStyle, ListStyle, Theme, attr_bool, attr_f64, attr_i64, child, children, path};
 
@@ -88,6 +91,10 @@ struct Parser<'p> {
     /// Masters in the order they were first seen.
     master_order: Vec<String>,
     layouts: HashMap<String, Rc<Layout>>,
+    /// `ppt/tableStyles.xml`, read on first use.
+    table_styles_xml: Option<Option<String>>,
+    /// Resolved table styles by (master, style id); colors depend on the master's theme.
+    table_styles: HashMap<(usize, String), Option<Arc<TableStyle>>>,
 }
 
 /// Inheritance context for the shapes of one part.
@@ -152,6 +159,8 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
         masters: HashMap::new(),
         master_order: Vec::new(),
         layouts: HashMap::new(),
+        table_styles_xml: None,
+        table_styles: HashMap::new(),
     };
 
     let slide_parts = {
@@ -204,6 +213,8 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
         parser.pres.minor_font = master.ctx.theme.minor.clone();
         let finalize = |s: &LevelStyle| run_style(s, &master.ctx.theme);
         parser.pres.text_defaults = Some(Arc::new((0..9).map(|lvl| para_defaults(&master.default_text.level(lvl).clone(), &finalize)).collect()));
+        let def = table::default_style_id(parser.table_styles_xml());
+        parser.pres.table_style = parser.table_style(master, &def);
     }
     Ok(parser.pres)
 }
@@ -393,6 +404,13 @@ impl Parser<'_> {
                 }
                 "graphicFrame" => {
                     let uri = path(n, &["graphic", "graphicData"]).and_then(|g| g.attribute("uri")).unwrap_or_default();
+                    if uri.ends_with("/table")
+                        && !is_hidden(n)
+                        && let Some(shape) = self.table_frame(n, cx, group)
+                    {
+                        out.push(shape);
+                        continue;
+                    }
                     let label = if uri.ends_with("/table") {
                         "表格"
                     } else if uri.ends_with("/chart") {
@@ -408,6 +426,38 @@ impl Parser<'_> {
                 _ => out.extend(self.opaque(n, cx, group, "hidden")),
             }
         }
+    }
+
+    /// A `p:graphicFrame` holding a table.
+    fn table_frame(&mut self, n: Node, cx: &ShapeCx, group: GroupTf) -> Option<Shape> {
+        let tbl = path(n, &["graphic", "graphicData", "tbl"])?;
+        let xfrm = group.apply(child(n, "xfrm").and_then(parse_xfrm)?);
+        let name = path(n, &["nvGraphicFramePr", "cNvPr"]).and_then(|c| c.attribute("name")).unwrap_or("表格").to_string();
+        let style = table::style_id(tbl).and_then(|id| self.table_style(cx.master, &id));
+        let mut shape = Shape::new(self.pres.alloc_id(), name, xfrm);
+        shape.kind = ShapeKind::Table(Box::new(table::table(tbl, cx.master, style)));
+        shape.source = self.source_of(n, cx, &shape);
+        Some(shape)
+    }
+
+    fn table_style(&mut self, master: &Master, id: &str) -> Option<Arc<TableStyle>> {
+        let key = (master as *const Master as usize, id.to_string());
+        if let Some(s) = self.table_styles.get(&key) {
+            return s.clone();
+        }
+        let xml = self.table_styles_xml();
+        let style = table::table_style(xml, id, &master.ctx).map(Arc::new);
+        self.table_styles.insert(key, style.clone());
+        style
+    }
+
+    fn table_styles_xml(&mut self) -> Option<&str> {
+        self.table_styles_xml
+            .get_or_insert_with(|| {
+                let pres_part = self.pkg.rel_of_type("", "officeDocument").unwrap_or_else(|| "ppt/presentation.xml".to_string());
+                self.pkg.rel_of_type(&pres_part, "tableStyles").and_then(|p| self.pkg.read_string(&p).ok())
+            })
+            .as_deref()
     }
 
     /// A shape the editor shows as a frame (or not at all) and saves verbatim.
@@ -451,7 +501,7 @@ impl Parser<'_> {
             namespaces: src.namespaces.clone(),
             rels,
             container: None,
-            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill, line: shape.line, text: shape.text.clone() },
+            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill, line: shape.line, text: shape.text.clone(), kind: shape.kind.clone() },
         }))
     }
 

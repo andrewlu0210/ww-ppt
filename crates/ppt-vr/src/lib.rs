@@ -47,7 +47,8 @@ impl SlideRenderer {
             loaded_paths: HashSet::new(),
             resolved: HashSet::new(),
         };
-        this.engine.set_fallbacks(FALLBACK_FAMILIES.iter().map(|f| f.to_string()).collect());
+        // The emoji family is in the stack but only registered for decks that need it.
+        this.engine.set_fallbacks(FALLBACK_FAMILIES.iter().copied().chain([ppt_model::EMOJI_FAMILY]).map(str::to_string).collect());
         this.ensure_fonts(FALLBACK_FAMILIES.iter().map(|f| f.to_string()));
         Ok(this)
     }
@@ -80,7 +81,7 @@ impl SlideRenderer {
         {
             // A fresh image cache per deck: media keys are only unique within one package.
             let mut images = ImageCache::default();
-            let opts = DrawOptions { skip_text: None, editing: false, emu_per_px: 1.0 / scale };
+            let opts = DrawOptions { editing: false, emu_per_px: 1.0 / scale, ..Default::default() };
             let mut cx = RenderCtx { engine: &mut self.engine, images: &mut images };
             draw_slide(&mut scene, &mut cx, pres, slide, Affine::scale(scale), &opts);
         }

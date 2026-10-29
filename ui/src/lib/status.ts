@@ -5,6 +5,8 @@ export interface Status {
   selectionCount: number;
   hasSelection: boolean;
   editingText: boolean;
+  /** A table or one of its cells is the target (shows the table layout tab). */
+  inTable: boolean;
   canUndo: boolean;
   canRedo: boolean;
   canPaste: boolean;
@@ -33,6 +35,7 @@ export const EMPTY_STATUS: Status = {
   selectionCount: 0,
   hasSelection: false,
   editingText: false,
+  inTable: false,
   canUndo: false,
   canRedo: false,
   canPaste: false,
