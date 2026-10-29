@@ -5,6 +5,7 @@ import { CanvasHost, focusCanvas } from "./components/CanvasHost";
 import { Ribbon } from "./components/Ribbon";
 import { SlidePane } from "./components/SlidePane";
 import { SlideShow } from "./components/SlideShow";
+import { MIN_NOTES_HEIGHT, NotesPane, notesFocused } from "./components/NotesPane";
 import { StatusBar } from "./components/StatusBar";
 import {
   askSaveChanges,
@@ -25,6 +26,17 @@ import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import { EMPTY_STATUS, type Status } from "./lib/status";
 
 const THUMB_WIDTH = 320;
+const NOTES_KEY = "ww-ppt.notes";
+
+/** Notes pane visibility and height, remembered per machine. */
+function loadNotesPrefs(): { open: boolean; height: number } {
+  try {
+    const v = JSON.parse(localStorage.getItem(NOTES_KEY) ?? "null") as { open?: unknown; height?: unknown } | null;
+    return { open: v?.open !== false, height: typeof v?.height === "number" ? Math.max(MIN_NOTES_HEIGHT, v.height) : 110 };
+  } catch {
+    return { open: true, height: 110 };
+  }
+}
 
 interface Doc {
   name: string;
@@ -45,6 +57,14 @@ export function App() {
   const [linkRequest, setLinkRequest] = useState(0);
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
   const [showing, setShowing] = useState(false);
+  const [notesPrefs, setNotesPrefs] = useState(loadNotesPrefs);
+  useEffect(() => {
+    try {
+      localStorage.setItem(NOTES_KEY, JSON.stringify(notesPrefs));
+    } catch {
+      // Storage may be unavailable; the defaults are fine.
+    }
+  }, [notesPrefs]);
   const showingRef = useRef(false);
   showingRef.current = showing;
   /** Whether the window was already full screen when the show started (so ending it leaves it so). */
@@ -233,6 +253,10 @@ export function App() {
       if (!engine) return;
       if (c.kind === "slideShow") {
         await startShow(c.fromBeginning);
+        return;
+      }
+      if (c.kind === "toggleNotes") {
+        setNotesPrefs((p) => ({ ...p, open: !p.open }));
         return;
       }
       let structural = false;
@@ -428,11 +452,22 @@ export function App() {
       zoom_fit: { kind: "zoom", factor: "fit" },
       show_from_beginning: { kind: "slideShow", fromBeginning: true },
       show_from_current: { kind: "slideShow", fromBeginning: false },
+      toggle_notes: { kind: "toggleNotes" },
     };
     const unlisten = onMenu((id) => {
       const engine = engineRef.current;
       // Editing commands must not touch the deck while it is being presented.
       if (showingRef.current) return;
+      // In the notes pane, undo/redo/select all act on its text (WebKit's own undo history).
+      const notes = notesFocused();
+      if (notes && (id === "undo" || id === "redo")) {
+        document.execCommand(id);
+        return;
+      }
+      if (notes && id === "select_all") {
+        notes.select();
+        return;
+      }
       if (id === "insert_link") {
         setLinkRequest((n) => n + 1);
       } else if (id === "select_all" && engine) {
@@ -497,7 +532,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}
@@ -510,19 +545,31 @@ export function App() {
           run={run}
         />
         <section className={showing ? "editor-area showing" : "editor-area"}>
-          <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
-          {showing && engineRef.current && <SlideShow engine={engineRef.current} onEnd={() => void endShow()} />}
-          {error && (
-            <div className="banner" role="alert">
-              {error}
-              <button onClick={() => setError(null)} aria-label="關閉">
-                ×
-              </button>
-            </div>
+          <div className="canvas-area">
+            <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
+            {showing && engineRef.current && <SlideShow engine={engineRef.current} onEnd={() => void endShow()} />}
+            {error && (
+              <div className="banner" role="alert">
+                {error}
+                <button onClick={() => setError(null)} aria-label="關閉">
+                  ×
+                </button>
+              </div>
+            )}
+          </div>
+          {notesPrefs.open && !showing && (
+            <NotesPane
+              engine={engineRef.current}
+              slideIndex={status.slideIndex}
+              revision={status.revision}
+              height={notesPrefs.height}
+              onResize={(height) => setNotesPrefs((p) => ({ ...p, height }))}
+              onChange={refresh}
+            />
           )}
         </section>
       </main>
-      <StatusBar status={status} fontsLoading={fontsLoading} run={run} />
+      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} run={run} />
     </div>
   );
 }

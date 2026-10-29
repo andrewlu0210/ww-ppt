@@ -18,6 +18,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::Error;
+use crate::notes::{CT_NOTES_MASTER, CT_NOTES_SLIDE, CT_THEME, notes_master_xml, notes_slide_xml, notes_text, with_notes_text};
 use crate::table_writer::{TABLE_URI, patch_table, style_xml as table_style_xml, table_xml};
 use crate::package::{REL_NS, resolve};
 
@@ -374,15 +375,92 @@ fn new_tx_body_xml(body: &TextBody, out: &mut SlideOut) -> String {
 
 // --- Per-slide output -------------------------------------------------------
 
-/// Media parts created during this save, keyed by `Presentation::media` key.
+/// Relationship types whose target belongs to one reference only: PowerPoint
+/// rejects a chart or diagram part shared by two graphic frames.
+fn owned_part(kind: &str) -> bool {
+    ["/chart", "/diagramData", "/diagramLayout", "/diagramQuickStyle", "/diagramColors", "/diagramDrawing", "/oleObject", "/package"].iter().any(|k| kind.ends_with(k))
+}
+
+/// Parts created during this save: media keyed by `Presentation::media` key,
+/// and copies of owned parts (charts, diagrams) for shapes that duplicate them.
 #[derive(Default)]
 struct MediaOut {
     parts: HashMap<String, String>,
     new_files: Vec<(String, Vec<u8>)>,
     existing: HashSet<String>,
+    /// Owned part → (slide part that references it, whether that reference was written).
+    owned: HashMap<String, (String, bool)>,
+    /// Every part name in the package, including the ones created so far.
+    taken: HashSet<String>,
+    /// Content types of the original parts (`Override` entries), and the ones for copies.
+    content_types: HashMap<String, String>,
+    new_overrides: Vec<(String, String)>,
 }
 
 impl MediaOut {
+    /// The target a reference from `slide` to owned part `target` should use:
+    /// the part itself for its first (or original) reference, a fresh copy otherwise.
+    fn claim(&mut self, pres: &Presentation, target: &str, slide: &str) -> String {
+        match self.owned.get_mut(target) {
+            Some((owner, written)) if owner == slide && !*written => {
+                *written = true;
+                target.to_string()
+            }
+            Some(_) => {
+                let copy = self.copy_part(pres, target);
+                self.owned.insert(copy.clone(), (slide.to_string(), true));
+                copy
+            }
+            None => {
+                self.owned.insert(target.to_string(), (slide.to_string(), true));
+                target.to_string()
+            }
+        }
+    }
+
+    /// Whether every owned part `src` refers to is still unwritten by this slide.
+    fn owned_free(&self, src: &ShapeSource, slide: &str) -> bool {
+        src.rels.iter().filter(|(_, kind, _)| owned_part(kind)).all(|(_, _, t)| self.owned.get(t).is_none_or(|(owner, written)| owner == slide && !written))
+    }
+
+    /// Copies `part` and the parts it relates to (except shared media) under new names.
+    fn copy_part(&mut self, pres: &Presentation, part: &str) -> String {
+        let Some(pkg) = pres.package.as_ref() else { return part.to_string() };
+        let Ok(mut zip) = ZipArchive::new(Cursor::new(pkg.as_slice())) else { return part.to_string() };
+        let mut bytes = Vec::new();
+        if zip.by_name(part).map(|mut f| f.read_to_end(&mut bytes)).is_err() {
+            return part.to_string();
+        }
+        let (stem, ext) = part.rsplit_once('.').map_or((part, ""), |(s, e)| (s, e));
+        let prefix = stem.trim_end_matches(|c: char| c.is_ascii_digit());
+        let mut n = 1;
+        let copy = loop {
+            let name = format!("{prefix}{n}.{ext}");
+            if self.taken.insert(name.clone()) {
+                break name;
+            }
+            n += 1;
+        };
+        let rels = parse_rels(&read_part(&mut zip, &rels_part_of(part)).unwrap_or_default(), part);
+        if !rels.is_empty() {
+            let rels: Vec<RelEntry> = rels
+                .into_iter()
+                .map(|mut r| {
+                    if !r.external && !r.target.starts_with("ppt/media/") {
+                        r.target = self.copy_part(pres, &r.target);
+                    }
+                    r
+                })
+                .collect();
+            self.new_files.push((rels_part_of(&copy), rels_xml(&rels, &copy).into_bytes()));
+        }
+        if let Some(ct) = self.content_types.get(part).cloned() {
+            self.new_overrides.push((copy.clone(), ct));
+        }
+        self.new_files.push((copy.clone(), bytes));
+        copy
+    }
+
     fn part_for(&mut self, pres: &Presentation, key: &str) -> Option<String> {
         if self.existing.contains(key) {
             return Some(key.to_string());
@@ -482,19 +560,24 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
             edits.push((attr.range_value(), id.to_string()));
         }
     }
-    if !same_part {
-        for n in el.descendants().filter(|n| n.is_element()) {
-            for a in n.attributes().filter(|a| a.namespace() == Some(REL_NS)) {
-                if let Some((_, kind, target)) = src.rels.iter().find(|(id, _, _)| id == a.value()) {
-                    let (target, external) = match target.strip_prefix("external:") {
-                        Some(url) => (url.to_string(), true),
-                        None => (target.clone(), false),
-                    };
-                    let id = out.rel_for(kind, &target, external);
-                    if id != a.value() {
-                        edits.push((a.range_value(), id));
-                    }
-                }
+    for n in el.descendants().filter(|n| n.is_element()) {
+        for a in n.attributes().filter(|a| a.namespace() == Some(REL_NS)) {
+            let Some((_, kind, target)) = src.rels.iter().find(|(id, _, _)| id == a.value()) else { continue };
+            let (target, external) = match target.strip_prefix("external:") {
+                Some(url) => (url.to_string(), true),
+                None => (target.clone(), false),
+            };
+            let owned = !external && owned_part(kind);
+            if same_part && !owned {
+                continue;
+            }
+            let new_target = if owned { out.media.claim(out.pres, &target, &out.part) } else { target.clone() };
+            if same_part && new_target == target {
+                continue;
+            }
+            let id = out.rel_for(kind, &new_target, external);
+            if id != a.value() {
+                edits.push((a.range_value(), id));
             }
         }
     }
@@ -670,7 +753,11 @@ fn shape_xml(shape: &Shape, out: &mut SlideOut) -> String {
     let Some(src) = &shape.source else { return generate_shape(shape, out).unwrap_or_default() };
     // XML from inside a group has group-relative coordinates: always rewrite the frame.
     let grouped = src.container.is_some();
-    if !grouped && src.part == out.part && shape_unchanged(shape, src) && !out.used_ids.contains(&raw_id(src)) {
+    // The original reference keeps an owned part (chart, diagram) unless an earlier copy took it.
+    let keeps_owned = |out: &mut SlideOut| {
+        src.rels.iter().filter(|(_, kind, target)| owned_part(kind) && !target.starts_with("external:")).all(|(_, _, target)| out.media.claim(out.pres, target, &out.part) == *target)
+    };
+    if !grouped && src.part == out.part && shape_unchanged(shape, src) && !out.used_ids.contains(&raw_id(src)) && out.media.owned_free(src, &out.part) && keeps_owned(out) {
         out.need_namespaces(&src.namespaces);
         out.used_ids.insert(raw_id(src));
         src.xml().to_string()
@@ -862,6 +949,69 @@ struct SlidePlan {
     content: Option<(String, String)>,
 }
 
+/// A relationship id not used in `rels`.
+fn free_rel_id(rels: &[RelEntry]) -> String {
+    let mut n = rels.len() + 1;
+    while rels.iter().any(|r| r.id == format!("rId{n}")) {
+        n += 1;
+    }
+    format!("rId{n}")
+}
+
+/// The first `{prefix}{n}.xml` not in `taken`, which is updated.
+fn free_part(taken: &mut HashSet<String>, prefix: &str) -> String {
+    let mut n = 1;
+    loop {
+        let part = format!("{prefix}{n}.xml");
+        if taken.insert(part.clone()) {
+            return part;
+        }
+        n += 1;
+    }
+}
+
+/// Notes parts written by a save: new notes slides (and a notes master when
+/// the deck has none), and rewritten existing notes slides.
+#[derive(Default)]
+struct NotesOut {
+    master: Option<String>,
+    /// Relationship id of a notes master created by this save.
+    new_master_rel: Option<String>,
+    /// New parts with their content types (rels parts have none).
+    new_parts: Vec<(String, String, Option<&'static str>)>,
+    replaced: Vec<(String, String)>,
+}
+
+impl NotesOut {
+    /// The notes master, created (with a copy of the deck theme) when missing.
+    fn master(&mut self, zip: &mut ZipArchive<Cursor<&[u8]>>, pres: &Presentation, pres_xml: &str, pres_rels: &mut Vec<RelEntry>, taken: &mut HashSet<String>) -> String {
+        if let Some(m) = &self.master {
+            return m.clone();
+        }
+        let part = free_part(taken, "ppt/notesMasters/notesMaster");
+        let notes_size = Document::parse(pres_xml).ok().and_then(|d| {
+            let n = child(d.root_element(), "notesSz")?;
+            Some((n.attribute("cx")?.parse::<i64>().ok()?, n.attribute("cy")?.parse::<i64>().ok()?))
+        });
+        let (nw, nh) = notes_size.unwrap_or((6_858_000, 9_144_000));
+        let xml = notes_master_xml(pres.slide_width, pres.slide_height, nw, nh);
+        let mut rels = Vec::new();
+        let theme_src = pres_rels.iter().find(|r| r.kind.ends_with("/theme")).map(|r| r.target.clone());
+        if let Some(theme_xml) = theme_src.and_then(|t| read_part(zip, &t)) {
+            let theme = free_part(taken, "ppt/theme/theme");
+            rels.push(RelEntry { id: "rId1".into(), kind: format!("{REL_BASE}theme"), target: theme.clone(), external: false });
+            self.new_parts.push((theme, theme_xml, Some(CT_THEME)));
+        }
+        self.new_parts.push((rels_part_of(&part), rels_xml(&rels, &part), None));
+        self.new_parts.push((part.clone(), xml, Some(CT_NOTES_MASTER)));
+        let id = free_rel_id(pres_rels);
+        pres_rels.push(RelEntry { id: id.clone(), kind: format!("{REL_BASE}notesMaster"), target: part.clone(), external: false });
+        self.new_master_rel = Some(id);
+        self.master = Some(part.clone());
+        part
+    }
+}
+
 fn read_part(zip: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Option<String> {
     let mut f = zip.by_name(name).ok()?;
     let mut s = String::new();
@@ -898,19 +1048,83 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
     let mut next_sld_id = originals.values().map(|v| v.0).max().unwrap_or(255).max(255) + 1;
     let mut next_slide_no = all_names.iter().filter_map(|n| n.strip_prefix("ppt/slides/slide")?.strip_suffix(".xml")?.parse::<u32>().ok()).max().unwrap_or(0) + 1;
 
-    let mut media = MediaOut { existing: all_names.iter().filter(|n| n.starts_with("ppt/media/")).cloned().collect(), ..Default::default() };
+    let mut media = MediaOut {
+        existing: all_names.iter().filter(|n| n.starts_with("ppt/media/")).cloned().collect(),
+        taken: taken_parts.clone(),
+        content_types: Document::parse(&content_types)
+            .map(|d| {
+                d.root_element()
+                    .children()
+                    .filter(|n| n.tag_name().name() == "Override")
+                    .filter_map(|n| Some((n.attribute("PartName")?.trim_start_matches('/').to_string(), n.attribute("ContentType")?.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        ..Default::default()
+    };
+    // Owned parts (charts, diagrams) stay with the original slides that keep them;
+    // other references to them get copies.
+    let mut kept: HashSet<&str> = HashSet::new();
+    for slide in &pres.slides {
+        if let Some(src) = slide.source.as_ref().filter(|s| originals.contains_key(&s.part))
+            && kept.insert(src.part.as_str())
+        {
+            for r in parse_rels(&read_part(&mut zip, &rels_part_of(&src.part)).unwrap_or_default(), &src.part) {
+                if !r.external && owned_part(&r.kind) {
+                    media.owned.insert(r.target, (src.part.clone(), false));
+                }
+            }
+        }
+    }
     let mut claimed: HashSet<String> = HashSet::new();
     let mut plans: Vec<SlidePlan> = Vec::new();
+    let mut notes = NotesOut { master: pres_rels.iter().find(|r| r.kind.ends_with("/notesMaster")).map(|r| r.target.clone()), ..Default::default() };
+    // Adds a notes slide for `slide_part` to `rels` when the slide has notes.
+    let add_notes = |zip: &mut ZipArchive<Cursor<&[u8]>>, pres_rels: &mut Vec<RelEntry>, taken: &mut HashSet<String>, notes: &mut NotesOut, slide: &Slide, slide_part: &str, rels: &mut Vec<RelEntry>| {
+        if slide.notes.trim().is_empty() {
+            return false;
+        }
+        let master = notes.master(zip, pres, &pres_xml, pres_rels, taken);
+        // A duplicated slide starts from its original's notes slide (same text format),
+        // unless that part references other parts we would not carry over.
+        let template = slide.source.as_ref().and_then(|src| {
+            let rels = parse_rels(&read_part(zip, &rels_part_of(&src.part))?, &src.part);
+            let xml = read_part(zip, &rels.iter().find(|r| r.kind.ends_with("/notesSlide"))?.target)?;
+            (!xml.contains(" r:embed=") && !xml.contains(" r:id=") && !xml.contains(" r:link=")).then_some(xml)
+        });
+        let xml = template.map_or_else(|| notes_slide_xml(&slide.notes), |t| with_notes_text(&t, &slide.notes));
+        let part = free_part(taken, "ppt/notesSlides/notesSlide");
+        let notes_rels = [
+            RelEntry { id: "rId1".into(), kind: format!("{REL_BASE}notesMaster"), target: master, external: false },
+            RelEntry { id: "rId2".into(), kind: format!("{REL_BASE}slide"), target: slide_part.to_string(), external: false },
+        ];
+        notes.new_parts.push((rels_part_of(&part), rels_xml(&notes_rels, &part), None));
+        notes.new_parts.push((part.clone(), xml, Some(CT_NOTES_SLIDE)));
+        rels.push(RelEntry { id: free_rel_id(rels), kind: format!("{REL_BASE}notesSlide"), target: part, external: false });
+        true
+    };
     for slide in &pres.slides {
         let original = slide.source.as_ref().filter(|s| originals.contains_key(&s.part) && !claimed.contains(&s.part));
         if let Some(src) = original {
             claimed.insert(src.part.clone());
             let (sld_id, rel_id) = originals[&src.part].clone();
+            let rels_part = rels_part_of(&src.part);
+            let mut rels = parse_rels(&read_part(&mut zip, &rels_part).unwrap_or_default(), &src.part);
+            let mut rels_changed = false;
+            match rels.iter().find(|r| r.kind.ends_with("/notesSlide")).map(|r| r.target.clone()) {
+                Some(notes_part) => {
+                    if let Some(xml) = read_part(&mut zip, &notes_part)
+                        && notes_text(&xml) != slide.notes
+                    {
+                        notes.replaced.push((notes_part, with_notes_text(&xml, &slide.notes)));
+                    }
+                }
+                None => rels_changed = add_notes(&mut zip, &mut pres_rels, &mut taken_parts, &mut notes, slide, &src.part, &mut rels),
+            }
             let content = if slide_unchanged(slide, src) {
-                None
+                // Only the relationships change when a notes slide was added.
+                rels_changed.then(|| (src.doc.to_string(), rels_xml(&rels, &src.part)))
             } else {
-                let rels_part = rels_part_of(&src.part);
-                let rels = parse_rels(&read_part(&mut zip, &rels_part).unwrap_or_default(), &src.part);
                 let mut out = SlideOut { part: src.part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new() };
                 let xml = slide_xml(slide, Some(src), &mut out);
                 Some((xml, rels_xml(&out.rels, &src.part)))
@@ -935,12 +1149,10 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
         }
         let mut out = SlideOut { part: part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new() };
         let xml = slide_xml(slide, slide.source.as_deref(), &mut out);
-        let rels = rels_xml(&out.rels, &part);
-        let mut n = pres_rels.len() + 1;
-        while pres_rels.iter().any(|r| r.id == format!("rId{n}")) {
-            n += 1;
-        }
-        let rel_id = format!("rId{n}");
+        let mut slide_rels = out.rels;
+        add_notes(&mut zip, &mut pres_rels, &mut taken_parts, &mut notes, slide, &part, &mut slide_rels);
+        let rels = rels_xml(&slide_rels, &part);
+        let rel_id = free_rel_id(&pres_rels);
         pres_rels.push(RelEntry { id: rel_id.clone(), kind: format!("{REL_BASE}slide"), target: part.clone(), external: false });
         plans.push(SlidePlan { part, sld_id: next_sld_id, rel_id, content: Some((xml, rels)) });
         next_sld_id += 1;
@@ -1017,15 +1229,29 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
 
     // presentation.xml: new slide list.
     let list: String = plans.iter().map(|p| format!(r#"<p:sldId id="{}" r:id="{}"/>"#, p.sld_id, esc(&p.rel_id))).collect();
-    let new_pres_xml = match sld_id_lst {
-        Some(lst) => apply_edits(&pres_xml, vec![(lst.range(), format!("<p:sldIdLst>{list}</p:sldIdLst>"))]),
+    let root = pres_doc.root_element();
+    let mut pres_edits = Vec::new();
+    // A notes master created by this save is listed right after the slide masters.
+    let masters_end = child(root, "sldMasterIdLst").map(|n| n.range().end);
+    let mut notes_master_lst = notes
+        .new_master_rel
+        .as_ref()
+        .filter(|_| child(root, "notesMasterIdLst").is_none())
+        .map(|id| format!(r#"<p:notesMasterIdLst><p:notesMasterId r:id="{}"/></p:notesMasterIdLst>"#, esc(id)));
+    match sld_id_lst {
+        Some(lst) => pres_edits.push((lst.range(), format!("<p:sldIdLst>{list}</p:sldIdLst>"))),
         None => {
-            let root = pres_doc.root_element();
             let after = ["notesMasterIdLst", "handoutMasterIdLst", "sldMasterIdLst"].iter().find_map(|n| child(root, n)).map(|n| n.range().end);
             let at = after.unwrap_or(root.range().start + open_tag(&pres_xml, root).len() + 1);
-            apply_edits(&pres_xml, vec![(at..at, format!("<p:sldIdLst>{list}</p:sldIdLst>"))])
+            // Both lists go to the same place: keep their schema order.
+            let lead = if after == masters_end { notes_master_lst.take().unwrap_or_default() } else { String::new() };
+            pres_edits.push((at..at, format!("{lead}<p:sldIdLst>{list}</p:sldIdLst>")));
         }
-    };
+    }
+    if let (Some(lst), Some(at)) = (notes_master_lst, masters_end) {
+        pres_edits.push((at..at, lst));
+    }
+    let new_pres_xml = apply_edits(&pres_xml, pres_edits);
 
     // [Content_Types].xml
     let ct_doc = Document::parse(&content_types).map_err(|e| Error::Xml(e.to_string()))?;
@@ -1043,6 +1269,14 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
         let name = format!("/{}", plan.part);
         if !overrides.iter().any(|(p, _)| *p == name) {
             overrides.push((name, CT_SLIDE.to_string()));
+        }
+    }
+    for (part, ct) in &media.new_overrides {
+        overrides.push((format!("/{part}"), ct.clone()));
+    }
+    for (part, _, ct) in &notes.new_parts {
+        if let Some(ct) = ct {
+            overrides.push((format!("/{part}"), ct.to_string()));
         }
     }
     if let Some((part, _)) = &styles_update {
@@ -1100,6 +1334,10 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
             new_parts.push((part, xml.into_bytes()));
         }
     }
+    for (part, xml) in notes.replaced {
+        replaced.insert(part, xml.into_bytes());
+    }
+    new_parts.extend(notes.new_parts.into_iter().map(|(part, xml, _)| (part, xml.into_bytes())));
     new_parts.extend(media.new_files);
 
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));

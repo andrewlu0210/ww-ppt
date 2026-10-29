@@ -8,6 +8,13 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  notes: (
+    <Svg>
+      <rect x="4" y="3.5" width="16" height="17" rx="1" />
+      <rect x="7" y="6" width="10" height="5.5" />
+      <path d="M7 14.5h10M7 17.5h7" />
+    </Svg>
+  ),
   playStart: (
     <Svg>
       <rect x="3.5" y="5" width="17" height="12" rx="1" />

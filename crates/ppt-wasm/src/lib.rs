@@ -785,6 +785,26 @@ impl App {
         self.touch(changed)
     }
 
+    // --- Notes ----------------------------------------------------------------------
+
+    /// Speaker notes of slide `index` (plain text).
+    pub fn notes(&self, index: usize) -> String {
+        self.editor.notes(index).to_string()
+    }
+
+    /// Call when the notes pane gets focus: its typing becomes one undo step.
+    #[wasm_bindgen(js_name = beginNotesEdit)]
+    pub fn begin_notes_edit(&mut self) {
+        self.editor.begin_notes_edit(&mut self.engine);
+        self.dirty = true;
+    }
+
+    /// Replaces the current slide's notes.
+    #[wasm_bindgen(js_name = setNotes)]
+    pub fn set_notes(&mut self, text: &str) -> bool {
+        self.editor.set_notes(text)
+    }
+
     // --- Slide show -----------------------------------------------------------------
 
     /// Starts a slide show from the first slide or from the current one. Returns false for an empty deck.

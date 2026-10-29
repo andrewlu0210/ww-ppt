@@ -1,7 +1,7 @@
 import type { Status } from "../lib/status";
 import type { Command } from "../lib/commands";
 
-export function StatusBar({ status, fontsLoading, run }: { status: Status; fontsLoading: boolean; run: (c: Command) => void }) {
+export function StatusBar({ status, fontsLoading, notesOpen, run }: { status: Status; fontsLoading: boolean; notesOpen: boolean; run: (c: Command) => void }) {
   return (
     <footer className="status-bar">
       <span>
@@ -12,6 +12,9 @@ export function StatusBar({ status, fontsLoading, run }: { status: Status; fonts
       {fontsLoading && <span>正在載入字型…</span>}
       <span className="spacer" />
       <span className="muted">WebGPU · vello · {status.frameMs.toFixed(1)} ms</span>
+      <button className={notesOpen ? "toggle on" : "toggle"} onClick={() => run({ kind: "toggleNotes" })} onMouseDown={(e) => e.preventDefault()} aria-pressed={notesOpen} title="顯示或隱藏備忘稿">
+        備忘稿
+      </button>
       <button onClick={() => run({ kind: "zoom", factor: 0.8 })} onMouseDown={(e) => e.preventDefault()} aria-label="縮小">
         −
       </button>

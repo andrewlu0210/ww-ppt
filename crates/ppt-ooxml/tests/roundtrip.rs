@@ -433,3 +433,110 @@ fn gallery_styles_are_written_to_table_styles() {
     let again = save_pptx(&re).unwrap();
     assert_eq!(parts(&again)["ppt/tableStyles.xml"], p["ppt/tableStyles.xml"]);
 }
+
+#[test]
+fn notes_are_added_edited_and_duplicated() {
+    // The template has no notes master: the first notes create one.
+    let mut pres = parse_pptx(&template_package()).unwrap();
+    pres.slides[0].notes = "第一頁的備忘稿\n\n第三行 <&>".into();
+    let mut second = pres.slide_from_layout(1);
+    second.notes = "second".into();
+    pres.slides.push(second);
+    let blank = pres.slide_from_layout(5);
+    pres.slides.push(blank);
+
+    let saved = save_pptx(&pres).unwrap();
+    let files = parts(&saved);
+    let pres_xml = String::from_utf8(files["ppt/presentation.xml"].clone()).unwrap();
+    let (masters, notes_masters, slides) = (pres_xml.find("<p:sldMasterIdLst").unwrap(), pres_xml.find("<p:notesMasterIdLst").unwrap(), pres_xml.find("<p:sldIdLst").unwrap());
+    assert!(masters < notes_masters && notes_masters < slides, "{pres_xml}");
+    let ct = String::from_utf8(files["[Content_Types].xml"].clone()).unwrap();
+    assert!(ct.contains("/ppt/notesMasters/notesMaster1.xml") && ct.contains("/ppt/notesSlides/notesSlide2.xml"), "{ct}");
+    assert!(files.contains_key("ppt/notesMasters/_rels/notesMaster1.xml.rels"));
+    let re = parse_pptx(&saved).unwrap();
+    assert_eq!(re.slides.iter().map(|s| s.notes.as_str()).collect::<Vec<_>>(), ["第一頁的備忘稿\n\n第三行 <&>", "second", ""]);
+
+    // Editing existing notes, adding notes to a slide without them, duplicating a slide with notes.
+    let mut pres = re;
+    pres.slides[0].notes = "改過了".into();
+    pres.slides[2].notes = "後來加的".into();
+    let dup = pres.slides[1].clone();
+    pres.slides.push(dup);
+    let saved2 = save_pptx(&pres).unwrap();
+    let files2 = parts(&saved2);
+    // The existing notes master is reused, and untouched notes keep their part.
+    assert!(!files2.contains_key("ppt/notesMasters/notesMaster2.xml"));
+    assert_eq!(files["ppt/notesSlides/notesSlide2.xml"], files2["ppt/notesSlides/notesSlide2.xml"]);
+    let re = parse_pptx(&saved2).unwrap();
+    assert_eq!(re.slides.iter().map(|s| s.notes.as_str()).collect::<Vec<_>>(), ["改過了", "second", "後來加的", "second"]);
+    // Deleting a slide drops its notes.
+    let mut pres = re;
+    pres.slides.remove(0);
+    let files3 = parts(&save_pptx(&pres).unwrap());
+    assert!(!files3.contains_key("ppt/notesSlides/notesSlide1.xml"));
+}
+
+/// The template with a chart part on its first slide.
+fn template_with_chart() -> Vec<u8> {
+    use std::io::Write;
+    let src = template_package();
+    let mut zip = zip::ZipArchive::new(Cursor::new(src.as_slice())).unwrap();
+    let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default();
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).unwrap();
+        let name = f.name().unwrap().into_owned();
+        let mut text = String::new();
+        f.read_to_string(&mut text).unwrap();
+        match name.as_str() {
+            "[Content_Types].xml" => {
+                text = text.replace("</Types>", r#"<Override PartName="/ppt/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>"#)
+            }
+            "ppt/slides/_rels/slide1.xml.rels" => {
+                text = text.replace("</Relationships>", r#"<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/></Relationships>"#)
+            }
+            "ppt/slides/slide1.xml" => {
+                text = text.replace(
+                    "</p:spTree>",
+                    r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="9" name="Chart 1"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="3000000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rId9"/></a:graphicData></a:graphic></p:graphicFrame></p:spTree>"#,
+                )
+            }
+            _ => {}
+        }
+        out.start_file(name, opts).unwrap();
+        out.write_all(text.as_bytes()).unwrap();
+    }
+    out.start_file("ppt/charts/chart1.xml", opts).unwrap();
+    out.write_all(br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea/></c:chart></c:chartSpace>"#).unwrap();
+    out.finish().unwrap().into_inner()
+}
+
+#[test]
+fn duplicated_chart_slides_get_their_own_chart_part() {
+    let mut pres = parse_pptx(&template_with_chart()).unwrap();
+    assert!(pres.slides[0].shapes.iter().any(|s| s.name == "Chart 1"));
+    // Duplicate placed before the original, plus a second copy of the chart on the original slide.
+    let dup = pres.slides[0].clone();
+    pres.slides.insert(0, dup);
+    let mut again = pres.slides[1].shapes.iter().find(|s| s.name == "Chart 1").unwrap().clone();
+    again.id = pres.alloc_id();
+    pres.slides[1].shapes.push(again);
+
+    let files = parts(&save_pptx(&pres).unwrap());
+    let text = |n: &str| String::from_utf8(files[n].clone()).unwrap();
+    let chart_targets = |rels: &str| rels.split("Target=\"").skip(1).filter_map(|t| t.split('"').next()).filter(|t| t.contains("charts/")).map(str::to_string).collect::<Vec<_>>();
+    // Three chart frames across the two slides: three distinct chart parts.
+    let mut all: Vec<String> = files
+        .keys()
+        .filter(|n| n.starts_with("ppt/slides/_rels/"))
+        .flat_map(|n| chart_targets(&text(n)))
+        .collect();
+    assert_eq!(all.len(), 3, "{all:?}");
+    all.sort();
+    all.dedup();
+    assert_eq!(all.len(), 3, "{all:?}");
+    let ct = text("[Content_Types].xml");
+    for t in &all {
+        assert!(ct.contains(&format!("/ppt/charts/{}", t.rsplit('/').next().unwrap())), "{t} has no content type");
+    }
+}

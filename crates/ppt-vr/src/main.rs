@@ -95,6 +95,9 @@ fn run_deck(r: &mut SlideRenderer, pptx: &Path, pdf: &Path, dir: &Path, width: u
     if reopened.slides.len() != pres.slides.len() {
         return Err(format!("resaved deck has {} slides, expected {}", reopened.slides.len(), pres.slides.len()));
     }
+    if let Some(i) = pres.slides.iter().zip(&reopened.slides).position(|(a, b)| a.notes != b.notes) {
+        return Err(format!("page {}: notes changed by saving", i + 1));
+    }
     r.ensure_fonts(pres.font_families());
     // The resaved deck has the same media as the original, so one cache serves both.
     r.new_deck();

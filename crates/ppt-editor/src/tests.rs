@@ -842,3 +842,22 @@ fn bold_applies_to_every_selected_cell() {
     assert!(e.key_down(&mut eng, "Delete", Modifiers::default()));
     assert_eq!(cell_text(&e, id, 1, 1), "");
 }
+
+#[test]
+fn notes_typing_is_one_undo_step_per_session() {
+    let mut eng = engine();
+    let (mut e, _) = editor();
+    e.begin_notes_edit(&mut eng);
+    assert!(e.set_notes("a"));
+    assert!(e.set_notes("ab"));
+    assert!(!e.set_notes("ab"));
+    e.begin_notes_edit(&mut eng);
+    assert!(e.set_notes("abc"));
+    assert_eq!(e.notes(0), "abc");
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.notes(0), "ab");
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.notes(0), "");
+    assert!(e.redo(&mut eng));
+    assert_eq!(e.notes(0), "ab");
+}

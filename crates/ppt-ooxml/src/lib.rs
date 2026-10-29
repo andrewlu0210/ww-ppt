@@ -4,6 +4,7 @@
 //! the flat [`ppt_model`] representation. Export arrives in M1.
 
 mod chart;
+mod notes;
 mod package;
 mod style;
 mod table;
@@ -353,6 +354,11 @@ impl Parser<'_> {
         }
         for shape in slide.background_shapes.iter_mut() {
             shape.id = self.pres.alloc_id();
+        }
+        if let Some(notes_part) = rels.values().find(|r| !r.external && r.kind.ends_with("/notesSlide")).map(|r| r.target.clone())
+            && let Ok(xml) = self.pkg.read_string(&notes_part)
+        {
+            slide.notes = notes::notes_text(&xml);
         }
         slide.source = Some(Arc::new(SlideSource {
             part: part.to_string(),

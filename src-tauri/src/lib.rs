@@ -117,6 +117,8 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
         .item(&item("zoom_in", "放大", Some("CmdOrCtrl+="))?)
         .item(&item("zoom_out", "縮小", Some("CmdOrCtrl+-"))?)
         .item(&item("zoom_fit", "符合視窗大小", Some("CmdOrCtrl+0"))?)
+        .separator()
+        .item(&item("toggle_notes", "備忘稿", None)?)
         .build()?;
     let show = SubmenuBuilder::new(app, "投影片放映")
         .item(&item("show_from_beginning", "從頭播放", Some("CmdOrCtrl+Shift+Enter"))?)

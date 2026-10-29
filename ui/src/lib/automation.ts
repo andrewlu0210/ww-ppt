@@ -2,6 +2,7 @@
 // pixels relative to the canvas, e.g. `click 400 300 2`, `drag 1 2 3 4`,
 // `text 你好`, `compose ㄋㄧˇ`, `commit 你`, `key Enter meta`, `shot name`.
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import type { App } from "../wasm/ppt_wasm";
 import { inTauri, writeFile } from "./backend";
 import type { Command } from "./commands";
@@ -127,6 +128,27 @@ async function step(cmd: string, h: Hooks) {
       layer.dispatchEvent(new PointerEvent("pointerdown", { button: num(0) || 0, bubbles: true }));
       break;
     }
+    // Notes pane: type (as the user would, so WebKit's undo sees it) and read back.
+    case "notestype": {
+      const ta = document.querySelector<HTMLTextAreaElement>(".notes-input");
+      if (!ta) throw new Error("no notes pane");
+      ta.focus();
+      document.execCommand("insertText", false, rest);
+      break;
+    }
+    case "notesget": {
+      const ta = document.querySelector<HTMLTextAreaElement>(".notes-input");
+      const s = engine.status() as { slideIndex: number };
+      await log(`notes pane=${JSON.stringify(ta?.value ?? null)} engine=${JSON.stringify(engine.notes(s.slideIndex))} focused=${document.activeElement === ta}`);
+      break;
+    }
+    // Same path as a native menu item.
+    case "menu":
+      await emit("menu", args[0]);
+      break;
+    case "blur":
+      (document.activeElement as HTMLElement | null)?.blur();
+      break;
     case "showstate":
       await log(`showstate ${JSON.stringify(engine.showState())} end=${document.querySelector(".show-end") !== null} slide=${(engine.status() as { slideIndex: number }).slideIndex}`);
       break;

@@ -718,6 +718,8 @@ pub struct Slide {
     pub background: Option<Color>,
     /// Skipped in slide shows (`p:sld/@show="0"`).
     pub hidden: bool,
+    /// Speaker notes as plain text, one line per paragraph.
+    pub notes: String,
     pub source: Option<Arc<SlideSource>>,
 }
 
@@ -824,6 +826,7 @@ impl Presentation {
             shapes: fresh(layout.placeholders),
             background: layout.background,
             hidden: false,
+            notes: String::new(),
             source: None,
         }
     }

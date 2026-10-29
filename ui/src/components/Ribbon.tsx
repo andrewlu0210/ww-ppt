@@ -70,9 +70,10 @@ interface Props {
   /** Bumped by the ⌘K menu item to open the link panel. */
   linkRequest: number;
   tableStyles: TableStyleInfo[];
+  notesOpen: boolean;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = isTableTab(chosen) && !status.inTable ? "常用" : chosen;
   const tabs: Tab[] = status.inTable ? [...TABS, ...TABLE_TABS] : [...TABS];
@@ -353,11 +354,16 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
           </Group>
         )}
         {tab === "檢視" && (
-          <Group label="縮放">
-            <Button icon={icons.zoomIn} label="放大" onClick={() => run({ kind: "zoom", factor: 1.25 })} />
-            <Button icon={icons.zoomOut} label="縮小" onClick={() => run({ kind: "zoom", factor: 0.8 })} />
-            <Button icon={icons.fit} label="符合視窗" onClick={() => run({ kind: "zoom", factor: "fit" })} />
-          </Group>
+          <>
+            <Group label="顯示">
+              <Button icon={icons.notes} label="備忘稿" active={notesOpen} onClick={() => run({ kind: "toggleNotes" })} />
+            </Group>
+            <Group label="縮放">
+              <Button icon={icons.zoomIn} label="放大" onClick={() => run({ kind: "zoom", factor: 1.25 })} />
+              <Button icon={icons.zoomOut} label="縮小" onClick={() => run({ kind: "zoom", factor: 0.8 })} />
+              <Button icon={icons.fit} label="符合視窗" onClick={() => run({ kind: "zoom", factor: "fit" })} />
+            </Group>
+          </>
         )}
       </div>
     </div>

@@ -228,9 +228,52 @@ button {
 
 
 .editor-area {
-  position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+.canvas-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Speaker notes under the canvas. */
+.notes-pane {
+  position: relative;
+  flex: none;
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+
+.notes-splitter {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+  z-index: 1;
+}
+
+.notes-input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  resize: none;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  background: transparent;
+  color: inherit;
+}
+
+.notes-input::placeholder {
+  color: var(--muted);
 }
 
 /* Slide show: the editor area covers the whole (full screen) window. */
@@ -336,6 +379,14 @@ button {
   background: transparent;
   padding: 0 4px;
   cursor: default;
+}
+
+.status-bar .toggle {
+  border-radius: 3px;
+}
+
+.status-bar .toggle.on {
+  background: #dcdcdc;
 }
 
 .status-bar .zoom-value {

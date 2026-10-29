@@ -229,6 +229,8 @@ pub struct Editor {
     /// A click on a member of the selected group enters the group on release,
     /// unless the pointer moved (then it was a move): (group, member).
     pending_enter: Option<(ShapeId, ShapeId)>,
+    /// The slide whose notes typing is folded into the last undo step.
+    notes_undo: Option<usize>,
 }
 
 /// A snap target: (position, extent start, extent end).
@@ -260,6 +262,7 @@ impl Editor {
             table_heights: HashMap::new(),
             entered_group: None,
             pending_enter: None,
+            notes_undo: None,
             cell_range: None,
         }
     }
@@ -283,6 +286,34 @@ impl Editor {
         self.entered_group = None;
         self.cell_range = None;
         self.refresh_tables(engine);
+    }
+
+    /// Starts editing the current slide's notes; the edits until the next
+    /// `begin_notes_edit` (or any other change) form one undo step.
+    pub fn begin_notes_edit(&mut self, engine: &mut TextEngine) {
+        self.end_text_edit(engine);
+        self.notes_undo = None;
+    }
+
+    pub fn notes(&self, index: usize) -> &str {
+        self.pres.slides.get(index).map_or("", |s| s.notes.as_str())
+    }
+
+    /// Replaces the current slide's notes.
+    pub fn set_notes(&mut self, text: &str) -> bool {
+        let slide = self.slide;
+        if self.pres.slides.get(slide).is_none_or(|s| s.notes == text) {
+            return false;
+        }
+        if self.notes_undo == Some(slide) {
+            self.changed();
+        } else {
+            let snap = self.snapshot();
+            self.push_undo(snap);
+            self.notes_undo = Some(slide);
+        }
+        self.pres.slides[slide].notes = text.to_string();
+        true
     }
 
     fn current_shapes(&self) -> &[Shape] {
@@ -318,6 +349,7 @@ impl Editor {
     }
 
     fn push_undo(&mut self, snap: Snapshot) {
+        self.notes_undo = None;
         self.undo.push(snap);
         if self.undo.len() > UNDO_LIMIT {
             self.undo.remove(0);
@@ -327,6 +359,7 @@ impl Editor {
     }
 
     pub fn undo(&mut self, engine: &mut TextEngine) -> bool {
+        self.notes_undo = None;
         // Inside a text box, undo typing first.
         if let Some(edit) = &mut self.text
             && edit.rich.can_undo()
@@ -344,6 +377,7 @@ impl Editor {
     }
 
     pub fn redo(&mut self, engine: &mut TextEngine) -> bool {
+        self.notes_undo = None;
         if let Some(edit) = &mut self.text
             && edit.rich.redo(engine)
         {
