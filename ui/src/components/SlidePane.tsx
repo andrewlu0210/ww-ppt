@@ -6,6 +6,8 @@ interface Props {
   count: number;
   current: number;
   thumbs: Map<number, ImageData>;
+  /** Slides with a transition get a mark under their number. */
+  transitions?: boolean[];
   onSelect: (index: number) => void;
   run: (c: Command) => void;
 }
@@ -17,7 +19,7 @@ interface Menu {
 }
 
 /** Slide thumbnails: click to open, drag to reorder, right-click for slide commands. */
-export function SlidePane({ count, current, thumbs, onSelect, run }: Props) {
+export function SlidePane({ count, current, thumbs, transitions, onSelect, run }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -75,7 +77,14 @@ export function SlidePane({ count, current, thumbs, onSelect, run }: Props) {
             aria-current={i === current}
             aria-label={`投影片 ${i + 1}`}
           >
-            <span className="slide-no">{i + 1}</span>
+            <span className="slide-no">
+              {i + 1}
+              {transitions?.[i] && (
+                <span className="slide-mark" title="有轉場">
+                  ★
+                </span>
+              )}
+            </span>
             <span className="slide-card">
               <Thumb image={thumbs.get(i)} className="slide-thumb" />
             </span>

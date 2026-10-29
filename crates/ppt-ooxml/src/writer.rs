@@ -18,6 +18,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::Error;
+use crate::transition::{transition_edit, transition_xml};
 use crate::notes::{CT_NOTES_MASTER, CT_NOTES_SLIDE, CT_THEME, notes_master_xml, notes_slide_xml, notes_text, with_notes_text};
 use crate::table_writer::{TABLE_URI, patch_table, style_xml as table_style_xml, table_xml};
 use crate::package::{REL_NS, resolve};
@@ -899,8 +900,9 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
     let shapes = shapes_xml(slide, out);
     let Some(t) = template else {
         let extra: String = out.namespaces.iter().filter(|(p, _)| !matches!(p.as_str(), "a" | "r" | "p")).map(|(p, u)| format!(r#" xmlns:{p}="{}""#, esc(u))).collect();
+        let transition = slide.transition.as_ref().map(transition_xml).unwrap_or_default();
         return format!(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld {NS_DECLS}{extra}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"#
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld {NS_DECLS}{extra}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}</p:sld>"#
         );
     };
     let doc_text = &t.doc;
@@ -916,6 +918,9 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
     let close = close_tag_start(doc_text, tree);
 
     let mut edits = vec![(props_end..close, shapes)];
+    if slide.transition != t.transition {
+        edits.push(transition_edit(doc_text, root, slide.transition.as_ref()));
+    }
     // Animations that point at shapes we no longer write would make PowerPoint repair the file.
     if let Some(timing) = child(root, "timing") {
         let dangling = timing.descendants().filter_map(|n| n.attribute("spid")).filter_map(|v| v.parse::<u32>().ok()).any(|id| !out.used_ids.contains(&id));
@@ -934,7 +939,8 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
 }
 
 fn slide_unchanged(slide: &Slide, src: &SlideSource) -> bool {
-    slide.shapes.len() == src.shape_ids.len()
+    slide.transition == src.transition
+        && slide.shapes.len() == src.shape_ids.len()
         && slide.shapes.iter().zip(&src.shape_ids).all(|(s, id)| s.id == *id)
         && slide.shapes.iter().all(|s| s.source.as_ref().is_some_and(|ss| ss.part == src.part && shape_unchanged(s, ss)))
 }

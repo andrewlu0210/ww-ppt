@@ -171,7 +171,7 @@ export function PresenterView({ engine, state, command, timer, onToggleView }: P
             className="pv-current"
             style={{ aspectRatio }}
             onPointerDown={(e) => {
-              if (e.button === 0) command({ name: "next" });
+              if (e.button === 0 && state.onClick) command({ name: "next" });
             }}
           >
             {state.slide === -1 && !state.blank && <div className="pv-end-label">投影片放映結束</div>}

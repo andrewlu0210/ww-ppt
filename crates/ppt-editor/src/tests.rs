@@ -861,3 +861,20 @@ fn notes_typing_is_one_undo_step_per_session() {
     assert!(e.redo(&mut eng));
     assert_eq!(e.notes(0), "ab");
 }
+
+#[test]
+fn transitions_apply_to_one_or_all_slides_with_undo() {
+    use ppt_model::transition::{Dir, Transition, TransitionKind};
+    let mut eng = engine();
+    let (mut e, _) = editor();
+    let blank = e.pres.slide_from_layout(0);
+    e.pres.slides.push(blank);
+    let push = Transition { kind: TransitionKind::Push(Dir::Up), ..Default::default() };
+    assert!(e.set_transition(&mut eng, Some(push.clone()), false));
+    assert!(!e.set_transition(&mut eng, Some(push.clone()), false));
+    assert_eq!((e.pres.slides[0].transition.as_ref(), e.pres.slides[1].transition.as_ref()), (Some(&push), None));
+    assert!(e.set_transition(&mut eng, Some(push.clone()), true));
+    assert_eq!(e.pres.slides[1].transition.as_ref(), Some(&push));
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.pres.slides[1].transition, None);
+}

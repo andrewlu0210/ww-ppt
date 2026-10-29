@@ -316,6 +316,23 @@ impl Editor {
         true
     }
 
+    /// Sets the current slide's transition, or every slide's with `all`.
+    pub fn set_transition(&mut self, engine: &mut TextEngine, t: Option<ppt_model::Transition>, all: bool) -> bool {
+        let targets: Vec<usize> = if all { (0..self.pres.slides.len()).collect() } else { vec![self.slide] };
+        if targets.iter().all(|&i| self.pres.slides.get(i).is_none_or(|s| s.transition == t)) {
+            return false;
+        }
+        self.end_text_edit(engine);
+        let snap = self.snapshot();
+        self.push_undo(snap);
+        for i in targets {
+            if let Some(s) = self.pres.slides.get_mut(i) {
+                s.transition = t.clone();
+            }
+        }
+        true
+    }
+
     fn current_shapes(&self) -> &[Shape] {
         self.pres.slides.get(self.slide).map(|s| s.shapes.as_slice()).unwrap_or(&[])
     }

@@ -60,6 +60,17 @@ pub struct App {
     show: Option<SlideShow>,
     /// Where the show's slide goes (device pixels), instead of the whole canvas: the presenter view.
     show_viewport: Option<Rect>,
+    /// A transition being played (in the show, or as a preview in the editor).
+    anim: Option<Anim>,
+}
+
+/// A running transition: both slides pre-encoded in slide space.
+struct Anim {
+    from: Option<Scene>,
+    to: Scene,
+    kind: ppt_model::TransitionKind,
+    start_ms: f64,
+    duration_ms: f64,
 }
 
 fn js_err(e: impl std::fmt::Display) -> JsValue {
@@ -110,6 +121,7 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         media_counter: 0,
         show: None,
         show_viewport: None,
+        anim: None,
     })
 }
 
@@ -160,6 +172,40 @@ impl App {
         changed
     }
 
+    /// A slide encoded in slide space, for transitions.
+    fn slide_scene(&mut self, index: usize, s: f64) -> Option<Scene> {
+        let slide = self.editor.pres.slides.get(index)?;
+        let mut scene = Scene::new();
+        let opts = DrawOptions { editing: false, emu_per_px: 1.0 / s, ..Default::default() };
+        let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+        draw_slide(&mut scene, &mut cx, &self.editor.pres, slide, Affine::IDENTITY, &opts);
+        Some(scene)
+    }
+
+    /// Starts slide `to`'s transition from slide `from` (black for `None`), if it has one.
+    fn start_transition(&mut self, from: Option<usize>, to: usize) {
+        self.anim = None;
+        let Some(t) = self.editor.pres.slides.get(to).and_then(|s| s.transition.clone()).filter(|t| t.animates()) else { return };
+        let s = self.scale();
+        let from = from.and_then(|i| self.slide_scene(i, s));
+        let Some(to) = self.slide_scene(to, s) else { return };
+        self.anim = Some(Anim { from, to, kind: t.kind, start_ms: js_sys::Date::now(), duration_ms: t.duration_ms as f64 });
+        self.dirty = true;
+    }
+
+    /// Draws the running transition, if any; false when there is none (or it just ended).
+    fn draw_anim(&mut self, view: Affine) -> bool {
+        let Some(a) = &self.anim else { return false };
+        let t = (js_sys::Date::now() - a.start_ms) / a.duration_ms.max(1.0);
+        if t >= 1.0 {
+            self.anim = None;
+            return false;
+        }
+        let pres = &self.editor.pres;
+        ppt_render::draw_transition(&mut self.scene, a.from.as_ref(), &a.to, &a.kind, t, view, pres.slide_width as f64, pres.slide_height as f64);
+        true
+    }
+
     /// The slide show frame: the slide only, or a blank / end screen.
     fn build_show_scene(&mut self, show: &SlideShow, view: Affine, s: f64) {
         let blank = match show.blank() {
@@ -178,6 +224,9 @@ impl App {
         };
         self.scene.fill(ppt_render::vello::peniko::Fill::NonZero, Affine::IDENTITY, PColor::BLACK, None, &full);
         self.scene.fill(ppt_render::vello::peniko::Fill::NonZero, Affine::IDENTITY, blank.unwrap_or(PColor::BLACK), None, &area);
+        if blank.is_none() && self.draw_anim(view) {
+            return;
+        }
         if let (None, Screen::Slide(i)) = (blank, show.screen())
             && let Some(slide) = self.editor.pres.slides.get(i)
         {
@@ -195,6 +244,10 @@ impl App {
         if let Some(show) = self.show.take() {
             self.build_show_scene(&show, view, s);
             self.show = Some(show);
+            return;
+        }
+        // A transition preview replaces the editing view while it plays.
+        if self.draw_anim(view) {
             return;
         }
         {
@@ -836,6 +889,10 @@ impl App {
         let pres = &self.editor.pres;
         self.show = if from_beginning { SlideShow::from_beginning(pres) } else { SlideShow::new(pres, self.editor.slide) };
         self.dirty = true;
+        // The first slide's transition plays from black.
+        if let Some(Screen::Slide(i)) = self.show.as_ref().map(|s| s.screen()) {
+            self.start_transition(None, i);
+        }
         self.show.is_some()
     }
 
@@ -843,6 +900,7 @@ impl App {
     #[wasm_bindgen(js_name = endShow)]
     pub fn end_show(&mut self) {
         self.show_viewport = None;
+        self.anim = None;
         let last = self.editor.pres.slides.len().saturating_sub(1);
         match self.show.take().map(|s| s.screen()) {
             Some(Screen::Slide(i)) => self.editor.set_slide(&mut self.engine, i),
@@ -856,7 +914,14 @@ impl App {
     /// "first", "last", "black", "white", or "goto" with a 0-based `index`.
     #[wasm_bindgen(js_name = showCommand)]
     pub fn show_command(&mut self, command: &str, index: usize) -> bool {
+        // A click during a transition only finishes it.
+        if command == "next" && self.anim.take().is_some() {
+            self.dirty = true;
+            return true;
+        }
+        self.anim = None;
         let Some(show) = self.show.as_mut() else { return false };
+        let before = show.screen();
         let mut running = true;
         match command {
             "next" => running = show.advance(),
@@ -868,14 +933,23 @@ impl App {
             "white" => show.toggle_blank(Blank::White),
             _ => {}
         }
+        // Moving forward plays the incoming slide's transition.
+        if let (Screen::Slide(from), Screen::Slide(to)) = (before, show.screen())
+            && command == "next"
+            && to != from
+        {
+            self.start_transition(Some(from), to);
+        }
         self.dirty = true;
         running
     }
 
     /// Sets the show state exactly (`slide` -1 is the end screen), to mirror the presenter's window.
     #[wasm_bindgen(js_name = showSet)]
-    pub fn show_set(&mut self, slide: i32, blank: &str) {
+    /// With `animate`, a change of slide plays the new slide's transition (as the presenter's window does).
+    pub fn show_set(&mut self, slide: i32, blank: &str, animate: bool) {
         let Some(show) = self.show.as_mut() else { return };
+        let before = show.screen();
         let screen = if slide < 0 { Screen::End } else { Screen::Slide(slide as usize) };
         let blank = match blank {
             "black" => Some(Blank::Black),
@@ -883,7 +957,35 @@ impl App {
             _ => None,
         };
         show.set(screen, blank);
+        match (before, screen) {
+            (from, Screen::Slide(to)) if animate && from != screen => self.start_transition(if let Screen::Slide(f) = from { Some(f) } else { None }, to),
+            (from, _) if from != screen => self.anim = None,
+            _ => {}
+        }
         self.dirty = true;
+    }
+
+    /// Sets the current slide's transition (every slide's with `all`). `id` "none" removes it;
+    /// `after_ms` < 0 means no automatic advance.
+    #[wasm_bindgen(js_name = setTransition)]
+    pub fn set_transition(&mut self, id: &str, option: &str, duration_ms: u32, on_click: bool, after_ms: i32, all: bool) -> bool {
+        let t = match id {
+            "none" => None,
+            _ => {
+                let Some(kind) = ppt_model::TransitionKind::from_ids(id, option) else { return false };
+                Some(ppt_model::Transition { kind, duration_ms, on_click, after_ms: u32::try_from(after_ms).ok() })
+            }
+        };
+        let changed = self.editor.set_transition(&mut self.engine, t, all);
+        self.touch(changed)
+    }
+
+    /// Plays the current slide's transition in the editor (from the previous slide).
+    #[wasm_bindgen(js_name = previewTransition)]
+    pub fn preview_transition(&mut self) {
+        let i = self.editor.slide;
+        self.editor.end_text_edit(&mut self.engine);
+        self.start_transition(i.checked_sub(1), i);
     }
 
     /// Draws the show's slide into this rectangle (CSS pixels) instead of the whole canvas; w = 0 resets.
@@ -913,6 +1015,14 @@ impl App {
             Screen::Slide(i) => i as i32,
             Screen::End => -1,
         };
+        let current = match show.screen() {
+            Screen::Slide(i) => self.editor.pres.slides.get(i).and_then(|s| s.transition.clone()),
+            Screen::End => None,
+        };
+        let _ = Reflect::set(&o, &"transition".into(), &self.anim.is_some().into());
+        let _ = Reflect::set(&o, &"transitionMs".into(), &current.as_ref().filter(|t| t.animates()).map_or(0, |t| t.duration_ms).into());
+        let _ = Reflect::set(&o, &"afterMs".into(), &current.as_ref().and_then(|t| t.after_ms).map_or(-1.0, |ms| ms as f64).into());
+        let _ = Reflect::set(&o, &"onClick".into(), &current.as_ref().is_none_or(|t| t.on_click).into());
         let _ = Reflect::set(&o, &"slide".into(), &slide.into());
         let _ = Reflect::set(&o, &"next".into(), &next.into());
         let _ = Reflect::set(&o, &"count".into(), &(show.slide_count() as u32).into());
@@ -1085,6 +1195,17 @@ impl App {
         set("canUndo", e.can_undo().into());
         set("canRedo", e.can_redo().into());
         set("canPaste", e.has_clipboard().into());
+        if let Some(t) = e.pres.slides.get(e.slide).and_then(|s| s.transition.as_ref()) {
+            let o = Object::new();
+            let _ = Reflect::set(&o, &"id".into(), &t.kind.id().into());
+            let _ = Reflect::set(&o, &"option".into(), &t.kind.option().into());
+            let _ = Reflect::set(&o, &"durationMs".into(), &t.duration_ms.into());
+            let _ = Reflect::set(&o, &"onClick".into(), &t.on_click.into());
+            let _ = Reflect::set(&o, &"afterMs".into(), &t.after_ms.map_or(-1.0, |ms| ms as f64).into());
+            set("transition", o.into());
+        }
+        let marks: Array = e.pres.slides.iter().map(|s| JsValue::from(s.transition.as_ref().is_some_and(|t| t.animates()))).collect();
+        set("transitionSlides", marks.into());
         set("zoom", self.zoom.into());
         set("frameMs", self.last_frame_ms.into());
         set("revision", (e.revision() as f64).into());
@@ -1150,7 +1271,8 @@ impl App {
         gpu.surface.blitter.copy(&dev.device, &mut encoder, &gpu.surface.target_view, &view);
         dev.queue.submit([encoder.finish()]);
         dev.queue.present(texture);
-        self.dirty = false;
+        // Keep drawing frames while a transition plays.
+        self.dirty = self.anim.is_some();
         self.last_frame_ms = js_sys::Date::now() - start;
         Ok(true)
     }

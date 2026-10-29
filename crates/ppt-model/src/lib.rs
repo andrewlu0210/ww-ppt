@@ -9,10 +9,12 @@ use std::sync::Arc;
 
 pub use bullet::{Bullet, BulletKind};
 pub use table::Table;
+pub use transition::{Transition, TransitionKind};
 
 pub mod bullet;
 pub mod chart;
 pub mod table;
+pub mod transition;
 mod text;
 
 pub type Emu = i64;
@@ -720,6 +722,7 @@ pub struct Slide {
     pub hidden: bool,
     /// Speaker notes as plain text, one line per paragraph.
     pub notes: String,
+    pub transition: Option<Transition>,
     pub source: Option<Arc<SlideSource>>,
 }
 
@@ -731,6 +734,8 @@ pub struct SlideSource {
     pub namespaces: Arc<Vec<(String, String)>>,
     /// Shape ids as loaded, in order; equal to the current ids when the slide's shape list is untouched.
     pub shape_ids: Vec<ShapeId>,
+    /// The transition as loaded, to tell whether it was edited.
+    pub transition: Option<Transition>,
 }
 
 /// A slide layout: what a new slide based on it starts with.
@@ -827,6 +832,7 @@ impl Presentation {
             background: layout.background,
             hidden: false,
             notes: String::new(),
+            transition: None,
             source: None,
         }
     }

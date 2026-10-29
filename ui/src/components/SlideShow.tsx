@@ -40,7 +40,7 @@ export function SlideShow({ state, command, onToggleView }: Props) {
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
     ref.current?.focus({ preventScroll: true });
-    if (e.button === 0) command({ name: "next" });
+    if (e.button === 0 && state?.onClick !== false) command({ name: "next" });
     else if (e.button === 2) command({ name: "prev" });
   };
 

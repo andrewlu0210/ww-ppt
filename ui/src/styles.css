@@ -1015,3 +1015,50 @@ button {
 .audience canvas {
   display: block;
 }
+
+/* Transitions tab */
+.transition-gallery {
+  max-width: 640px;
+}
+
+.transition-gallery .rb-btn {
+  flex-direction: column;
+  height: auto;
+  min-width: 48px;
+  font-size: 11px;
+  gap: 1px;
+}
+
+.transition-other {
+  align-self: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 6px;
+}
+
+.rb-col .rb-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.rb-field input[type="number"],
+.rb-check input[type="number"] {
+  height: 22px;
+  width: 60px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  padding: 0 4px;
+}
+
+.rb-check input.narrow {
+  width: 48px;
+}
+
+.slide-mark {
+  display: block;
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 2px;
+}

@@ -37,6 +37,21 @@ export interface Status {
   fill?: string;
   lineColor?: string;
   lineWidth?: number;
+  /** The current slide's transition, absent when it has none. */
+  transition?: TransitionInfo;
+  /** Per slide: whether it has a (visible) transition. */
+  transitionSlides?: boolean[];
+}
+
+export interface TransitionInfo {
+  /** "fade", "push", ... ("none" in commands removes the transition). */
+  id: string;
+  /** Effect option: a direction ("l", "u", ...), "vertOut", "thruBlk", ... or "". */
+  option: string;
+  durationMs: number;
+  onClick: boolean;
+  /** Automatic advance after this long; -1 for none. */
+  afterMs: number;
 }
 
 export const EMPTY_STATUS: Status = {

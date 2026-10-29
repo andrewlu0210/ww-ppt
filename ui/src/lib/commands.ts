@@ -46,6 +46,8 @@ export type Command =
   | { kind: "zoom"; factor: number | "fit" }
   | { kind: "slideShow"; fromBeginning: boolean; presenter?: boolean; forceAudience?: boolean }
   | { kind: "usePresenter"; on: boolean }
+  | { kind: "setTransition"; id: string; option: string; durationMs: number; onClick: boolean; afterMs: number; all: boolean }
+  | { kind: "previewTransition" }
   | { kind: "toggleNotes" };
 
 /** A gallery table style with the colors its preview needs (`App::tableStyles()`). */

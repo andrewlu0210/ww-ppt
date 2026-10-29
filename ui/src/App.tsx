@@ -340,6 +340,14 @@ export function App() {
     [endShow, syncShow],
   );
 
+  // Slides set to advance by themselves (after their transition has played).
+  useEffect(() => {
+    if (!showState || showState.slide < 0 || showState.blank || showState.afterMs < 0) return;
+    const delay = showState.afterMs + (showState.transition ? showState.transitionMs : 0);
+    const id = window.setTimeout(() => showCommand({ name: "next" }), delay);
+    return () => window.clearTimeout(id);
+  }, [showState, showCommand]);
+
   // Input forwarded from the audience window; it asks for the state once it has loaded.
   useEffect(() => {
     if (!inTauri) return;
@@ -530,6 +538,13 @@ export function App() {
         case "zoom":
           engine.setZoom(c.factor === "fit" ? 1 : engine.zoom() * c.factor);
           break;
+        case "setTransition":
+          engine.setTransition(c.id, c.option, c.durationMs, c.onClick, c.afterMs, c.all);
+          structural = c.all;
+          break;
+        case "previewTransition":
+          engine.previewTransition();
+          break;
       }
       if (structural) scheduleThumbs(true);
       refresh();
@@ -645,6 +660,7 @@ export function App() {
       <main className="workspace">
         <SlidePane
           count={status.slideCount}
+          transitions={status.transitionSlides}
           current={status.slideIndex}
           thumbs={thumbs}
           onSelect={(i) => {

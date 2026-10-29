@@ -17,6 +17,8 @@ use vello::kurbo::{Affine, BezPath, Cap, Circle, Line, ParamCurve, PathEl, PathS
 use vello::peniko::{Blob, Color as PColor, ColorStop, Fill, Gradient as PGradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat, StyleRef};
 
 mod chart;
+mod transition;
+pub use transition::draw_transition;
 
 pub use vello;
 

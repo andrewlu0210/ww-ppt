@@ -166,6 +166,11 @@ async function step(cmd: string, h: Hooks) {
     case "showstate":
       await log(`showstate ${JSON.stringify(engine.showState())} end=${document.querySelector(".show-end") !== null} slide=${(engine.status() as { slideIndex: number }).slideIndex}`);
       break;
+    case "transition": {
+      const st = engine.status() as { slideIndex: number; transition?: unknown; transitionSlides?: boolean[] };
+      await log(`transition slide=${st.slideIndex} ${JSON.stringify(st.transition ?? null)} marks=${JSON.stringify(st.transitionSlides)}`);
+      break;
+    }
     case "status":
       await log(`status ${JSON.stringify(engine.status())} ime=${JSON.stringify(Array.from(engine.imeRect()))}`);
       break;

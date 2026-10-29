@@ -10,6 +10,7 @@ mod style;
 mod table;
 mod table_writer;
 mod template;
+mod transition;
 mod writer;
 
 pub use template::template_package;
@@ -337,6 +338,7 @@ impl Parser<'_> {
             layout: Some(layout.index),
             background: background(root, &master.ctx).or(layout.bg).or(master.bg).or(Some(Color::WHITE)),
             hidden: attr_bool(root, "show") == Some(false),
+            transition: transition::parse(root),
             ..Default::default()
         };
         let show_master = attr_bool(root, "showMasterSp").unwrap_or(true);
@@ -365,6 +367,7 @@ impl Parser<'_> {
             doc: xml.clone(),
             namespaces: src.namespaces.clone(),
             shape_ids: slide.shapes.iter().map(|s| s.id).collect(),
+            transition: slide.transition.clone(),
         }));
         Ok(slide)
     }

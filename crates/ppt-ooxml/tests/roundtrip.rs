@@ -540,3 +540,30 @@ fn duplicated_chart_slides_get_their_own_chart_part() {
         assert!(ct.contains(&format!("/ppt/charts/{}", t.rsplit('/').next().unwrap())), "{t} has no content type");
     }
 }
+
+#[test]
+fn transitions_round_trip_and_edit() {
+    use ppt_model::transition::{Dir, Transition, TransitionKind};
+    let mut pres = parse_pptx(&template_package()).unwrap();
+    let push = Transition { kind: TransitionKind::Push(Dir::Up), duration_ms: 1000, on_click: true, after_ms: None };
+    let wipe = Transition { kind: TransitionKind::Wipe(Dir::Down), duration_ms: 1300, on_click: false, after_ms: Some(4000) };
+    pres.slides[0].transition = Some(push.clone());
+    let mut second = pres.slide_from_layout(1);
+    second.transition = Some(wipe.clone());
+    pres.slides.push(second);
+    let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
+    assert_eq!(re.slides[0].transition.as_ref(), Some(&push));
+    assert_eq!(re.slides[1].transition.as_ref(), Some(&wipe));
+
+    // Unchanged slides keep their part; an edited transition replaces the old one; None removes it.
+    let saved = save_pptx(&re).unwrap();
+    let mut pres = parse_pptx(&saved).unwrap();
+    pres.slides[0].transition = Some(Transition { kind: TransitionKind::Circle, ..push.clone() });
+    pres.slides[1].transition = None;
+    let saved2 = save_pptx(&pres).unwrap();
+    let re = parse_pptx(&saved2).unwrap();
+    assert_eq!(re.slides[0].transition.as_ref().map(|t| &t.kind), Some(&TransitionKind::Circle));
+    assert_eq!(re.slides[1].transition, None);
+    let xml = String::from_utf8(parts(&saved2)["ppt/slides/slide1.xml"].clone()).unwrap();
+    assert_eq!(xml.matches("<p:transition").count(), 1, "{xml}");
+}

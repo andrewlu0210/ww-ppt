@@ -8,6 +8,14 @@ export interface ShowState {
   next: number;
   count: number;
   blank: "" | "black" | "white";
+  /** A transition is playing (the audience window plays it too). */
+  transition: boolean;
+  /** The current slide's transition length, 0 if it has none. */
+  transitionMs: number;
+  /** The current slide advances by itself after this long (-1: it doesn't). */
+  afterMs: number;
+  /** Mouse clicks advance (keys always do). */
+  onClick: boolean;
 }
 
 /** A navigation command for `App.showCommand` (plus "end"). */

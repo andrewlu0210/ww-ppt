@@ -96,7 +96,28 @@ impl SlideRenderer {
             let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
             draw_slide(&mut scene, &mut cx, pres, slide, Affine::scale(scale), &opts);
         }
+        self.render_scene(&scene, width, height)
+    }
 
+    /// Renders a frame of the transition from `from` (black when `None`) to `to` at progress `t`.
+    pub fn render_transition(&mut self, pres: &Presentation, from: Option<&Slide>, to: &Slide, kind: &ppt_model::TransitionKind, t: f64, width: u32) -> Result<RgbaImage, String> {
+        let height = ((width as f64) * pres.slide_height as f64 / pres.slide_width as f64).round().max(1.0) as u32;
+        let scale = width as f64 / pres.slide_width as f64;
+        let opts = DrawOptions { editing: false, emu_per_px: 1.0 / scale, ..Default::default() };
+        let mut slide_scene = |slide: &Slide| {
+            let mut s = Scene::new();
+            let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+            draw_slide(&mut s, &mut cx, pres, slide, Affine::IDENTITY, &opts);
+            s
+        };
+        let a = from.map(&mut slide_scene);
+        let b = slide_scene(to);
+        let mut scene = Scene::new();
+        ppt_render::draw_transition(&mut scene, a.as_ref(), &b, kind, t, Affine::scale(scale), pres.slide_width as f64, pres.slide_height as f64);
+        self.render_scene(&scene, width, height)
+    }
+
+    fn render_scene(&mut self, scene: &Scene, width: u32, height: u32) -> Result<RgbaImage, String> {
         let dev = &self.cx.devices[self.dev_id];
         let (device, queue) = (&dev.device, &dev.queue);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -111,7 +132,7 @@ impl SlideRenderer {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let params = RenderParams { base_color: PColor::WHITE, width, height, antialiasing_method: AaConfig::Area };
-        self.renderer.render_to_texture(device, queue, &scene, &view, &params).map_err(|e| e.to_string())?;
+        self.renderer.render_to_texture(device, queue, scene, &view, &params).map_err(|e| e.to_string())?;
 
         let padded = (width * 4).div_ceil(256) * 256;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
