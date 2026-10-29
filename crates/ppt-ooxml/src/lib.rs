@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use package::{Package, REL_NS, Rel};
 use ppt_model::{
-    Color, ContainerSource, Crop, CustomPath, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
+    Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
     PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
 use ppt_model::table::TableStyle;
@@ -215,6 +215,7 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
         parser.pres.text_defaults = Some(Arc::new((0..9).map(|lvl| para_defaults(&master.default_text.level(lvl).clone(), &finalize)).collect()));
         let def = table::default_style_id(parser.table_styles_xml());
         parser.pres.table_style = parser.table_style(master, &def);
+        parser.pres.link_color = master.ctx.scheme("hlink");
     }
     Ok(parser.pres)
 }
@@ -391,12 +392,21 @@ impl Parser<'_> {
                     } else if let Some(fallback) = child(n, "Fallback") {
                         self.sp_tree(fallback, cx, group, include_placeholders, &mut inner_out);
                     }
+                    if name == "grpSp" {
+                        // Outer groups overwrite inner ones: members belong to the outermost group.
+                        let id = self.pres.alloc_id();
+                        for shape in inner_out.iter_mut() {
+                            shape.group = Some(id);
+                        }
+                    }
                     if let Some(src) = cx.source {
                         // Children remember the outermost container so it can be saved as a unit.
                         let container = Arc::new(ContainerSource { range: n.range(), children: inner_out.len(), part: src.part.clone() });
                         for shape in inner_out.iter_mut() {
                             if let Some(s) = &shape.source {
-                                shape.source = Some(Arc::new(ShapeSource { container: Some(container.clone()), ..(**s).clone() }));
+                                let mut src = ShapeSource { container: Some(container.clone()), ..(**s).clone() };
+                                src.parsed.group = shape.group;
+                                shape.source = Some(Arc::new(src));
                             }
                         }
                     }
@@ -420,12 +430,51 @@ impl Parser<'_> {
                     } else {
                         "物件"
                     };
-                    out.extend(self.opaque(n, cx, group, label));
+                    let mut shape = self.opaque(n, cx, group, label);
+                    if uri.ends_with("/diagram")
+                        && let Some(s) = &mut shape
+                        && let Some(shapes) = self.diagram_drawing(n, cx)
+                    {
+                        s.kind = ShapeKind::Diagram { shapes: Arc::new(shapes), w: s.xfrm.w, h: s.xfrm.h };
+                        // Keep the parsed snapshot in step so an untouched diagram saves verbatim.
+                        if let Some(src) = &s.source {
+                            let mut src = (**src).clone();
+                            src.parsed.kind = s.kind.clone();
+                            s.source = Some(Arc::new(src));
+                        }
+                    }
+                    out.extend(shape);
                 }
                 // Anything else (ink, 3D models, ...) is preserved without being drawn.
                 _ => out.extend(self.opaque(n, cx, group, "hidden")),
             }
         }
+    }
+
+    /// Shapes of a SmartArt's stored drawing (`dsp:drawing`), relative to its frame.
+    fn diagram_drawing(&mut self, frame: Node, cx: &ShapeCx) -> Option<Vec<Shape>> {
+        let src = cx.source?;
+        let data_id = path(frame, &["graphic", "graphicData", "relIds"])?.attribute((REL_NS, "dm"))?;
+        let data_part = cx.rels.get(data_id)?.target.clone();
+        let data_xml = self.pkg.read_string(&data_part).ok()?;
+        // The data model names the drawing by a relationship id of the slide.
+        let drawing_id = Document::parse(&data_xml)
+            .ok()?
+            .descendants()
+            .find(|n| n.tag_name().name() == "dataModelExt")
+            .and_then(|n| n.attribute("relId").map(str::to_string));
+        let drawing_part = match drawing_id.and_then(|id| cx.rels.get(&id)) {
+            Some(rel) => rel.target.clone(),
+            None => self.pkg.rel_of_type(&src.part, "diagramDrawing")?,
+        };
+        let xml = self.pkg.read_string(&drawing_part).ok()?;
+        let doc = parse_xml(&xml).ok()?;
+        let tree = path(doc.root_element(), &["spTree"])?;
+        let rels = self.pkg.rels(&drawing_part);
+        let inner = ShapeCx { master: cx.master, ph_chain: Vec::new(), rels: &rels, source: None };
+        let mut shapes = Vec::new();
+        self.sp_tree(tree, &inner, GroupTf::IDENTITY, false, &mut shapes);
+        Some(shapes)
     }
 
     /// A `p:graphicFrame` holding a table.
@@ -435,7 +484,7 @@ impl Parser<'_> {
         let name = path(n, &["nvGraphicFramePr", "cNvPr"]).and_then(|c| c.attribute("name")).unwrap_or("表格").to_string();
         let style = table::style_id(tbl).and_then(|id| self.table_style(cx.master, &id));
         let mut shape = Shape::new(self.pres.alloc_id(), name, xfrm);
-        shape.kind = ShapeKind::Table(Box::new(table::table(tbl, cx.master, style)));
+        shape.kind = ShapeKind::Table(Box::new(table::table(tbl, cx.master, style, cx.rels)));
         shape.source = self.source_of(n, cx, &shape);
         Some(shape)
     }
@@ -501,7 +550,7 @@ impl Parser<'_> {
             namespaces: src.namespaces.clone(),
             rels,
             container: None,
-            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill, line: shape.line, text: shape.text.clone(), kind: shape.kind.clone() },
+            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill.clone(), line: shape.line, text: shape.text.clone(), kind: shape.kind.clone(), group: shape.group },
         }))
     }
 
@@ -536,11 +585,9 @@ impl Parser<'_> {
 
         let geometry = sp_pr.map(parse_geometry).unwrap_or_default();
         let fill = match sp_pr.map(|p| fill_spec(p, ctx)).unwrap_or(FillSpec::Unset) {
-            FillSpec::Solid(c) => Some(c),
+            FillSpec::Paint(p) => Some(p),
             FillSpec::None => None,
-            FillSpec::Unset => style_ref("fillRef")
-                .filter(|r| attr_i64(*r, "idx").unwrap_or(0) > 0)
-                .and_then(|r| ctx.color_in(r, None)),
+            FillSpec::Unset => style_ref("fillRef").and_then(|r| theme_fill(r, ctx)),
         };
         let line = parse_line(sp_pr.and_then(|p| child(p, "ln")), style_ref("lnRef"), ctx);
 
@@ -576,7 +623,20 @@ impl Parser<'_> {
                     ..Default::default()
                 }
             });
-            text_body(tx, cx.master, placeholder.as_ref(), &inherited, font_ref)
+            let mut body = text_body(tx, cx.master, placeholder.as_ref(), &inherited, font_ref, cx.rels);
+            // SmartArt drawings give the text its own frame (`dsp:txXfrm`): fold it into the insets.
+            if let Some(tx_frame) = child(n, "txXfrm").and_then(parse_xfrm).map(|x| group.apply(x))
+                && xfrm.rot == 0.0
+            {
+                let [l, t, r, b] = body.insets;
+                body.insets = [
+                    l + (tx_frame.x - xfrm.x).max(0),
+                    t + (tx_frame.y - xfrm.y).max(0),
+                    r + (xfrm.x + xfrm.w - tx_frame.x - tx_frame.w).max(0),
+                    b + (xfrm.y + xfrm.h - tx_frame.y - tx_frame.h).max(0),
+                ];
+            }
+            body
         });
 
         let mut shape = Shape {
@@ -589,6 +649,7 @@ impl Parser<'_> {
             line,
             text,
             placeholder,
+            group: None,
             source: None,
         };
         shape.source = self.source_of(n, cx, &shape);
@@ -642,7 +703,7 @@ fn background(root: Node, ctx: &ColorCtx) -> Option<Color> {
     let bg = path(root, &["cSld", "bg"])?;
     if let Some(pr) = child(bg, "bgPr") {
         return match fill_spec(pr, ctx) {
-            FillSpec::Solid(c) => Some(c),
+            FillSpec::Paint(p) => Some(p.color()),
             _ => None,
         };
     }
@@ -760,19 +821,81 @@ fn arc_to(n: Node, cur: (f64, f64), cmds: &mut Vec<PathCmd>) -> (f64, f64) {
 enum FillSpec {
     Unset,
     None,
+    Paint(Paint),
+}
+
+impl FillSpec {
+    /// The fill as one color (gradients by their first stop), for lines and table cells.
+    fn color(self) -> FillSpecColor {
+        match self {
+            FillSpec::Paint(p) => FillSpecColor::Solid(p.color()),
+            FillSpec::None => FillSpecColor::None,
+            FillSpec::Unset => FillSpecColor::Unset,
+        }
+    }
+}
+
+enum FillSpecColor {
+    Unset,
+    None,
     Solid(Color),
+}
+
+/// The theme fill a `a:fillRef` points at, colored with the reference's color (`phClr`).
+fn theme_fill(r: Node, ctx: &ColorCtx) -> Option<Paint> {
+    let idx = attr_i64(r, "idx").unwrap_or(0);
+    let ph = ctx.color_in(r, None);
+    // 0 means no fill; 1001+ are background styles, which shapes rarely use: treat as solid.
+    if idx <= 0 {
+        return None;
+    }
+    let xml = ctx.theme.fill_styles.get(idx as usize - 1).filter(|_| idx < 1000);
+    let Some(xml) = xml else { return ph.map(Paint::Solid) };
+    let doc = Document::parse(xml).ok()?;
+    let fill = doc.root_element().first_element_child()?;
+    match fill.tag_name().name() {
+        "solidFill" => ctx.color_in(fill, ph).map(Paint::Solid),
+        "gradFill" => gradient(fill, ctx, ph).map(|g| Paint::Gradient(Arc::new(g))),
+        "noFill" => None,
+        _ => ph.map(Paint::Solid),
+    }
+}
+
+/// `a:gradFill`. Stops are sorted; positions are fractions. `ph` fills in `phClr`.
+fn gradient(g: Node, ctx: &ColorCtx, ph: Option<Color>) -> Option<Gradient> {
+    let mut stops: Vec<(f32, Color)> = path(g, &["gsLst"])
+        .map(|l| {
+            children(l, "gs")
+                .filter_map(|gs| Some(((attr_f64(gs, "pos").unwrap_or(0.0) / 100_000.0) as f32, ctx.color_in(gs, ph)?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    if stops.is_empty() {
+        return None;
+    }
+    let kind = if let Some(lin) = child(g, "lin") {
+        GradientKind::Linear { angle: attr_f64(lin, "ang").unwrap_or(0.0) / 60_000.0, scaled: attr_bool(lin, "scaled").unwrap_or(false) }
+    } else if let Some(p) = child(g, "path") {
+        let focus = child(p, "fillToRect")
+            .map(|r| ["l", "t", "r", "b"].map(|k| attr_f64(r, k).unwrap_or(0.0) / 100_000.0))
+            .unwrap_or([0.5; 4]);
+        GradientKind::Path { circle: p.attribute("path") == Some("circle"), focus }
+    } else {
+        // No direction given: PowerPoint shades top to bottom.
+        GradientKind::Linear { angle: 90.0, scaled: false }
+    };
+    Some(Gradient { stops, kind, rotate_with_shape: attr_bool(g, "rotWithShape").unwrap_or(true) })
 }
 
 fn fill_spec(n: Node, ctx: &ColorCtx) -> FillSpec {
     for c in n.children().filter(|c| c.is_element()) {
         match c.tag_name().name() {
             "noFill" => return FillSpec::None,
-            "solidFill" => return ctx.color_in(c, None).map(FillSpec::Solid).unwrap_or(FillSpec::None),
-            // Gradients render as their first stop until real gradient support lands.
-            "gradFill" => {
-                return path(c, &["gsLst", "gs"]).and_then(|gs| ctx.color_in(gs, None)).map(FillSpec::Solid).unwrap_or(FillSpec::None);
-            }
-            "pattFill" => return child(c, "fgClr").and_then(|f| ctx.color_in(f, None)).map(FillSpec::Solid).unwrap_or(FillSpec::None),
+            "solidFill" => return ctx.color_in(c, None).map(|c| FillSpec::Paint(Paint::Solid(c))).unwrap_or(FillSpec::None),
+            "gradFill" => return gradient(c, ctx, None).map(|g| FillSpec::Paint(Paint::Gradient(Arc::new(g)))).unwrap_or(FillSpec::None),
+            // Patterns show as their foreground color.
+            "pattFill" => return child(c, "fgClr").and_then(|f| ctx.color_in(f, None)).map(|c| FillSpec::Paint(Paint::Solid(c))).unwrap_or(FillSpec::None),
             "blipFill" | "grpFill" => return FillSpec::None,
             _ => {}
         }
@@ -783,17 +906,34 @@ fn fill_spec(n: Node, ctx: &ColorCtx) -> FillSpec {
 fn parse_line(ln: Option<Node>, ln_ref: Option<Node>, ctx: &ColorCtx) -> Option<Line> {
     let ref_idx = ln_ref.and_then(|r| attr_i64(r, "idx")).unwrap_or(0);
     let ref_color = ln_ref.filter(|_| ref_idx > 0).and_then(|r| ctx.color_in(r, None));
-    let color = match ln.map(|l| fill_spec(l, ctx)).unwrap_or(FillSpec::Unset) {
-        FillSpec::Solid(c) => c,
-        FillSpec::None => return None,
-        FillSpec::Unset => ref_color?,
+    let color = match ln.map(|l| fill_spec(l, ctx).color()).unwrap_or(FillSpecColor::Unset) {
+        FillSpecColor::Solid(c) => c,
+        FillSpecColor::None => return None,
+        FillSpecColor::Unset => ref_color?,
     };
     let ref_width = ctx.theme.line_widths.get((ref_idx as usize).wrapping_sub(1)).copied();
     let width = ln.and_then(|l| attr_i64(l, "w")).or(ref_width).unwrap_or(9525);
-    Some(Line { color, width })
+    let ln_child = |name: &str| ln.and_then(|l| child(l, name));
+    let end = |name: &str| {
+        ln_child(name).map_or(LineEnd::NONE, |e| {
+            let size = |a: &str| match e.attribute(a) {
+                Some("sm") => 0,
+                Some("lg") => 2,
+                _ => 1,
+            };
+            LineEnd { kind: EndKind::parse(e.attribute("type").unwrap_or("none")), width: size("w"), length: size("len") }
+        })
+    };
+    Some(Line {
+        color,
+        width,
+        dash: ln_child("prstDash").and_then(|d| d.attribute("val")).map_or(Dash::Solid, Dash::parse),
+        head: end("headEnd"),
+        tail: end("tailEnd"),
+    })
 }
 
-fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&PhInfo], font_ref: Option<LevelStyle>) -> TextBody {
+fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&PhInfo], font_ref: Option<LevelStyle>, rels: &HashMap<String, Rel>) -> TextBody {
     let theme = &master.ctx.theme;
     let ctx = &master.ctx;
     let body = inherited.iter().fold(BodyProps::parse(child(tx, "bodyPr")), |acc, p| acc.or(&p.body));
@@ -834,8 +974,19 @@ fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&
                 match c.tag_name().name() {
                     "r" | "fld" => {
                         let rstyle = child(c, "rPr").map(|r| LevelStyle::parse_rpr(r, ctx)).unwrap_or_default().or(&pstyle);
-                        let text: String = child(c, "t").and_then(|t| t.text()).unwrap_or_default().to_string();
-                        runs.push(Run { text, style: finalize(&rstyle) });
+                        let raw = child(c, "t").and_then(|t| t.text()).unwrap_or_default();
+                        // Symbol-font codes (U+F020..U+F0FF) become the characters they stand for.
+                        let sym = child(c, "rPr").and_then(|r| child(r, "sym")).and_then(|f| f.attribute("typeface")).unwrap_or("Wingdings");
+                        let text: String = raw
+                            .chars()
+                            .map(|ch| match ch as u32 {
+                                0xF020..=0xF0FF => ppt_model::bullet::symbol_char(sym, ch).or_else(|| ppt_model::bullet::symbol_char("Wingdings", ch)).unwrap_or(ch),
+                                _ => ch,
+                            })
+                            .collect();
+                        let mut style = finalize(&rstyle);
+                        style.link = child(c, "rPr").and_then(|r| child(r, "hlinkClick")).map(|h| hyperlink(h, rels, ctx));
+                        runs.push(Run { text, style });
                     }
                     // Soft line break inside a paragraph.
                     "br" => {
@@ -852,7 +1003,7 @@ fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&
                 runs,
                 align: pstyle.align.unwrap_or_default(),
                 level: lvl,
-                bullet: pstyle.bullet.flatten(),
+                bullet: pstyle.bullet(),
                 line_spacing: pstyle.line_spacing.unwrap_or(1.0),
                 mar_l: pstyle.mar_l.unwrap_or(0),
                 indent: pstyle.indent.unwrap_or(0),
@@ -876,6 +1027,19 @@ fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&
     }
 }
 
+/// `a:hlinkClick`: the relationship it names (if any) and its action.
+fn hyperlink(h: Node, rels: &HashMap<String, Rel>, ctx: &ColorCtx) -> Arc<Link> {
+    let rel = h.attribute((REL_NS, "id")).filter(|id| !id.is_empty()).and_then(|id| rels.get(id));
+    Arc::new(Link {
+        kind: rel.map_or_else(|| Link::HYPERLINK.to_string(), |r| r.kind.clone()),
+        target: rel.map(|r| r.target.clone()).unwrap_or_default(),
+        external: rel.is_some_and(|r| r.external),
+        action: h.attribute("action").map(str::to_string),
+        tooltip: h.attribute("tooltip").map(str::to_string),
+        color: ctx.scheme("hlink"),
+    })
+}
+
 /// Resolves inherited run properties, falling back to theme fonts and 18pt black.
 fn run_style(s: &LevelStyle, theme: &Theme) -> RunStyle {
     RunStyle {
@@ -886,6 +1050,7 @@ fn run_style(s: &LevelStyle, theme: &Theme) -> RunStyle {
         color: s.color.unwrap_or(Color::BLACK),
         latin_font: theme.resolve_typeface(s.latin.as_deref().unwrap_or("+mn-lt")),
         ea_font: theme.resolve_typeface(s.ea.as_deref().unwrap_or("+mn-ea")),
+        link: None,
     }
 }
 
@@ -893,7 +1058,7 @@ fn para_defaults(s: &LevelStyle, finalize: &dyn Fn(&LevelStyle) -> RunStyle) -> 
     let style = finalize(s);
     ParaDefaults {
         align: s.align.unwrap_or_default(),
-        bullet: s.bullet.flatten(),
+        bullet: s.bullet(),
         line_spacing: s.line_spacing.unwrap_or(1.0),
         mar_l: s.mar_l.unwrap_or(0),
         indent: s.indent.unwrap_or(0),

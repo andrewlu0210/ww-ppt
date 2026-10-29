@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ppt_model::{Align, Anchor, Color, Emu};
+use ppt_model::{Align, Anchor, Bullet, BulletKind, Color, Emu};
 use roxmltree::Node;
 
 pub(crate) fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
@@ -36,6 +36,9 @@ pub struct Theme {
     pub minor: (String, String),
     /// Widths of `a:fmtScheme/a:lnStyleLst` entries, referenced by `a:lnRef@idx`.
     pub line_widths: Vec<Emu>,
+    /// `a:fillStyleLst` entries (XML, `a:` namespace declared on a wrapper),
+    /// referenced by `a:fillRef@idx` 1..; `phClr` is resolved per use.
+    pub fill_styles: Vec<String>,
 }
 
 impl Theme {
@@ -54,6 +57,11 @@ impl Theme {
                     theme.colors.insert(entry.tag_name().name().to_string(), color);
                 }
             }
+        }
+        if let Some(list) = path(elements, &["themeElements", "fmtScheme", "fillStyleLst"]) {
+            let ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+            theme.fill_styles =
+                list.children().filter(|c| c.is_element()).map(|c| format!(r#"<w xmlns:a="{ns}">{}</w>"#, &xml[c.range()])).collect();
         }
         if let Some(fonts) = path(elements, &["themeElements", "fontScheme"]) {
             let read = |name: &str| {
@@ -245,8 +253,12 @@ pub struct LevelStyle {
     pub ea: Option<String>,
     pub align: Option<Align>,
     pub line_spacing: Option<f32>,
-    /// `Some(None)` is an explicit `a:buNone`.
-    pub bullet: Option<Option<char>>,
+    /// Bullet parts inherit independently; `Some(None)` is an explicit
+    /// `a:buNone` / `a:buFontTx` / `a:buClrTx` / `a:buSzTx`.
+    pub bu_kind: Option<Option<BulletKind>>,
+    pub bu_font: Option<Option<String>>,
+    pub bu_color: Option<Option<Color>>,
+    pub bu_size: Option<Option<f32>>,
     pub mar_l: Option<Emu>,
     pub indent: Option<Emu>,
     pub space_before: Option<Spacing>,
@@ -283,8 +295,14 @@ impl LevelStyle {
         macro_rules! take {
             ($($f:ident),*) => { $( if self.$f.is_none() { self.$f = fallback.$f.clone(); } )* };
         }
-        take!(size, bold, italic, underline, color, latin, ea, align, line_spacing, bullet, mar_l, indent, space_before, space_after);
+        take!(size, bold, italic, underline, color, latin, ea, align, line_spacing, bu_kind, bu_font, bu_color, bu_size, mar_l, indent, space_before, space_after);
         self
+    }
+
+    /// The resolved bullet, if the level has one.
+    pub fn bullet(&self) -> Option<Bullet> {
+        let kind = self.bu_kind.clone().flatten()?;
+        Some(Bullet { kind, font: self.bu_font.clone().flatten(), color: self.bu_color.flatten(), size: self.bu_size.flatten() })
     }
 
     /// Parses run properties (`a:rPr`, `a:defRPr`, `a:endParaRPr`).
@@ -318,13 +336,25 @@ impl LevelStyle {
         style.indent = attr_i64(n, "indent");
         style.space_before = child(n, "spcBef").and_then(Spacing::parse);
         style.space_after = child(n, "spcAft").and_then(Spacing::parse);
-        if child(n, "buNone").is_some() {
-            style.bullet = Some(None);
-        } else if let Some(bu) = child(n, "buChar") {
-            style.bullet = Some(bu.attribute("char").and_then(|c| c.chars().next()));
-        } else if child(n, "buAutoNum").is_some() {
-            // Numbered lists are rendered without numbers until M1.
-            style.bullet = Some(Some('•'));
+        for c in n.children().filter(|c| c.is_element()) {
+            match c.tag_name().name() {
+                "buNone" => style.bu_kind = Some(None),
+                "buChar" => style.bu_kind = Some(c.attribute("char").and_then(|ch| ch.chars().next()).map(BulletKind::Char)),
+                "buAutoNum" => {
+                    let scheme = c.attribute("type").unwrap_or("arabicPeriod").to_string();
+                    let start = attr_i64(c, "startAt").unwrap_or(1).max(1) as u32;
+                    style.bu_kind = Some(Some(BulletKind::AutoNum { scheme, start }));
+                }
+                // Picture bullets show as a plain dot for now.
+                "buBlip" => style.bu_kind = Some(Some(BulletKind::Char('•'))),
+                "buFontTx" => style.bu_font = Some(None),
+                "buFont" => style.bu_font = Some(c.attribute("typeface").map(str::to_string)),
+                "buClrTx" => style.bu_color = Some(None),
+                "buClr" => style.bu_color = Some(ctx.color_in(c, None)),
+                "buSzTx" => style.bu_size = Some(None),
+                "buSzPct" => style.bu_size = Some(attr_f64(c, "val").map(|v| (v / 100_000.0) as f32)),
+                _ => {}
+            }
         }
         style
     }

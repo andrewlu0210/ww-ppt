@@ -15,6 +15,8 @@ export type Command =
   | { kind: "shape"; preset: string }
   | { kind: "picture" }
   | { kind: "insertTable"; rows: number; cols: number }
+  | { kind: "group"; on: boolean }
+  | { kind: "link"; url: string }
   | { kind: "table"; command: "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" }
   | { kind: "newSlide"; layout?: number }
   | { kind: "duplicateSlide"; index?: number }
@@ -27,6 +29,7 @@ export type Command =
   | { kind: "textColor"; color: string }
   | { kind: "align"; align: "left" | "center" | "right" | "justify" }
   | { kind: "bullets" }
+  | { kind: "numbering"; scheme: string }
   | { kind: "level"; delta: number }
   | { kind: "fill"; color: string }
   | { kind: "lineColor"; color: string }

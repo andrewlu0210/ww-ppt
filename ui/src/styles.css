@@ -591,3 +591,66 @@ button {
   background: #f3d6cd;
   border-color: var(--accent);
 }
+
+/* Hyperlink panel */
+.link-panel {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.link-input {
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 6px;
+  font: inherit;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.link-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.link-actions button {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 4px;
+  padding: 3px 12px;
+  cursor: default;
+}
+
+.link-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.link-actions button:disabled {
+  opacity: 0.5;
+}
+
+/* Numbering gallery */
+.numbering-panel {
+  display: grid;
+  grid-template-columns: repeat(3, 96px);
+  gap: 6px;
+}
+
+.numbering-item {
+  height: 44px;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 4px;
+  cursor: default;
+}
+
+.numbering-item:hover,
+.numbering-item.active {
+  border-color: var(--accent);
+  background: #fbeee9;
+}

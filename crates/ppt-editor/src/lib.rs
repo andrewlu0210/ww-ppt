@@ -3,6 +3,7 @@
 //! All pointer coordinates are in slide space (EMU). The host converts from
 //! screen coordinates and passes tolerances already scaled to EMU.
 
+mod group;
 mod richedit;
 mod table;
 
@@ -10,9 +11,9 @@ use std::collections::HashMap;
 
 use parley::BoundingBox;
 use ppt_geometry::kurbo::{Affine, Point};
-use ppt_geometry::{text_affine, text_width_pt};
+use ppt_geometry::{TextFrame, text_affine, text_width_pt};
 use ppt_model::{
-    Align, Anchor, Color, EMU_PER_INCH, EMU_PER_PT, Geometry, Line, Paragraph, Presentation, RunStyle, Shape, ShapeId,
+    Align, Anchor, Bullet, BulletKind, Color, EMU_PER_INCH, EMU_PER_PT, Geometry, Line, Link, Paint, Paragraph, Presentation, RunStyle, Shape, ShapeId,
     ShapeKind, Slide, TextBody, Xfrm,
 };
 use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
@@ -137,6 +138,8 @@ pub struct TextFormat {
     pub style: RunStyle,
     pub align: Align,
     pub bullet: bool,
+    /// Numbering scheme when the paragraph is numbered (`arabicPeriod`, ...).
+    pub numbering: Option<String>,
     pub level: u8,
 }
 
@@ -172,8 +175,8 @@ pub struct TextEdit {
     pub shape: ShapeId,
     /// The table cell (row, column) being edited, for tables.
     pub cell: Option<(usize, usize)>,
-    /// Slide-space frame the text sits in: the shape, or the table cell.
-    frame: Xfrm,
+    /// Where the text sits: the shape (with its preset's text rectangle), or the table cell.
+    frame: TextFrame,
     pub rich: RichEdit,
     original: TextBody,
     /// The shape's frame before editing (tables grow while typing).
@@ -215,6 +218,11 @@ pub struct Editor {
     revision: u64,
     /// Laid-out row heights of the current slide's tables, for hit testing without a text engine.
     table_heights: HashMap<ShapeId, Vec<i64>>,
+    /// The group whose members are being selected individually.
+    pub entered_group: Option<ShapeId>,
+    /// A click on a member of the selected group enters the group on release,
+    /// unless the pointer moved (then it was a move): (group, member).
+    pending_enter: Option<(ShapeId, ShapeId)>,
 }
 
 /// A snap target: (position, extent start, extent end).
@@ -244,6 +252,8 @@ impl Editor {
             clipboard_slide: None,
             revision: 0,
             table_heights: HashMap::new(),
+            entered_group: None,
+            pending_enter: None,
         }
     }
 
@@ -263,6 +273,7 @@ impl Editor {
         self.end_text_edit(engine);
         self.slide = index.min(self.pres.slides.len().saturating_sub(1));
         self.selection.clear();
+        self.entered_group = None;
         self.refresh_tables(engine);
     }
 
@@ -344,6 +355,7 @@ impl Editor {
         self.slide = snap.slide.min(self.pres.slides.len().saturating_sub(1));
         let slide = self.slide;
         self.selection = snap.selection.into_iter().filter(|id| self.pres.shape(slide, *id).is_some()).collect();
+        self.entered_group = None;
         self.changed();
     }
 
@@ -376,8 +388,12 @@ impl Editor {
 
     /// Handle positions of the single selected shape, in slide space.
     pub fn handles(&self, tol: &Tolerance) -> Vec<(Handle, (f64, f64))> {
-        let Some(shape) = self.selected_shape() else { return Vec::new() };
-        handle_points(&shape.xfrm, shape.geometry.is_line(), tol.rotate_offset)
+        if let Some(shape) = self.selected_shape() {
+            return handle_points(&shape.xfrm, shape.geometry.is_line(), tol.rotate_offset);
+        }
+        // A selected group resizes as a whole (it does not rotate).
+        let Some(frame) = self.selection_frame() else { return Vec::new() };
+        handle_points(&frame, false, tol.rotate_offset).into_iter().filter(|h| h.0 != Handle::Rotate).collect()
     }
 
     fn handle_at(&self, x: f64, y: f64, tol: &Tolerance) -> Option<Handle> {
@@ -400,7 +416,7 @@ impl Editor {
             };
         }
         if let Some(edit) = &self.text
-            && frame_contains(&edit.frame, ev.x, ev.y, tol.handle)
+            && frame_contains(&edit.frame.xfrm, ev.x, ev.y, tol.handle)
         {
             return CursorIcon::Text;
         }
@@ -425,7 +441,7 @@ impl Editor {
     /// Returns true when the view needs to be redrawn.
     pub fn pointer_down(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> bool {
         // Clicks inside the text being edited move the caret.
-        if let Some(frame) = self.text.as_ref().map(|t| t.frame) {
+        if let Some(frame) = self.text.as_ref().map(|t| t.frame.xfrm) {
             let inside = frame_contains(&frame, ev.x, ev.y, tol.handle);
             if inside {
                 if let Some((x, y)) = self.to_text_space(ev.x, ev.y)
@@ -458,15 +474,29 @@ impl Editor {
 
         match self.hit_test(ev.x, ev.y, tol.handle) {
             Some(id) => {
+                let group = self.pres.shape(self.slide, id).and_then(|s| s.group);
+                if group.is_some() && self.entered_group != group {
+                    self.entered_group = None;
+                }
                 if ev.shift || ev.meta {
-                    // Toggle membership; dragging still moves the whole selection.
-                    if let Some(i) = self.selection.iter().position(|s| *s == id) {
-                        self.selection.remove(i);
+                    // Toggle membership (a whole group at a time); dragging still moves the selection.
+                    let target = self.click_target(id);
+                    if self.is_selected(id) {
+                        self.selection.retain(|s| !target.contains(s));
                         return true;
                     }
-                    self.selection.push(id);
-                } else if !self.is_selected(id) {
+                    self.selection.extend(target);
+                } else if ev.clicks >= 2 && group.is_some() {
+                    // Double click goes straight into the group.
+                    self.entered_group = group;
                     self.selection = vec![id];
+                } else if let Some(g) = self.in_selected_group(id) {
+                    self.pending_enter = Some((g, id));
+                } else if !self.is_selected(id) {
+                    if group.is_none() || self.entered_group != group {
+                        self.entered_group = None;
+                    }
+                    self.selection = self.click_target(id);
                 }
                 let shape = self.pres.shape(self.slide, id).expect("hit shape exists");
                 if ev.clicks >= 2 && can_hold_text(shape) {
@@ -484,6 +514,7 @@ impl Editor {
                 let additive = ev.shift || ev.meta;
                 if !additive {
                     self.selection.clear();
+                    self.entered_group = None;
                 }
                 self.drag = Some(Drag {
                     kind: DragKind::Marquee { additive },
@@ -526,9 +557,18 @@ impl Editor {
                 self.marquee = Some(rect);
                 let base = self.drag.as_ref().map(|d| d.base_selection.clone()).unwrap_or_default();
                 let mut sel = if additive { base } else { Vec::new() };
-                for s in self.current_shapes().iter().filter(|s| selectable(s)) {
+                let inside = |s: &Shape| {
                     let (x0, y0, x1, y1) = bounds(&s.xfrm);
-                    if x0 >= rect.0 && y0 >= rect.1 && x1 <= rect.2 && y1 <= rect.3 && !sel.contains(&s.id) {
+                    x0 >= rect.0 && y0 >= rect.1 && x1 <= rect.2 && y1 <= rect.3
+                };
+                let shapes = self.current_shapes();
+                for s in shapes.iter().filter(|s| selectable(s)) {
+                    // A group is picked only when all of it is inside the rectangle.
+                    let whole = match s.group {
+                        Some(g) if self.entered_group != Some(g) => shapes.iter().filter(|m| m.group == Some(g)).all(inside),
+                        _ => inside(s),
+                    };
+                    if whole && !sel.contains(&s.id) {
                         sel.push(s.id);
                     }
                 }
@@ -555,6 +595,16 @@ impl Editor {
                 for (id, o) in &origs {
                     if let Some(shape) = self.pres.shape_mut(self.slide, *id) {
                         shape.xfrm = Xfrm { x: o.x + dx.round() as i64, y: o.y + dy.round() as i64, ..*o };
+                    }
+                }
+            }
+            DragKind::Resize(handle) if origs.len() > 1 => {
+                // A group: scale every member with the group's frame.
+                let Some(frame) = group::union_frame(origs.iter().map(|o| o.1)) else { return false };
+                let new = resize(&frame, handle, dx, dy, ev.shift, MIN_SIZE);
+                for (id, o) in &origs {
+                    if let Some(shape) = self.pres.shape_mut(self.slide, *id) {
+                        shape.xfrm = group::rescale(o, &frame, &new);
                     }
                 }
             }
@@ -593,7 +643,15 @@ impl Editor {
     pub fn pointer_up(&mut self, _engine: &mut TextEngine, _ev: &PointerEvent) -> bool {
         self.guides.clear();
         let had_marquee = self.marquee.take().is_some();
+        let pending = self.pending_enter.take();
         let Some(drag) = self.drag.take() else { return had_marquee };
+        if !drag.moved
+            && let Some((group, member)) = pending
+        {
+            self.entered_group = Some(group);
+            self.selection = vec![member];
+            return true;
+        }
         if drag.moved
             && let Some(before) = drag.before
         {
@@ -706,11 +764,11 @@ impl Editor {
             body
         });
         let original = body.clone();
-        let frame = shape.xfrm;
+        let frame = TextFrame::of(shape.xfrm, &shape.geometry);
         let width = text_width_pt(&frame, body);
         let rich = RichEdit::new(engine, original.clone(), width);
         self.selection = vec![id];
-        self.text = Some(TextEdit { shape: id, cell: None, frame, rich, original, original_xfrm: frame, remove_if_empty });
+        self.text = Some(TextEdit { shape: id, cell: None, frame, rich, original, original_xfrm: shape.xfrm, remove_if_empty });
     }
 
     /// Commits the edited text into the model and leaves text mode.
@@ -829,7 +887,8 @@ impl Editor {
         let Some(edit) = &mut self.text else { return };
         let id = edit.shape;
         let Some(shape) = self.pres.slides.get_mut(self.slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) else { return };
-        edit.rich.set_width(engine, text_width_pt(&shape.xfrm, &edit.rich.body));
+        edit.frame = TextFrame::of(shape.xfrm, &shape.geometry);
+        edit.rich.set_width(engine, text_width_pt(&edit.frame, &edit.rich.body));
         let body = &edit.rich.body;
         if !body.auto_grow {
             return;
@@ -837,7 +896,7 @@ impl Editor {
         let min_line = body.paragraphs.first().map(|p| p.first_style().size_pt * SINGLE_LINE_HEIGHT).unwrap_or(0.0);
         let content = edit.rich.layout().height.max(min_line) as f64;
         shape.xfrm.h = (content * EMU_PER_PT).round() as i64 + body.insets[1] + body.insets[3];
-        edit.frame = shape.xfrm;
+        edit.frame = TextFrame::of(shape.xfrm, &shape.geometry);
     }
 
     pub fn selected_text(&self) -> Option<String> {
@@ -870,6 +929,12 @@ impl Editor {
                 body.apply_style(0..len, &f);
             }
         })
+    }
+
+    /// Links the selected text (or the selected shapes' text) to `url`, or removes links with `None`.
+    pub fn set_link(&mut self, engine: &mut TextEngine, url: Option<&str>) -> bool {
+        let link = url.filter(|u| !u.trim().is_empty()).map(|u| std::sync::Arc::new(Link::url(u.trim(), self.pres.link_color)));
+        self.apply_text_style(engine, |s| s.link = link.clone())
     }
 
     /// Bold/italic/underline toggle: turns it off only when the current text already has it.
@@ -905,12 +970,34 @@ impl Editor {
         })
     }
 
+    /// Numbers the affected paragraphs with `scheme`, or removes numbering when
+    /// they already use it.
+    pub fn toggle_numbering(&mut self, engine: &mut TextEngine, scheme: &str) -> bool {
+        let on = self.text_format().and_then(|f| f.numbering).as_deref() != Some(scheme);
+        let scheme = scheme.to_string();
+        self.apply_paragraph(engine, |p| {
+            if on {
+                // Keep a numbered list's own color/size if it had one; numbers use the text font.
+                let base = p.bullet.clone().unwrap_or_else(|| Bullet::char('•'));
+                p.bullet = Some(Bullet { kind: BulletKind::AutoNum { scheme: scheme.clone(), start: 1 }, font: None, ..base });
+                if p.indent >= 0 {
+                    p.mar_l = 342_900 * (p.level as i64 + 1);
+                    p.indent = -342_900;
+                }
+            } else {
+                p.bullet = None;
+                p.indent = 0;
+                p.mar_l = 0;
+            }
+        })
+    }
+
     /// Toggles bullets on the affected paragraphs, with PowerPoint's default hanging indent.
     pub fn toggle_bullets(&mut self, engine: &mut TextEngine) -> bool {
         let on = !self.text_format().is_some_and(|f| f.bullet);
         self.apply_paragraph(engine, |p| {
             if on {
-                p.bullet = Some('•');
+                p.bullet = Some(Bullet { font: Some("Arial".into()), ..Bullet::char('•') });
                 if p.indent >= 0 {
                     p.mar_l = 285_750 * (p.level as i64 + 1);
                     p.indent = -285_750;
@@ -937,17 +1024,29 @@ impl Editor {
     pub fn text_format(&self) -> Option<TextFormat> {
         if let Some(edit) = &self.text {
             let p = edit.rich.current_paragraph();
-            return Some(TextFormat { style: edit.rich.typing_style(), align: p.align, bullet: p.bullet.is_some(), level: p.level });
+            return Some(TextFormat {
+                style: edit.rich.typing_style(),
+                align: p.align,
+                bullet: p.bullet.as_ref().is_some_and(|b| !b.is_numbered()),
+                numbering: numbering_of(p),
+                level: p.level,
+            });
         }
         let body = self.selected_shapes().into_iter().find_map(|s| s.text_bodies().next())?;
         let p = body.paragraphs.first()?;
-        Some(TextFormat { style: body.style_at(0), align: p.align, bullet: p.bullet.is_some(), level: p.level })
+        Some(TextFormat {
+            style: body.style_at(0),
+            align: p.align,
+            bullet: p.bullet.as_ref().is_some_and(|b| !b.is_numbered()),
+            numbering: numbering_of(p),
+            level: p.level,
+        })
     }
 
     pub fn set_fill(&mut self, fill: Option<Color>) -> bool {
         self.modify_selected(|s| {
             if !s.geometry.is_line() && matches!(s.kind, ShapeKind::Shape) {
-                s.fill = fill;
+                s.fill = fill.map(Paint::Solid);
             }
         })
     }
@@ -955,19 +1054,19 @@ impl Editor {
     /// Sets the outline color (`None` = no outline), keeping the width.
     pub fn set_line_color(&mut self, color: Option<Color>) -> bool {
         self.modify_selected(|s| {
-            s.line = color.map(|color| Line { color, width: s.line.map(|l| l.width).unwrap_or(12_700) });
+            s.line = color.map(|color| Line { color, ..s.line.unwrap_or(Line::new(color, 12_700)) });
         })
     }
 
     pub fn set_line_width(&mut self, width: i64) -> bool {
         self.modify_selected(|s| {
             let color = s.line.map(|l| l.color).unwrap_or(Color::BLACK);
-            s.line = Some(Line { color, width });
+            s.line = Some(Line { width, ..s.line.unwrap_or(Line::new(color, width)) });
         })
     }
 
     pub fn selection_fill(&self) -> Option<Option<Color>> {
-        self.selected_shapes().first().map(|s| s.fill)
+        self.selected_shapes().first().map(|s| s.fill.as_ref().map(Paint::color))
     }
 
     pub fn selection_line(&self) -> Option<Option<Line>> {
@@ -1000,6 +1099,7 @@ impl Editor {
                 "]" | "}" => return self.apply_text_style(engine, |s| s.size_pt = grow_size(s.size_pt, true)),
                 "[" | "{" => return self.apply_text_style(engine, |s| s.size_pt = grow_size(s.size_pt, false)),
                 "d" if self.text.is_none() => return self.duplicate_selected(),
+                "g" | "G" if m.alt && self.text.is_none() => return if m.shift { self.ungroup_selected() } else { self.group_selected() },
                 _ => {}
             }
         }
@@ -1117,7 +1217,9 @@ impl Editor {
 
     /// Copies the selected shapes to the internal clipboard. Returns how many were copied.
     pub fn copy(&mut self) -> usize {
-        self.clipboard = self.selected_shapes().into_iter().cloned().collect();
+        let mut copies: Vec<Shape> = self.selected_shapes().into_iter().cloned().collect();
+        group::detach_partial_groups(&mut copies, self.current_shapes());
+        self.clipboard = copies;
         self.clipboard_slide = Some(self.slide);
         self.paste_count = 0;
         self.clipboard.len()
@@ -1149,7 +1251,8 @@ impl Editor {
     }
 
     pub fn duplicate_selected(&mut self) -> bool {
-        let shapes: Vec<Shape> = self.selected_shapes().into_iter().cloned().collect();
+        let mut shapes: Vec<Shape> = self.selected_shapes().into_iter().cloned().collect();
+        group::detach_partial_groups(&mut shapes, self.current_shapes());
         self.insert_copies(shapes, PASTE_OFFSET)
     }
 
@@ -1159,8 +1262,13 @@ impl Editor {
         }
         let before = self.snapshot();
         let mut ids = Vec::new();
+        // Copies form groups of their own.
+        let mut groups: HashMap<ShapeId, ShapeId> = HashMap::new();
         for mut shape in shapes {
             shape.id = self.pres.alloc_id();
+            if let Some(g) = shape.group {
+                shape.group = Some(*groups.entry(g).or_insert_with(|| self.pres.alloc_id()));
+            }
             shape.xfrm.x += offset;
             shape.xfrm.y += offset;
             ids.push(shape.id);
@@ -1275,8 +1383,8 @@ impl Editor {
         let id = self.pres.alloc_id();
         let mut shape = Shape::new(id, format!("{preset} {}", id.0), xfrm);
         shape.geometry = Geometry::preset(preset);
-        shape.fill = Some(Color::rgb(0x44, 0x72, 0xC4));
-        shape.line = Some(Line { color: Color::rgb(0x2F, 0x52, 0x8F), width: 12_700 });
+        shape.fill = Some(Paint::Solid(Color::rgb(0x44, 0x72, 0xC4)));
+        shape.line = Some(Line::new(Color::rgb(0x2F, 0x52, 0x8F), 12_700));
         self.pres.slides[self.slide].shapes.push(shape);
         self.selection = vec![id];
         self.push_undo(before);
@@ -1333,8 +1441,10 @@ impl Editor {
         for s in src.background_shapes {
             copy.background_shapes.push(Shape { id: self.pres.alloc_id(), ..s });
         }
+        let mut groups: HashMap<ShapeId, ShapeId> = HashMap::new();
         for s in src.shapes {
-            copy.shapes.push(Shape { id: self.pres.alloc_id(), ..s });
+            let group = s.group.map(|g| *groups.entry(g).or_insert_with(|| self.pres.alloc_id()));
+            copy.shapes.push(Shape { id: self.pres.alloc_id(), group, ..s });
         }
         self.pres.slides.insert(index + 1, copy);
         self.slide = index + 1;
@@ -1374,6 +1484,13 @@ impl Editor {
 }
 
 /// PowerPoint's font size steps for ⌘] / ⌘[.
+fn numbering_of(p: &Paragraph) -> Option<String> {
+    match p.bullet.as_ref().map(|b| &b.kind) {
+        Some(BulletKind::AutoNum { scheme, .. }) => Some(scheme.clone()),
+        _ => None,
+    }
+}
+
 fn grow_size(size: f32, up: bool) -> f32 {
     const STEPS: [f32; 22] = [8.0, 9.0, 10.0, 10.5, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0, 44.0, 48.0, 54.0, 60.0, 66.0, 72.0, 80.0];
     if up {

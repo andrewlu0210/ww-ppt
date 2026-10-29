@@ -253,7 +253,7 @@ mod tests {
     use super::*;
 
     fn line(r: u8) -> Line {
-        Line { color: Color::rgb(r, 0, 0), width: 12_700 }
+        Line::new(Color::rgb(r, 0, 0), 12_700)
     }
 
     fn table(rows: usize, cols: usize) -> Table {

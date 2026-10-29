@@ -10,8 +10,8 @@ use std::io::{Cursor, Read, Write};
 use std::ops::Range;
 
 use ppt_model::{
-    Align, Anchor, Color, Crop, Geometry, Line, ParaDefaults, Paragraph, PathCmd, Presentation, RunStyle, Shape, ShapeKind,
-    ShapeSource, Slide, SlideSource, TextBody, Xfrm,
+    Align, Anchor, Bullet, BulletKind, Color, Crop, Dash, EndKind, Geometry, GradientKind, Line, LineEnd, Paint, ParaDefaults, Paragraph, PathCmd, Presentation, RunStyle, Shape, ShapeKind,
+    ShapeSource, Slide, SlideSource, TextBody, Xfrm, ContainerSource, Link,
 };
 use roxmltree::{Document, Node};
 use zip::write::SimpleFileOptions;
@@ -151,18 +151,35 @@ fn src_rect_xml(crop: &Crop) -> String {
     format!(r#"<a:srcRect l="{}" t="{}" r="{}" b="{}"/>"#, v(crop.left), v(crop.top), v(crop.right), v(crop.bottom))
 }
 
-fn fill_xml(fill: Option<Color>) -> String {
+fn fill_xml(fill: &Option<Paint>) -> String {
     match fill {
-        Some(c) => format!("<a:solidFill>{}</a:solidFill>", color_xml(c)),
+        Some(Paint::Solid(c)) => format!("<a:solidFill>{}</a:solidFill>", color_xml(*c)),
+        Some(Paint::Gradient(g)) => {
+            let stops: String = g.stops.iter().map(|(pos, c)| format!(r#"<a:gs pos="{}">{}</a:gs>"#, (pos * 100_000.0).round() as i64, color_xml(*c))).collect();
+            let shade = match g.kind {
+                GradientKind::Linear { angle, scaled } => format!(r#"<a:lin ang="{}" scaled="{}"/>"#, (angle * 60_000.0).round() as i64, u8::from(scaled)),
+                GradientKind::Path { circle, focus } => {
+                    let [l, t, r, b] = focus.map(|f| (f * 100_000.0).round() as i64);
+                    format!(r#"<a:path path="{}"><a:fillToRect l="{l}" t="{t}" r="{r}" b="{b}"/></a:path>"#, if circle { "circle" } else { "rect" })
+                }
+            };
+            format!(r#"<a:gradFill rotWithShape="{}"><a:gsLst>{stops}</a:gsLst>{shade}</a:gradFill>"#, u8::from(g.rotate_with_shape))
+        }
         None => "<a:noFill/>".to_string(),
     }
 }
 
 fn line_xml(line: Option<Line>) -> String {
-    match line {
-        Some(l) => format!(r#"<a:ln w="{}"><a:solidFill>{}</a:solidFill></a:ln>"#, l.width, color_xml(l.color)),
-        None => "<a:ln><a:noFill/></a:ln>".to_string(),
-    }
+    let Some(l) = line else { return "<a:ln><a:noFill/></a:ln>".to_string() };
+    let dash = if l.dash == Dash::Solid { String::new() } else { format!(r#"<a:prstDash val="{}"/>"#, l.dash.name()) };
+    let end = |tag: &str, e: LineEnd| {
+        if e.kind == EndKind::None {
+            return String::new();
+        }
+        let size = |v: u8| ["sm", "med", "lg"][v.min(2) as usize];
+        format!(r#"<a:{tag} type="{}" w="{}" len="{}"/>"#, e.kind.name(), size(e.width), size(e.length))
+    };
+    format!(r#"<a:ln w="{}"><a:solidFill>{}</a:solidFill>{dash}{}{}</a:ln>"#, l.width, color_xml(l.color), end("headEnd", l.head), end("tailEnd", l.tail))
 }
 
 fn geometry_xml(g: &Geometry) -> String {
@@ -213,7 +230,7 @@ fn has_cjk(s: &str) -> bool {
 }
 
 /// `a:rPr`-style element with only the properties that differ from `base`.
-fn rpr_xml(tag: &str, s: &RunStyle, base: &RunStyle, text: &str) -> String {
+fn rpr_xml(tag: &str, s: &RunStyle, base: &RunStyle, text: &str, links: &mut Links) -> String {
     let lang = if has_cjk(text) { "zh-TW" } else { "en-US" };
     let mut attrs = format!(r#" lang="{lang}" altLang="en-US""#);
     if (s.size_pt - base.size_pt).abs() > 0.01 {
@@ -239,10 +256,39 @@ fn rpr_xml(tag: &str, s: &RunStyle, base: &RunStyle, text: &str) -> String {
     if s.ea_font != base.ea_font && !s.ea_font.is_empty() {
         kids.push_str(&format!(r#"<a:ea typeface="{}"/>"#, esc(&s.ea_font)));
     }
+    if let Some(l) = &s.link {
+        let rid = if l.target.is_empty() { String::new() } else { links(l) };
+        let action = l.action.as_ref().map(|a| format!(r#" action="{}""#, esc(a))).unwrap_or_default();
+        let tooltip = l.tooltip.as_ref().map(|t| format!(r#" tooltip="{}""#, esc(t))).unwrap_or_default();
+        kids.push_str(&format!(r#"<a:hlinkClick r:id="{rid}"{action}{tooltip}/>"#));
+    }
     if kids.is_empty() { format!("<{tag}{attrs}/>") } else { format!("<{tag}{attrs}>{kids}</{tag}>") }
 }
 
-fn paragraph_xml(p: &Paragraph, d: &ParaDefaults) -> String {
+/// Bullet elements of `a:pPr`, in schema order (color, size, font, kind).
+fn bullet_xml(b: Option<&Bullet>) -> String {
+    let Some(b) = b else { return "<a:buNone/>".to_string() };
+    let mut out = String::new();
+    if let Some(c) = b.color {
+        out.push_str(&format!("<a:buClr>{}</a:buClr>", color_xml(c)));
+    }
+    if let Some(s) = b.size {
+        out.push_str(&format!(r#"<a:buSzPct val="{}"/>"#, (s * 100_000.0).round() as i64));
+    }
+    if let Some(f) = &b.font {
+        out.push_str(&format!(r#"<a:buFont typeface="{}"/>"#, esc(f)));
+    }
+    match &b.kind {
+        BulletKind::Char(c) => out.push_str(&format!(r#"<a:buChar char="{}"/>"#, esc(&c.to_string()))),
+        BulletKind::AutoNum { scheme, start } => {
+            let start = if *start > 1 { format!(r#" startAt="{start}""#) } else { String::new() };
+            out.push_str(&format!(r#"<a:buAutoNum type="{}"{start}/>"#, esc(scheme)));
+        }
+    }
+    out
+}
+
+fn paragraph_xml(p: &Paragraph, d: &ParaDefaults, links: &mut Links) -> String {
     let mut attrs = String::new();
     if p.level > 0 {
         attrs.push_str(&format!(r#" lvl="{}""#, p.level));
@@ -273,10 +319,7 @@ fn paragraph_xml(p: &Paragraph, d: &ParaDefaults) -> String {
         kids.push_str(&format!(r#"<a:spcAft><a:spcPts val="{}"/></a:spcAft>"#, (p.space_after * 100.0).round() as i64));
     }
     if p.bullet != d.bullet {
-        match p.bullet {
-            Some(c) => kids.push_str(&format!(r#"<a:buFont typeface="Arial"/><a:buChar char="{}"/>"#, esc(&c.to_string()))),
-            None => kids.push_str("<a:buNone/>"),
-        }
+        kids.push_str(&bullet_xml(p.bullet.as_ref()));
     }
     let mut out = String::from("<a:p>");
     if !attrs.is_empty() || !kids.is_empty() {
@@ -285,22 +328,32 @@ fn paragraph_xml(p: &Paragraph, d: &ParaDefaults) -> String {
     for run in &p.runs {
         for (i, piece) in run.text.split('\u{2028}').enumerate() {
             if i > 0 {
-                out.push_str(&format!("<a:br>{}</a:br>", rpr_xml("a:rPr", &run.style, &d.style, piece)));
+                out.push_str(&format!("<a:br>{}</a:br>", rpr_xml("a:rPr", &run.style, &d.style, piece, links)));
             }
             if !piece.is_empty() {
-                out.push_str(&format!("<a:r>{}<a:t>{}</a:t></a:r>", rpr_xml("a:rPr", &run.style, &d.style, piece), esc(piece)));
+                out.push_str(&format!("<a:r>{}<a:t>{}</a:t></a:r>", rpr_xml("a:rPr", &run.style, &d.style, piece, links), esc(piece)));
             }
         }
     }
     let text = p.text();
-    out.push_str(&rpr_xml("a:endParaRPr", &p.end_style, &d.style, &text));
+    // The end-of-paragraph mark never carries a link.
+    let end = RunStyle { link: None, ..p.end_style.clone() };
+    out.push_str(&rpr_xml("a:endParaRPr", &end, &d.style, &text, links));
     out.push_str("</a:p>");
     out
 }
 
-pub(crate) fn paragraphs_xml(body: &TextBody) -> String {
+/// Turns a hyperlink into a relationship id of the part being written.
+pub(crate) type Links<'a> = dyn FnMut(&Link) -> String + 'a;
+
+pub(crate) fn paragraphs_xml(body: &TextBody, links: &mut Links) -> String {
     let fallback = fallback_defaults();
-    body.paragraphs.iter().map(|p| paragraph_xml(p, body.defaults_for(p.level).unwrap_or(&fallback))).collect()
+    body.paragraphs.iter().map(|p| paragraph_xml(p, body.defaults_for(p.level).unwrap_or(&fallback), links)).collect()
+}
+
+/// Relationship id for a hyperlink on the slide `out` writes.
+fn link_rel(out: &mut SlideOut, l: &Link) -> String {
+    out.rel_for(&l.kind, &l.target, l.external)
 }
 
 fn body_pr_xml(body: &TextBody) -> String {
@@ -315,8 +368,8 @@ fn body_pr_xml(body: &TextBody) -> String {
     format!(r#"<a:bodyPr wrap="{wrap}" lIns="{l}" tIns="{t}" rIns="{r}" bIns="{b}" rtlCol="0" anchor="{anchor}">{fit}</a:bodyPr>"#)
 }
 
-fn new_tx_body_xml(body: &TextBody) -> String {
-    format!("<p:txBody>{}<a:lstStyle/>{}</p:txBody>", body_pr_xml(body), paragraphs_xml(body))
+fn new_tx_body_xml(body: &TextBody, out: &mut SlideOut) -> String {
+    format!("<p:txBody>{}<a:lstStyle/>{}</p:txBody>", body_pr_xml(body), paragraphs_xml(body, &mut |l| link_rel(out, l)))
 }
 
 // --- Per-slide output -------------------------------------------------------
@@ -396,7 +449,7 @@ impl SlideOut<'_> {
 
 fn shape_unchanged(shape: &Shape, src: &ShapeSource) -> bool {
     let p = &src.parsed;
-    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind
+    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind && shape.group == p.group
 }
 
 /// Parses a shape's XML out of context by wrapping it with its namespace declarations.
@@ -479,12 +532,12 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
                         for c in tx.children().filter(|c| c.is_element() && c.tag_name().name() != "p") {
                             kept.push_str(&wrapped[c.range()]);
                         }
-                        let new = format!("{}>{kept}{}</p:txBody>", open_tag(&wrapped, tx), paragraphs_xml(body));
+                        let new = format!("{}>{kept}{}</p:txBody>", open_tag(&wrapped, tx), paragraphs_xml(body, &mut |l| link_rel(out, l)));
                         edits.push((tx.range(), new));
                     }
                     (None, Some(body)) => {
                         let at = child(el, "extLst").map(|e| e.range().start).unwrap_or_else(|| close_tag_start(&wrapped, el));
-                        edits.push((at..at, new_tx_body_xml(body)));
+                        edits.push((at..at, new_tx_body_xml(body, out)));
                     }
                     _ => {}
                 }
@@ -498,7 +551,7 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
                 && new != old
                 && let Some(tbl) = el.descendants().find(|n| n.is_element() && n.tag_name().name() == "tbl")
             {
-                edits.push((tbl.range(), patch_table(&wrapped, tbl, old, new)));
+                edits.push((tbl.range(), patch_table(&wrapped, tbl, old, new, &mut |l| link_rel(out, l))));
             }
         }
         _ => {}
@@ -539,7 +592,7 @@ fn rebuild_sp_pr(src: &str, sp_pr: Option<Node>, shape: &Shape, xfrm: bool, fill
         set(0, xfrm_xml("a:xfrm", &shape.xfrm));
     }
     if fill {
-        set(2, fill_xml(shape.fill));
+        set(2, fill_xml(&shape.fill));
     }
     if line {
         set(3, line_xml(shape.line));
@@ -563,20 +616,20 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             let text_box = shape.placeholder.is_none() && shape.fill.is_none() && shape.line.is_none() && shape.text.is_some();
             let mut sp_pr = format!("<p:spPr>{}{}", xfrm_xml("a:xfrm", &shape.xfrm), geometry_xml(&shape.geometry));
             if shape.fill.is_some() || text_box {
-                sp_pr.push_str(&fill_xml(shape.fill));
+                sp_pr.push_str(&fill_xml(&shape.fill));
             }
             if shape.line.is_some() {
                 sp_pr.push_str(&line_xml(shape.line));
             }
             sp_pr.push_str("</p:spPr>");
             let c_nv_sp_pr = if text_box { r#"<p:cNvSpPr txBox="1"/>"# } else { "<p:cNvSpPr/>" };
-            let tx = shape.text.as_ref().map(new_tx_body_xml).unwrap_or_default();
+            let tx = shape.text.as_ref().map(|t| new_tx_body_xml(t, out)).unwrap_or_default();
             Some(format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{name}"/>{c_nv_sp_pr}{nv_pr}</p:nvSpPr>{sp_pr}{tx}</p:sp>"#))
         }
         ShapeKind::Table(table) => Some(format!(
             r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="{id}" name="{name}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>{}<a:graphic><a:graphicData uri="{TABLE_URI}">{}</a:graphicData></a:graphic></p:graphicFrame>"#,
             xfrm_xml("p:xfrm", &shape.xfrm),
-            table_xml(table, None)
+            table_xml(table, None, &mut |l| link_rel(out, l))
         )),
         ShapeKind::Picture { media: Some(key), crop } => {
             let part = out.media.part_for(out.pres, key)?;
@@ -591,58 +644,137 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
     }
 }
 
-/// Emits the slide's shapes, keeping untouched groups as a unit.
+/// Emits the slide's shapes. Consecutive members of a group are written as
+/// one `p:grpSp`: verbatim when the original group is untouched, else rebuilt.
 fn shapes_xml(slide: &Slide, out: &mut SlideOut) -> String {
     let mut xml = String::new();
     let shapes = &slide.shapes;
     let mut i = 0;
     while i < shapes.len() {
-        let shape = &shapes[i];
-        let Some(src) = &shape.source else {
-            xml.push_str(&generate_shape(shape, out).unwrap_or_default());
-            i += 1;
-            continue;
+        let run = match shapes[i].group {
+            Some(g) => shapes[i..].iter().take_while(|s| s.group == Some(g)).count(),
+            None => 1,
         };
-        if let Some(container) = &src.container {
-            let run = shapes[i..]
-                .iter()
-                .take_while(|s| s.source.as_ref().and_then(|s| s.container.as_ref()).is_some_and(|c| c == container))
-                .count();
-            let intact = src.part == out.part
-                && run == container.children
-                && shapes[i..i + run].iter().all(|s| s.source.as_ref().is_some_and(|src| shape_unchanged(s, src)));
-            if intact {
-                out.need_namespaces(&src.namespaces);
-                let group = &src.doc[container.range.clone()];
-                if let Ok(doc) = Document::parse(&wrap(group, &src.namespaces).0) {
-                    for id in doc.descendants().filter(|n| n.tag_name().name() == "cNvPr").filter_map(|n| n.attribute("id")?.parse().ok()) {
-                        out.used_ids.insert(id);
-                    }
-                }
-                xml.push_str(group);
-                i += run;
-                continue;
-            }
-            // A changed group is written out as its individual shapes, in slide coordinates.
-            for s in &shapes[i..i + run] {
-                match &s.source {
-                    Some(src) => xml.push_str(&patch_shape(s, src, true, out)),
-                    None => xml.push_str(&generate_shape(s, out).unwrap_or_default()),
-                }
-            }
-            i += run;
-            continue;
-        }
-        if src.part == out.part && shape_unchanged(shape, src) && !out.used_ids.contains(&raw_id(src)) {
-            out.need_namespaces(&src.namespaces);
-            out.used_ids.insert(raw_id(src));
-            xml.push_str(src.xml());
+        if run > 1 {
+            xml.push_str(&group_xml(&shapes[i..i + run], out));
         } else {
-            xml.push_str(&patch_shape(shape, src, false, out));
+            xml.push_str(&shape_xml(&shapes[i], out));
         }
-        i += 1;
+        i += run;
     }
     xml
+}
+
+/// One shape, reusing its XML when nothing changed.
+fn shape_xml(shape: &Shape, out: &mut SlideOut) -> String {
+    let Some(src) = &shape.source else { return generate_shape(shape, out).unwrap_or_default() };
+    // XML from inside a group has group-relative coordinates: always rewrite the frame.
+    let grouped = src.container.is_some();
+    if !grouped && src.part == out.part && shape_unchanged(shape, src) && !out.used_ids.contains(&raw_id(src)) {
+        out.need_namespaces(&src.namespaces);
+        out.used_ids.insert(raw_id(src));
+        src.xml().to_string()
+    } else {
+        patch_shape(shape, src, grouped, out)
+    }
+}
+
+/// Axis-aligned bounds (x0, y0, x1, y1) of possibly rotated shapes.
+fn bounds_of(shapes: &[Shape]) -> (i64, i64, i64, i64) {
+    let mut b = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+    for s in shapes {
+        let x = &s.xfrm;
+        let (w, h) = (x.w as f64, x.h as f64);
+        for (px, py) in [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)] {
+            let (sx, sy) = x.to_slide(px, py);
+            let (sx, sy) = (sx.round() as i64, sy.round() as i64);
+            b = (b.0.min(sx), b.1.min(sy), b.2.max(sx), b.3.max(sy));
+        }
+    }
+    b
+}
+
+/// When an untouched original group was only moved or resized as a whole, its
+/// XML with just the outer frame (`a:off`/`a:ext`) updated, keeping nested groups.
+fn moved_as_a_whole(members: &[Shape], container: &ContainerSource, out: &SlideOut) -> Option<String> {
+    if members.len() != container.children || container.part != out.part {
+        return None;
+    }
+    let srcs: Vec<&ShapeSource> = members.iter().map(|s| s.source.as_deref()).collect::<Option<_>>()?;
+    let same_otherwise = members.iter().zip(&srcs).all(|(s, src)| {
+        let p = &src.parsed;
+        src.container.as_deref() == Some(container) && s.fill == p.fill && s.line == p.line && s.text == p.text && s.kind == p.kind && s.group == p.group
+    });
+    if !same_otherwise {
+        return None;
+    }
+    let frame = |xs: &mut dyn Iterator<Item = Xfrm>| {
+        let shapes: Vec<Shape> = xs.map(|x| Shape::new(ppt_model::ShapeId(0), "", x)).collect();
+        let (x0, y0, x1, y1) = bounds_of(&shapes);
+        Xfrm::new(x0, y0, x1 - x0, y1 - y0)
+    };
+    let old = frame(&mut srcs.iter().map(|s| s.parsed.xfrm));
+    let new = frame(&mut members.iter().map(|s| s.xfrm));
+    let (sx, sy) = (new.w as f64 / old.w.max(1) as f64, new.h as f64 / old.h.max(1) as f64);
+    let map = |x: &Xfrm| Xfrm {
+        x: new.x + ((x.x - old.x) as f64 * sx).round() as i64,
+        y: new.y + ((x.y - old.y) as f64 * sy).round() as i64,
+        w: (x.w as f64 * sx).round() as i64,
+        h: (x.h as f64 * sy).round() as i64,
+        ..*x
+    };
+    // Every member must sit where the whole-group transform puts it (within rounding).
+    let close = |a: &Xfrm, b: &Xfrm| (a.x - b.x).abs() <= 2 && (a.y - b.y).abs() <= 2 && (a.w - b.w).abs() <= 2 && (a.h - b.h).abs() <= 2 && a.rot == b.rot;
+    if !members.iter().zip(&srcs).all(|(s, src)| close(&s.xfrm, &map(&src.parsed.xfrm))) {
+        return None;
+    }
+    let src = srcs[0];
+    let group_xml = &src.doc[container.range.clone()];
+    let (wrapped, offset) = wrap(group_xml, &src.namespaces);
+    let doc = Document::parse(&wrapped).ok()?;
+    let el = doc.root_element().first_element_child()?;
+    let xfrm = child(el, "grpSpPr").and_then(|p| child(p, "xfrm"))?;
+    let (off, ext) = (child(xfrm, "off")?, child(xfrm, "ext")?);
+    let num = |n: Node, a: &str| n.attribute(a).and_then(|v| v.parse::<i64>().ok());
+    let g = Xfrm::new(num(off, "x")?, num(off, "y")?, num(ext, "cx")?, num(ext, "cy")?);
+    let g2 = map(&g);
+    let edits = vec![
+        (off.attribute_node("x")?.range_value(), g2.x.to_string()),
+        (off.attribute_node("y")?.range_value(), g2.y.to_string()),
+        (ext.attribute_node("cx")?.range_value(), g2.w.max(0).to_string()),
+        (ext.attribute_node("cy")?.range_value(), g2.h.max(0).to_string()),
+    ];
+    let patched = apply_edits(&wrapped, edits);
+    Some(patched[offset..patched.len() - "</w>".len()].to_string())
+}
+
+fn group_xml(members: &[Shape], out: &mut SlideOut) -> String {
+    let container = members[0].source.as_ref().and_then(|s| s.container.clone());
+    if let Some(container) = &container {
+        let intact = members.len() == container.children
+            && container.part == out.part
+            && members.iter().all(|s| s.source.as_ref().is_some_and(|src| src.container.as_ref() == Some(container) && shape_unchanged(s, src)));
+        let src = members[0].source.as_ref().expect("container implies a source");
+        let moved = (!intact).then(|| moved_as_a_whole(members, container, out)).flatten();
+        if intact || moved.is_some() {
+            out.need_namespaces(&src.namespaces);
+            let group = &src.doc[container.range.clone()];
+            if let Ok(doc) = Document::parse(&wrap(group, &src.namespaces).0) {
+                for id in doc.descendants().filter(|n| n.tag_name().name() == "cNvPr").filter_map(|n| n.attribute("id")?.parse().ok()) {
+                    out.used_ids.insert(id);
+                }
+            }
+            return moved.unwrap_or_else(|| group.to_string());
+        }
+    }
+    // A new or changed group, in slide coordinates: the child space equals the group's frame.
+    let (x0, y0, x1, y1) = bounds_of(members);
+    let (w, h) = ((x1 - x0).max(0), (y1 - y0).max(0));
+    let id = out.take_id(0);
+    let inner: String = members.iter().map(|s| shape_xml(s, out)).collect();
+    format!(
+        r#"<p:grpSp><p:nvGrpSpPr><p:cNvPr id="{id}" name="群組 {id}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="{x0}" y="{y0}"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="{x0}" y="{y0}"/><a:chExt cx="{w}" cy="{h}"/></a:xfrm></p:grpSpPr>{inner}</p:grpSp>"#
+    )
 }
 
 fn raw_id(src: &ShapeSource) -> u32 {

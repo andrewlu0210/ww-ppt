@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use ppt_geometry::text_width_pt;
+use ppt_geometry::{TextFrame, text_width_pt};
 use ppt_model::table::{TableCell, TableFlags, TableRow};
 use ppt_model::{Anchor, EMU_PER_INCH, ParaDefaults, Shape, ShapeId, ShapeKind, Table, TextBody, Xfrm};
 use ppt_text::TextEngine;
@@ -215,7 +215,7 @@ impl Editor {
         let Some(table) = table_of(shape) else { return };
         let (row, col) = table.anchor_of(row, col);
         let Some(cell) = table.cell(row, col) else { return };
-        let frame = table.cell_frame(&heights, &shape.xfrm, row, col);
+        let frame = TextFrame::plain(table.cell_frame(&heights, &shape.xfrm, row, col));
         let original = cell.text.clone();
         let rich = RichEdit::new(engine, original.clone(), text_width_pt(&frame, &original));
         let original_xfrm = shape.xfrm;
@@ -234,7 +234,7 @@ impl Editor {
         let heights = self.layout_table(engine, id);
         let Some(shape) = self.pres.shape(self.slide, id) else { return };
         let Some(table) = table_of(shape) else { return };
-        let frame = table.cell_frame(&heights, &shape.xfrm, r, c);
+        let frame = TextFrame::plain(table.cell_frame(&heights, &shape.xfrm, r, c));
         let edit = self.text.as_mut().expect("cell edit");
         edit.frame = frame;
         edit.rich.set_width(engine, text_width_pt(&frame, &edit.rich.body));

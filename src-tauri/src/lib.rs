@@ -106,6 +106,12 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
         .item(&item("insert_text_box", "文字方塊", None)?)
         .item(&item("insert_rect", "矩形", None)?)
         .item(&item("insert_ellipse", "橢圓", None)?)
+        .separator()
+        .item(&item("insert_link", "超連結…", Some("CmdOrCtrl+K"))?)
+        .build()?;
+    let arrange = SubmenuBuilder::new(app, "排列")
+        .item(&item("group", "組成群組", Some("CmdOrCtrl+Alt+G"))?)
+        .item(&item("ungroup", "取消群組", Some("CmdOrCtrl+Alt+Shift+G"))?)
         .build()?;
     let view = SubmenuBuilder::new(app, "檢視")
         .item(&item("zoom_in", "放大", Some("CmdOrCtrl+="))?)
@@ -116,7 +122,7 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
         .item(&PredefinedMenuItem::minimize(app, Some("縮到最小"))?)
         .item(&PredefinedMenuItem::fullscreen(app, Some("進入全螢幕"))?)
         .build()?;
-    MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &insert, &view, &window]).build()
+    MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &insert, &arrange, &view, &window]).build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

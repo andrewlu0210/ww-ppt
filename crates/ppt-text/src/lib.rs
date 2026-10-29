@@ -13,7 +13,7 @@ use parley::{
     Alignment, AlignmentOptions, BreakReason, FontContext, FontFamily, FontFamilyName, FontStyle, FontWeight, Layout,
     LayoutContext, LineHeight, StyleProperty, YieldData,
 };
-use ppt_model::{Align, Color, EMU_PER_PT, Emu, RunStyle, Table, TextBody};
+use ppt_model::{Align, Bullet as BulletDef, BulletKind, Color, EMU_PER_PT, Emu, Paragraph, RunStyle, Table, TextBody};
 
 pub use parley;
 
@@ -89,8 +89,9 @@ impl TextEngine {
             StyleProperty::FontSize(style.size_pt * font_scale),
             StyleProperty::FontWeight(if style.bold { FontWeight::BOLD } else { FontWeight::NORMAL }),
             StyleProperty::FontStyle(if style.italic { FontStyle::Italic } else { FontStyle::Normal }),
-            StyleProperty::Underline(style.underline),
-            StyleProperty::Brush(style.color),
+            // Linked text shows in the theme's hyperlink color, underlined, like PowerPoint.
+            StyleProperty::Underline(style.underline || style.link.is_some()),
+            StyleProperty::Brush(style.link.as_ref().and_then(|l| l.color).unwrap_or(style.color)),
         ]
     }
 
@@ -139,12 +140,14 @@ impl TextEngine {
         let mut layout: Layout<Color> = builder.build(&text);
 
         // Bullets are shaped separately and drawn in the hanging indent.
+        let numbers = list_numbers(&body.paragraphs, &ranges);
         let bullets_shaped: Vec<Option<Layout<Color>>> = body
             .paragraphs
             .iter()
             .zip(&ranges)
-            .map(|(p, r)| match p.bullet {
-                Some(c) if !r.is_empty() => Some(self.layout_bullet(c, p.first_style(), scale)),
+            .zip(&numbers)
+            .map(|((p, r), &n)| match &p.bullet {
+                Some(b) if !r.is_empty() => Some(self.layout_bullet(b, n, p.first_style(), scale)),
                 _ => None,
             })
             .collect();
@@ -225,9 +228,15 @@ impl TextEngine {
         BodyLayout { layout, lines, bullets, height }
     }
 
-    fn layout_bullet(&mut self, bullet: char, style: &RunStyle, scale: f32) -> Layout<Color> {
-        let text = bullet.to_string();
-        let props = self.run_properties(style, scale);
+    /// Shapes item `n`'s bullet: its own font, color and relative size, else the text's.
+    fn layout_bullet(&mut self, bullet: &BulletDef, n: u32, style: &RunStyle, scale: f32) -> Layout<Color> {
+        let (text, font) = bullet.label(n);
+        let mut style = RunStyle { size_pt: style.size_pt * bullet.size.unwrap_or(1.0), color: bullet.color.unwrap_or(style.color), ..style.clone() };
+        if let Some(font) = font {
+            style.latin_font = font.to_string();
+            style.ea_font = font.to_string();
+        }
+        let props = self.run_properties(&style, scale);
         let mut builder = self.layout_cx.ranged_builder(&mut self.font_cx, &text, 1.0, true);
         for prop in props {
             builder.push_default(prop);
@@ -277,6 +286,40 @@ impl TextEngine {
         }
         heights
     }
+}
+
+/// Item numbers for numbered paragraphs (0 elsewhere). A list continues
+/// across deeper levels and empty paragraphs; any other paragraph at the same
+/// level, or a different scheme, starts it over.
+fn list_numbers(paragraphs: &[Paragraph], ranges: &[Range<usize>]) -> Vec<u32> {
+    let mut counters: [Option<(String, u32)>; 9] = Default::default();
+    paragraphs
+        .iter()
+        .zip(ranges)
+        .map(|(p, r)| {
+            let level = (p.level as usize).min(8);
+            for c in counters.iter_mut().skip(level + 1) {
+                *c = None;
+            }
+            if r.is_empty() {
+                return 0;
+            }
+            match p.bullet.as_ref().map(|b| &b.kind) {
+                Some(BulletKind::AutoNum { scheme, start }) => {
+                    let n = match &counters[level] {
+                        Some((s, n)) if s == scheme => n + 1,
+                        _ => *start,
+                    };
+                    counters[level] = Some((scheme.clone(), n));
+                    n
+                }
+                _ => {
+                    counters[level] = None;
+                    0
+                }
+            }
+        })
+        .collect()
 }
 
 /// Gap between a bullet and the text after it, in points.
@@ -382,7 +425,7 @@ mod tests {
         let p = &mut b.paragraphs[0];
         p.mar_l = 342_900; // 27pt
         p.indent = -342_900;
-        p.bullet = Some('•');
+        p.bullet = Some(BulletDef::char('•'));
         let l = engine.layout_body(&b, 200.0);
         assert!(l.layout.len() > 1);
         assert_eq!(l.bullets.len(), 1);
@@ -427,5 +470,27 @@ mod tests {
         assert_eq!(names.len(), 3);
         assert!(names[0].contains("Helvetica") && names[1].contains("微軟正黑體") && names[2].contains("PingFang TC"), "{names:?}");
     }
+
+    #[test]
+    fn numbered_lists_count_per_level() {
+        let num = |level: u8| Paragraph {
+            level,
+            bullet: Some(BulletDef { kind: BulletKind::AutoNum { scheme: "arabicPeriod".into(), start: 1 }, font: None, color: None, size: None }),
+            runs: vec![Run { text: "x".into(), style: RunStyle::default() }],
+            ..Default::default()
+        };
+        let plain = Paragraph { runs: vec![Run { text: "x".into(), style: RunStyle::default() }], ..Default::default() };
+        let paras = vec![num(0), num(1), num(1), num(0), plain, num(0)];
+        let ranges: Vec<Range<usize>> = (0..paras.len()).map(|i| i * 2..i * 2 + 1).collect();
+        // 1, (a: 1, 2), 2, then a plain paragraph restarts the list.
+        assert_eq!(list_numbers(&paras, &ranges), vec![1, 1, 2, 2, 0, 1]);
+        let mut engine = engine();
+        let mut body = TextBody { paragraphs: paras, ..Default::default() };
+        body.paragraphs[0].mar_l = 342_900;
+        body.paragraphs[0].indent = -342_900;
+        let l = engine.layout_body(&body, 400.0);
+        assert_eq!(l.bullets.len(), 5, "every numbered paragraph gets its number");
+    }
+
 }
 

@@ -1,5 +1,6 @@
 //! Table parsing: `a:tbl` and the table styles in `ppt/tableStyles.xml`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ppt_model::table::{Border, CellFill, StylePart, TableCell, TableFlags, TableRow, TableStyle};
@@ -7,7 +8,8 @@ use ppt_model::{Anchor, Line, Table};
 use roxmltree::Node;
 
 use crate::style::{ColorCtx, LevelStyle, attr_bool, attr_i64, child, children, path};
-use crate::{FillSpec, Master, fill_spec, text_body};
+use crate::package::Rel;
+use crate::{FillSpecColor, Master, fill_spec, text_body};
 
 /// PowerPoint's default table style, "Medium Style 2 - Accent 1".
 pub const MEDIUM_STYLE_2: &str = "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}";
@@ -24,18 +26,18 @@ const DEFAULT_BORDER: i64 = 12_700;
 
 /// A border element (`a:lnL`, `a:left/a:ln`, ...): `Some(None)` when explicitly empty.
 fn border(ln: Node, ctx: &ColorCtx) -> Option<Border> {
-    match fill_spec(ln, ctx) {
-        FillSpec::Solid(color) => Some(Some(Line { color, width: attr_i64(ln, "w").unwrap_or(DEFAULT_BORDER) })),
-        FillSpec::None => Some(None),
-        FillSpec::Unset => None,
+    match fill_spec(ln, ctx).color() {
+        FillSpecColor::Solid(color) => Some(Some(Line::new(color, attr_i64(ln, "w").unwrap_or(DEFAULT_BORDER)))),
+        FillSpecColor::None => Some(None),
+        FillSpecColor::Unset => None,
     }
 }
 
 fn cell_fill(n: Node, ctx: &ColorCtx) -> Option<CellFill> {
-    match fill_spec(n, ctx) {
-        FillSpec::Solid(c) => Some(CellFill::Solid(c)),
-        FillSpec::None => Some(CellFill::None),
-        FillSpec::Unset => None,
+    match fill_spec(n, ctx).color() {
+        FillSpecColor::Solid(c) => Some(CellFill::Solid(c)),
+        FillSpecColor::None => Some(CellFill::None),
+        FillSpecColor::Unset => None,
     }
 }
 
@@ -121,7 +123,7 @@ pub(crate) fn style_id(tbl: Node) -> Option<String> {
 }
 
 /// Parses `a:tbl`. Cell text inherits the style's text formatting for its position.
-pub(crate) fn table(tbl: Node, master: &Master, style: Option<Arc<TableStyle>>) -> Table {
+pub(crate) fn table(tbl: Node, master: &Master, style: Option<Arc<TableStyle>>, rels: &HashMap<String, Rel>) -> Table {
     let ctx = &master.ctx;
     let cols: Vec<i64> = path(tbl, &["tblGrid"]).map(|g| children(g, "gridCol").map(|c| attr_i64(c, "w").unwrap_or(0)).collect()).unwrap_or_default();
     let mut table = Table { cols, rows: Vec::new(), flags: table_flags(tbl), style };
@@ -140,7 +142,7 @@ pub(crate) fn table(tbl: Node, master: &Master, style: Option<Arc<TableStyle>>) 
                 text_style.italic = part.italic.or(text_style.italic);
                 text_style.color = part.color.or(text_style.color);
             }
-            let mut text = child(tc, "txBody").map(|tx| text_body(tx, master, None, &[], Some(text_style))).unwrap_or_default();
+            let mut text = child(tc, "txBody").map(|tx| text_body(tx, master, None, &[], Some(text_style), rels)).unwrap_or_default();
             let margin = |name, default| pr.and_then(|p| attr_i64(p, name)).unwrap_or(default);
             text.insets = [margin("marL", MARGIN_LR), margin("marT", MARGIN_TB), margin("marR", MARGIN_LR), margin("marB", MARGIN_TB)];
             text.anchor = match pr.and_then(|p| p.attribute("anchor")) {

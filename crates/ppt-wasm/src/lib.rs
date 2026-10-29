@@ -175,7 +175,31 @@ impl App {
         let single = self.editor.selected_shape().is_some();
         let editing = self.editor.is_editing_text();
         let handles = self.editor.handles(&tol);
-        for shape in self.editor.selected_shapes() {
+        let frame_corners = |xf: &ppt_model::Xfrm| {
+            let tf = view * shape_affine(xf, false);
+            let (w, h) = (xf.w as f64, xf.h as f64);
+            [tf * Point::new(0.0, 0.0), tf * Point::new(w, 0.0), tf * Point::new(w, h), tf * Point::new(0.0, h)]
+        };
+        // The entered group's frame, so it is clear which group is being edited.
+        if let Some(frame) = self.editor.entered_group_frame() {
+            let overlay = SelectionOverlay { corners: frame_corners(&frame), handles: Vec::new(), rotate: None, dpr: self.dpr, editing: true };
+            draw_selection(&mut self.scene, &overlay);
+        }
+        // A selected group shows one frame with handles around all its members.
+        if self.editor.selection_group().is_some()
+            && let Some(frame) = self.editor.selection_frame()
+        {
+            let overlay = SelectionOverlay {
+                corners: frame_corners(&frame),
+                handles: handles.iter().map(|h| to_dev(h.1)).collect(),
+                rotate: None,
+                dpr: self.dpr,
+                editing: false,
+            };
+            draw_selection(&mut self.scene, &overlay);
+        }
+        let shapes = if self.editor.selection_group().is_some() { Vec::new() } else { self.editor.selected_shapes() };
+        for shape in shapes {
             let xf = shape.xfrm;
             let corners = if shape.geometry.is_line() {
                 let (w, h) = (xf.w as f64, xf.h as f64);
@@ -485,6 +509,13 @@ impl App {
         self.touch(changed)
     }
 
+    /// Links the selected text to `url`; an empty string removes links.
+    #[wasm_bindgen(js_name = setLink)]
+    pub fn set_link(&mut self, url: &str) -> bool {
+        let changed = self.editor.set_link(&mut self.engine, Some(url).filter(|u| !u.is_empty()));
+        self.touch(changed)
+    }
+
     /// `align`: "left" | "center" | "right" | "justify".
     #[wasm_bindgen(js_name = setAlign)]
     pub fn set_align(&mut self, align: &str) -> bool {
@@ -501,6 +532,13 @@ impl App {
     #[wasm_bindgen(js_name = setLineSpacing)]
     pub fn set_line_spacing(&mut self, multiple: f32) -> bool {
         let changed = self.editor.apply_paragraph(&mut self.engine, |p| p.line_spacing = multiple);
+        self.touch(changed)
+    }
+
+    /// Numbers the selected paragraphs (`arabicPeriod`, `romanUcPeriod`, ...) or removes numbering.
+    #[wasm_bindgen(js_name = toggleNumbering)]
+    pub fn toggle_numbering(&mut self, scheme: &str) -> bool {
+        let changed = self.editor.toggle_numbering(&mut self.engine, scheme);
         self.touch(changed)
     }
 
@@ -596,6 +634,13 @@ impl App {
     #[wasm_bindgen(js_name = addShape)]
     pub fn add_shape(&mut self, preset: &str) -> bool {
         let changed = self.editor.add_shape(&mut self.engine, preset);
+        self.touch(changed)
+    }
+
+    /// Groups the selected shapes (`true`) or ungroups the selected group.
+    #[wasm_bindgen(js_name = groupShapes)]
+    pub fn group_shapes(&mut self, group: bool) -> bool {
+        let changed = if group { self.editor.group_selected() } else { self.editor.ungroup_selected() };
         self.touch(changed)
     }
 
@@ -774,6 +819,8 @@ impl App {
         set("hasSelection", (!e.selection.is_empty()).into());
         set("editingText", e.is_editing_text().into());
         set("inTable", e.in_table().into());
+        set("canGroup", (e.selection.len() > 1 && e.selection_group().is_none()).into());
+        set("canUngroup", (e.selection_group().is_some() || e.selected_shape().is_some_and(|s| s.group.is_some())).into());
         set("canUndo", e.can_undo().into());
         set("canRedo", e.can_redo().into());
         set("canPaste", e.has_clipboard().into());
@@ -791,6 +838,7 @@ impl App {
             set("italic", f.style.italic.into());
             set("underline", f.style.underline.into());
             set("textColor", hex(f.style.color).into());
+            set("link", f.style.link.as_ref().filter(|l| l.external).map(|l| l.target.clone()).unwrap_or_default().into());
             let align = match f.align {
                 Align::Left => "left",
                 Align::Center => "center",
@@ -799,6 +847,7 @@ impl App {
             };
             set("align", align.into());
             set("bullet", f.bullet.into());
+            set("numbering", f.numbering.clone().unwrap_or_default().into());
         }
         match e.selection_fill() {
             Some(Some(c)) => set("fill", hex(c).into()),

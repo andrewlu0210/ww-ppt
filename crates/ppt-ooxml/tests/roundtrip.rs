@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
-use ppt_model::{Color, Geometry, Line, Presentation, Shape, ShapeKind, TextBody, Xfrm};
+use ppt_model::{Color, Geometry, Line, Paint, Presentation, Shape, ShapeKind, TextBody, Xfrm};
 use ppt_ooxml::{parse_pptx, save_pptx, template_package};
 
 fn sample() -> Presentation {
@@ -84,8 +84,8 @@ fn moved_and_recolored_shapes() {
     let shape = &mut pres.slides[2].shapes[2];
     shape.xfrm.x += 100_000;
     shape.xfrm.rot = 45.0;
-    shape.fill = Some(Color::rgb(0x12, 0x34, 0x56));
-    shape.line = Some(Line { color: Color::rgb(1, 2, 3), width: 25_400 });
+    shape.fill = Some(Paint::Solid(Color::rgb(0x12, 0x34, 0x56)));
+    shape.line = Some(Line::new(Color::rgb(1, 2, 3), 25_400));
     let expect = shape.xfrm;
     // Placeholder that inherits its position: moving it must add an xfrm.
     pres.slides[0].shapes[0].xfrm.y += 50_000;
@@ -93,20 +93,53 @@ fn moved_and_recolored_shapes() {
     let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
     let s = &re.slides[2].shapes[2];
     assert_eq!(s.xfrm, expect);
-    assert_eq!(s.fill, Some(Color::rgb(0x12, 0x34, 0x56)));
-    assert_eq!(s.line, Some(Line { color: Color::rgb(1, 2, 3), width: 25_400 }));
+    assert_eq!(s.fill, Some(Paint::Solid(Color::rgb(0x12, 0x34, 0x56))));
+    assert_eq!(s.line, Some(Line::new(Color::rgb(1, 2, 3), 25_400)));
     assert_eq!(s.text.as_ref().unwrap().plain_text(), "Ellipse");
     assert_eq!(re.slides[0].shapes[0].xfrm, title_xfrm);
 }
 
 #[test]
-fn edited_group_child_is_written_ungrouped_in_place() {
+fn edited_group_child_keeps_its_group() {
     let mut pres = sample();
     let n = pres.slides[2].shapes.len();
+    let group = pres.slides[2].shapes[n - 1].group;
+    assert!(group.is_some(), "the sample's last shape is in a group");
     pres.slides[2].shapes[n - 1].xfrm.x += 200_000;
+    let expect: Vec<Xfrm> = pres.slides[2].shapes.iter().map(|s| s.xfrm).collect();
+    let members = pres.slides[2].shapes.iter().filter(|s| s.group == group).count();
+    let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
+    assert_eq!(re.slides[2].shapes.iter().map(|s| s.xfrm).collect::<Vec<_>>(), expect);
+    let g = re.slides[2].shapes[n - 1].group;
+    assert!(g.is_some());
+    assert_eq!(re.slides[2].shapes.iter().filter(|s| s.group == g).count(), members);
+}
+
+#[test]
+fn ungrouping_and_grouping_round_trip() {
+    let mut pres = sample();
+    let n = pres.slides[2].shapes.len();
+    let group = pres.slides[2].shapes[n - 1].group;
+    for s in pres.slides[2].shapes.iter_mut().filter(|s| s.group == group) {
+        s.group = None;
+    }
     let expect: Vec<Xfrm> = pres.slides[2].shapes.iter().map(|s| s.xfrm).collect();
     let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
     assert_eq!(re.slides[2].shapes.iter().map(|s| s.xfrm).collect::<Vec<_>>(), expect);
+    assert!(re.slides[2].shapes.iter().all(|s| s.group.is_none()), "ungrouped shapes stay ungrouped");
+
+    // Group the first two shapes of slide 3 into a new group.
+    let mut pres = re;
+    let gid = pres.alloc_id();
+    pres.slides[2].shapes[0].group = Some(gid);
+    pres.slides[2].shapes[1].group = Some(gid);
+    let expect: Vec<Xfrm> = pres.slides[2].shapes.iter().map(|s| s.xfrm).collect();
+    let saved = save_pptx(&pres).unwrap();
+    assert!(slide_xml(&saved, 3).contains("<p:grpSp>"));
+    let re = parse_pptx(&saved).unwrap();
+    assert_eq!(re.slides[2].shapes.iter().map(|s| s.xfrm).collect::<Vec<_>>(), expect);
+    let g = re.slides[2].shapes[0].group;
+    assert!(g.is_some() && re.slides[2].shapes[1].group == g);
 }
 
 #[test]
@@ -122,7 +155,7 @@ fn add_delete_reorder_duplicate_slides() {
     let id = pres.alloc_id();
     let mut rect = Shape::new(id, "rect", Xfrm::new(1_000_000, 4_000_000, 2_000_000, 1_000_000));
     rect.geometry = Geometry::preset("roundRect");
-    rect.fill = Some(Color::rgb(0x44, 0x72, 0xC4));
+    rect.fill = Some(Paint::Solid(Color::rgb(0x44, 0x72, 0xC4)));
     slide.shapes.push(rect);
     pres.slides.insert(1, slide);
     // Duplicate the picture slide, delete the shapes slide, move the title slide last.
@@ -176,7 +209,7 @@ fn template_is_a_complete_deck() {
     // Body placeholders on the content layout carry bullets from the master.
     let content = &pres.layouts[1].placeholders[1];
     let p = &content.text.as_ref().unwrap().paragraphs[0];
-    assert_eq!(p.bullet, Some('•'));
+    assert_eq!(p.bullet.as_ref().map(|b| b.kind.clone()), Some(ppt_model::BulletKind::Char('•')));
     assert_eq!(p.end_style.size_pt, 28.0);
     assert_eq!(pres.minor_font, ("Calibri".to_string(), "新細明體".to_string()));
 }
@@ -319,4 +352,57 @@ fn table_rows_and_merges_survive_structural_edits() {
     assert!(t.rows[2].cells[1].h_merge);
     assert_eq!(t.rows[2].cells[0].text.plain_text(), "新列");
     assert_eq!(t.style.as_ref().unwrap().id, "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}");
+}
+
+#[test]
+fn moving_a_whole_group_only_changes_its_outer_frame() {
+    let original = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap();
+    let mut pres = parse_pptx(&original).unwrap();
+    let n = pres.slides[2].shapes.len();
+    let group = pres.slides[2].shapes[n - 1].group;
+    for s in pres.slides[2].shapes.iter_mut().filter(|s| s.group == group) {
+        s.xfrm.x += 300_000;
+        s.xfrm.y += 100_000;
+    }
+    let expect: Vec<Xfrm> = pres.slides[2].shapes.iter().map(|s| s.xfrm).collect();
+    let saved = save_pptx(&pres).unwrap();
+    let (a, b) = (slide_xml(&original, 3), slide_xml(&saved, 3));
+    let group_of = |xml: &str| xml[xml.find("<p:grpSp>").unwrap()..xml.rfind("</p:grpSp>").unwrap()].to_string();
+    let (ga, gb) = (group_of(&a), group_of(&b));
+    // Children keep their XML (group-relative coordinates); only the outer a:off changes.
+    let children = |g: &str| g[g.find("</p:grpSpPr>").unwrap()..].to_string();
+    assert_eq!(children(&ga), children(&gb));
+    assert_ne!(ga, gb);
+    let re = parse_pptx(&saved).unwrap();
+    assert_eq!(re.slides[2].shapes.iter().map(|s| s.xfrm).collect::<Vec<_>>(), expect);
+}
+
+#[test]
+fn hyperlinks_survive_saving_and_text_edits() {
+    let mut pres = parse_pptx(&template_package()).unwrap();
+    let id = pres.alloc_id();
+    let mut shape = Shape::new(id, "連結", Xfrm::new(914_400, 914_400, 4_000_000, 600_000));
+    let mut body = TextBody::default();
+    let plain = body.style_at(0);
+    let linked = ppt_model::RunStyle { link: Some(std::sync::Arc::new(ppt_model::Link::url("https://example.com/a?b=1&c=2", None))), ..plain.clone() };
+    body.insert(0, "前往 ", &plain);
+    body.insert(3, "範例網站", &linked);
+    shape.text = Some(body);
+    pres.slides[0].shapes.push(shape);
+    let saved = save_pptx(&pres).unwrap();
+    let rels = String::from_utf8(parts(&saved)["ppt/slides/_rels/slide1.xml.rels"].clone()).unwrap();
+    assert!(rels.contains(r#"Target="https://example.com/a?b=1&amp;c=2" TargetMode="External""#), "{rels}");
+
+    let link_of = |pres: &Presentation| {
+        let body = pres.slides[0].shapes.last().unwrap().text.as_ref().unwrap();
+        body.paragraphs[0].runs.iter().find_map(|r| r.style.link.clone().map(|l| (r.text.clone(), l.target.clone(), l.external)))
+    };
+    let mut re = parse_pptx(&saved).unwrap();
+    assert_eq!(link_of(&re), Some(("範例網站".to_string(), "https://example.com/a?b=1&c=2".to_string(), true)));
+    // Editing other text in the paragraph regenerates it; the link stays.
+    let body = re.slides[0].shapes.last_mut().unwrap().text.as_mut().unwrap();
+    let style = body.style_at(0);
+    body.insert(0, "請", &style);
+    let re = parse_pptx(&save_pptx(&re).unwrap()).unwrap();
+    assert_eq!(link_of(&re).map(|l| l.0), Some("範例網站".to_string()));
 }

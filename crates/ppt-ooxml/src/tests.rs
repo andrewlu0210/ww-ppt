@@ -106,7 +106,7 @@ fn parses_slide_size_and_shapes() {
     assert_eq!(slide.background, Some(Color::WHITE));
     // The master's non-placeholder logo is inherited; its title placeholder is not.
     assert_eq!(slide.background_shapes.len(), 1);
-    assert_eq!(slide.background_shapes[0].fill, Color::from_hex("4472C4"));
+    assert_eq!(slide.background_shapes[0].fill, Color::from_hex("4472C4").map(ppt_model::Paint::Solid));
     assert_eq!(pres.minor_font, ("Calibri".to_string(), "微軟正黑體".to_string()));
 }
 
@@ -135,7 +135,7 @@ fn shape_style_references_and_runs() {
     let pres = parse_pptx(&sample_pptx()).unwrap();
     let rect = &pres.slides[0].shapes[1];
     assert_eq!(rect.xfrm.rot, 90.0);
-    assert_eq!(rect.fill, Color::from_hex("4472C4"));
+    assert_eq!(rect.fill, Color::from_hex("4472C4").map(ppt_model::Paint::Solid));
     let line = rect.line.unwrap();
     assert_eq!(line.width, 12_700);
     assert_eq!(line.color, Color::rgb(0x22, 0x39, 0x62));

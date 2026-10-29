@@ -6,7 +6,7 @@ use ppt_model::table::{Border, CellFill, TableCell, TableFlags};
 use ppt_model::{Anchor, Table};
 use roxmltree::Node;
 
-use crate::writer::{apply_edits, child, color_xml, esc, open_tag, paragraphs_xml};
+use crate::writer::{Links, apply_edits, child, color_xml, esc, open_tag, paragraphs_xml};
 
 pub(crate) const TABLE_URI: &str = "http://schemas.openxmlformats.org/drawingml/2006/table";
 const MARGINS: [i64; 4] = [91_440, 45_720, 91_440, 45_720];
@@ -57,7 +57,7 @@ fn tc_pr_xml(cell: &TableCell) -> String {
     if kids.is_empty() { format!("<a:tcPr{attrs}/>") } else { format!("<a:tcPr{attrs}>{kids}</a:tcPr>") }
 }
 
-fn tc_xml(cell: &TableCell) -> String {
+fn tc_xml(cell: &TableCell, links: &mut Links) -> String {
     let mut attrs = String::new();
     if cell.grid_span > 1 {
         attrs.push_str(&format!(r#" gridSpan="{}""#, cell.grid_span));
@@ -71,15 +71,19 @@ fn tc_xml(cell: &TableCell) -> String {
     if cell.v_merge {
         attrs.push_str(r#" vMerge="1""#);
     }
-    format!("<a:tc{attrs}><a:txBody><a:bodyPr/><a:lstStyle/>{}</a:txBody>{}</a:tc>", paragraphs_xml(&cell.text), tc_pr_xml(cell))
+    format!("<a:tc{attrs}><a:txBody><a:bodyPr/><a:lstStyle/>{}</a:txBody>{}</a:tc>", paragraphs_xml(&cell.text, links), tc_pr_xml(cell))
 }
 
 /// A complete `a:tbl`. `old_tbl_pr` keeps the original properties' children.
-pub(crate) fn table_xml(t: &Table, old_tbl_pr: Option<&str>) -> String {
+pub(crate) fn table_xml(t: &Table, old_tbl_pr: Option<&str>, links: &mut Links) -> String {
     let style = t.style.as_ref().map(|s| format!("<a:tableStyleId>{}</a:tableStyleId>", esc(&s.id))).unwrap_or_default();
     let tbl_pr = format!("<a:tblPr{}>{}</a:tblPr>", flags_attrs(&t.flags), old_tbl_pr.unwrap_or(&style));
     let grid: String = t.cols.iter().map(|w| format!(r#"<a:gridCol w="{w}"/>"#)).collect();
-    let rows: String = t.rows.iter().map(|r| format!(r#"<a:tr h="{}">{}</a:tr>"#, r.height, r.cells.iter().map(tc_xml).collect::<String>())).collect();
+    let mut rows = String::new();
+    for r in &t.rows {
+        let cells: String = r.cells.iter().map(|c| tc_xml(c, links)).collect();
+        rows.push_str(&format!(r#"<a:tr h="{}">{cells}</a:tr>"#, r.height));
+    }
     format!("<a:tbl>{tbl_pr}<a:tblGrid>{grid}</a:tblGrid>{rows}</a:tbl>")
 }
 
@@ -97,12 +101,12 @@ fn elements<'a, 'i>(n: Node<'a, 'i>, name: &'a str) -> impl Iterator<Item = Node
 }
 
 /// Edits turning the original `tbl` (parsed as `old`) into `new`, in `src` coordinates.
-fn table_edits(src: &str, tbl: Node, old: &Table, new: &Table) -> Vec<(std::ops::Range<usize>, String)> {
+fn table_edits(src: &str, tbl: Node, old: &Table, new: &Table, links: &mut Links) -> Vec<(std::ops::Range<usize>, String)> {
     let tbl_pr = child(tbl, "tblPr");
     let tbl_pr_kids = tbl_pr.map(|p| p.children().filter(|c| c.is_element()).map(|c| &src[c.range()]).collect::<String>());
     if !same_structure(old, new) {
         let kids = tbl_pr_kids.filter(|_| old.style.as_ref().map(|s| &s.id) == new.style.as_ref().map(|s| &s.id));
-        return vec![(tbl.range(), table_xml(new, kids.as_deref()))];
+        return vec![(tbl.range(), table_xml(new, kids.as_deref(), links))];
     }
     let mut edits = Vec::new();
     if old.flags != new.flags
@@ -132,11 +136,11 @@ fn table_edits(src: &str, tbl: Node, old: &Table, new: &Table) -> Vec<(std::ops:
                 match child(tc, "txBody") {
                     Some(tx) => {
                         let kept: String = tx.children().filter(|c| c.is_element() && c.tag_name().name() != "p").map(|c| &src[c.range()]).collect();
-                        edits.push((tx.range(), format!("{}>{kept}{}</a:txBody>", open_tag(src, tx), paragraphs_xml(&nc.text))));
+                        edits.push((tx.range(), format!("{}>{kept}{}</a:txBody>", open_tag(src, tx), paragraphs_xml(&nc.text, links))));
                     }
                     None => {
                         let at = tc.range().start + src[tc.range()].find('>').map_or(0, |i| i + 1);
-                        edits.push((at..at, format!("<a:txBody><a:bodyPr/><a:lstStyle/>{}</a:txBody>", paragraphs_xml(&nc.text))));
+                        edits.push((at..at, format!("<a:txBody><a:bodyPr/><a:lstStyle/>{}</a:txBody>", paragraphs_xml(&nc.text, links))));
                     }
                 }
             }
@@ -156,8 +160,8 @@ fn table_edits(src: &str, tbl: Node, old: &Table, new: &Table) -> Vec<(std::ops:
 }
 
 /// Applies `table_edits` to a whole graphic frame's XML (used for copies too).
-pub(crate) fn patch_table(src: &str, tbl: Node, old: &Table, new: &Table) -> String {
+pub(crate) fn patch_table(src: &str, tbl: Node, old: &Table, new: &Table, links: &mut Links) -> String {
     let r = tbl.range();
-    let edits = table_edits(src, tbl, old, new).into_iter().map(|(e, s)| (e.start - r.start..e.end - r.start, s)).collect();
+    let edits = table_edits(src, tbl, old, new, links).into_iter().map(|(e, s)| (e.start - r.start..e.end - r.start, s)).collect();
     apply_edits(&src[r], edits)
 }

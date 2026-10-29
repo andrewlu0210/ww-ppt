@@ -7,6 +7,8 @@ export interface Status {
   editingText: boolean;
   /** A table or one of its cells is the target (shows the table layout tab). */
   inTable: boolean;
+  canGroup?: boolean;
+  canUngroup?: boolean;
   canUndo: boolean;
   canRedo: boolean;
   canPaste: boolean;
@@ -21,8 +23,12 @@ export interface Status {
   italic?: boolean;
   underline?: boolean;
   textColor?: string;
+  /** URL of the link at the caret / on the selected text, "" when none. */
+  link?: string;
   align?: "left" | "center" | "right" | "justify";
   bullet?: boolean;
+  /** Numbering scheme of the current paragraph, "" when not numbered. */
+  numbering?: string;
   /** Present when shapes are selected; "" means no fill / no outline. */
   fill?: string;
   lineColor?: string;

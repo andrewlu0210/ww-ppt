@@ -41,6 +41,7 @@ export function App() {
   const [layoutNames, setLayoutNames] = useState<string[]>([]);
   const [layoutThumbs, setLayoutThumbs] = useState<(ImageData | undefined)[]>([]);
   const [thumbs, setThumbs] = useState<Map<number, ImageData>>(new Map());
+  const [linkRequest, setLinkRequest] = useState(0);
 
   const dirty = status.revision !== doc.savedRevision;
   const docRef = useRef(doc);
@@ -268,6 +269,12 @@ export function App() {
           if (!engine.insertPicture(await readFile(path), ext)) setError("無法讀取這個圖片檔。");
           break;
         }
+        case "link":
+          engine.setLink(c.url);
+          break;
+        case "group":
+          engine.groupShapes(c.on);
+          break;
         case "insertTable":
           engine.insertTable(c.rows, c.cols);
           break;
@@ -308,6 +315,9 @@ export function App() {
           break;
         case "align":
           engine.setAlign(c.align);
+          break;
+        case "numbering":
+          engine.toggleNumbering(c.scheme);
           break;
         case "bullets":
           engine.toggleBullets();
@@ -356,13 +366,17 @@ export function App() {
       insert_text_box: { kind: "textBox" },
       insert_rect: { kind: "shape", preset: "rect" },
       insert_ellipse: { kind: "shape", preset: "ellipse" },
+      group: { kind: "group", on: true },
+      ungroup: { kind: "group", on: false },
       zoom_in: { kind: "zoom", factor: 1.25 },
       zoom_out: { kind: "zoom", factor: 0.8 },
       zoom_fit: { kind: "zoom", factor: "fit" },
     };
     const unlisten = onMenu((id) => {
       const engine = engineRef.current;
-      if (id === "select_all" && engine) {
+      if (id === "insert_link") {
+        setLinkRequest((n) => n + 1);
+      } else if (id === "select_all" && engine) {
         engine.keyDown("a", false, false, true, false);
         refresh();
       } else if (map[id]) {
@@ -413,7 +427,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}

@@ -1,8 +1,10 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { icons } from "./icons";
 import { ColorPicker } from "./ColorPicker";
 import { LayoutPicker } from "./LayoutPicker";
 import { TablePicker } from "./TablePicker";
+import { Popover } from "./Popover";
+import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command } from "../lib/commands";
 import type { Status } from "../lib/status";
 
@@ -19,6 +21,19 @@ const SHAPES: [string, string][] = [
   ["rightArrow", "向右箭號"],
   ["star5", "星形"],
   ["line", "直線"],
+];
+
+/** Numbering schemes offered in the gallery, with a sample. */
+const NUMBERINGS: [string, string][] = [
+  ["arabicPeriod", "1. 2. 3."],
+  ["arabicParenR", "1) 2) 3)"],
+  ["romanUcPeriod", "I. II. III."],
+  ["alphaUcPeriod", "A. B. C."],
+  ["alphaLcParenR", "a) b) c)"],
+  ["alphaLcPeriod", "a. b. c."],
+  ["romanLcPeriod", "i. ii. iii."],
+  ["circleNumDbPlain", "① ② ③"],
+  ["ea1ChtPeriod", "一. 二. 三."],
 ];
 
 /** Keeps keyboard focus on the canvas input while clicking ribbon controls. */
@@ -50,12 +65,17 @@ interface Props {
   layoutThumbs: (ImageData | undefined)[];
   loadLayoutThumbs: () => void;
   run: (c: Command) => void;
+  /** Bumped by the ⌘K menu item to open the link panel. */
+  linkRequest: number;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = chosen === TABLE_TAB && !status.inTable ? "常用" : chosen;
   const tabs: Tab[] = status.inTable ? [...TABS, TABLE_TAB] : [...TABS];
+  useEffect(() => {
+    if (linkRequest > 0) setTab("插入");
+  }, [linkRequest]);
   const text = status.hasText;
   const shapes = status.hasSelection && !status.editingText;
   const [sizeDraft, setSizeDraft] = useState<string | null>(null);
@@ -173,6 +193,34 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               <div className="rb-col">
                 <div className="rb-row">
                   <Button iconOnly icon={icons.bulletList} label="項目符號" active={status.bullet} disabled={!text} onClick={() => run({ kind: "bullets" })} />
+                  <Popover
+                    button={(open, toggle) => (
+                      <span className="split-btn">
+                        <Button iconOnly icon={icons.numberList} label="編號" active={!!status.numbering} disabled={!text} onClick={() => run({ kind: "numbering", scheme: status.numbering || "arabicPeriod" })} />
+                        <button className={open ? "split-arrow active" : "split-arrow"} title="編號格式" disabled={!text} onClick={toggle} onMouseDown={keepFocus}>
+                          ▾
+                        </button>
+                      </span>
+                    )}
+                  >
+                    {(close) => (
+                      <div className="numbering-panel">
+                        {NUMBERINGS.map(([scheme, sample]) => (
+                          <button
+                            key={scheme}
+                            className={status.numbering === scheme ? "numbering-item active" : "numbering-item"}
+                            onMouseDown={keepFocus}
+                            onClick={() => {
+                              run({ kind: "numbering", scheme });
+                              close();
+                            }}
+                          >
+                            {sample}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Popover>
                   <Button iconOnly icon={icons.outdent} label="減少清單階層" disabled={!text} onClick={() => run({ kind: "level", delta: -1 })} />
                   <Button iconOnly icon={icons.indent} label="增加清單階層" disabled={!text} onClick={() => run({ kind: "level", delta: 1 })} />
                 </div>
@@ -219,6 +267,15 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
             <Group label="文字">
               <Button large icon={icons.textbox} label="文字方塊" onClick={() => run({ kind: "textBox" })} />
             </Group>
+            <Group label="連結">
+              <LinkPicker
+                current={status.link}
+                disabled={!text}
+                request={linkRequest}
+                onApply={(url) => run({ kind: "link", url })}
+                button={(open, toggle) => <Button large active={open} disabled={!text} icon={icons.link} label="連結 (⌘K)" onClick={toggle} />}
+              />
+            </Group>
             <Group label="圖例">
               {SHAPES.map(([preset, label]) => (
                 <Button key={preset} icon={icons[preset]} label={label} onClick={() => run({ kind: "shape", preset })} />
@@ -262,6 +319,10 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               <div className="rb-col">
                 <Button icon={icons.front} label="上移一層" disabled={!shapes} onClick={() => run({ kind: "reorder", order: "forward" })} />
                 <Button icon={icons.back} label="下移一層" disabled={!shapes} onClick={() => run({ kind: "reorder", order: "backward" })} />
+              </div>
+              <div className="rb-col">
+                <Button icon={icons.group} label="組成群組 (⌘⌥G)" disabled={!status.canGroup} onClick={() => run({ kind: "group", on: true })} />
+                <Button icon={icons.ungroup} label="取消群組 (⌘⌥⇧G)" disabled={!status.canUngroup} onClick={() => run({ kind: "group", on: false })} />
               </div>
             </Group>
             <Group label="對齊">

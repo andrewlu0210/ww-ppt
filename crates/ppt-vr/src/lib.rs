@@ -17,7 +17,7 @@ use ppt_render::{DrawOptions, ImageCache, RenderCtx, draw_slide};
 use ppt_text::TextEngine;
 
 /// Families always registered for missing glyphs; mirrors `FALLBACK_FAMILIES` in ui/src/lib/fonts.ts.
-pub const FALLBACK_FAMILIES: [&str; 2] = ["Helvetica Neue", "PingFang TC"];
+pub const FALLBACK_FAMILIES: [&str; 4] = ["Helvetica Neue", "PingFang TC", "Apple Symbols", "Zapf Dingbats"];
 
 pub struct SlideRenderer {
     cx: RenderContext,

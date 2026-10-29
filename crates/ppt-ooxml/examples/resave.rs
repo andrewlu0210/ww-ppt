@@ -1,7 +1,7 @@
 //! Dev tool: `cargo run -p ppt-ooxml --example resave -- in.pptx out.pptx [--edit]`.
 //! Re-saves a deck; with `--edit` it also changes text, moves a shape and adds a slide.
 
-use ppt_model::{Color, Geometry, Shape, Xfrm};
+use ppt_model::{Color, Geometry, Paint, Shape, Xfrm};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -25,7 +25,7 @@ fn main() {
         let id = pres.alloc_id();
         let mut rect = Shape::new(id, "rect", Xfrm::new(1_000_000, 1_000_000, 3_000_000, 1_500_000));
         rect.geometry = Geometry::preset("roundRect");
-        rect.fill = Some(Color::rgb(0xED, 0x7D, 0x31));
+        rect.fill = Some(Paint::Solid(Color::rgb(0xED, 0x7D, 0x31)));
         slide.shapes.push(rect);
         if let Some(body) = slide.shapes.iter_mut().find_map(|s| s.text.as_mut()) {
             let style = body.style_at(0);

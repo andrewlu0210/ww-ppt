@@ -1,10 +1,10 @@
-//! Shape outlines for DrawingML geometry.
-//!
-//! M0 covers the most common presets with hand-written outlines. The full
-//! `presetShapeDefinitions.xml` guide-formula engine replaces this in M1.
+//! Shape outlines for DrawingML geometry: presets via the guide-formula
+//! engine in [`preset`], custom geometry from parsed paths.
 
-use kurbo::{Affine, BezPath, Ellipse, Point, RoundedRect, Shape as _, Vec2};
-use ppt_model::{Anchor, EMU_PER_PT, Geometry, PathCmd, TextBody, Xfrm};
+mod preset;
+
+use kurbo::{Affine, BezPath, Point, Shape as _, Vec2};
+use ppt_model::{Anchor, EMU_PER_PT, Emu, Geometry, PathCmd, TextBody, Xfrm};
 
 pub use kurbo;
 
@@ -20,15 +20,48 @@ pub fn shape_affine(xfrm: &Xfrm, with_flip: bool) -> Affine {
     Affine::translate(Vec2::new(cx, cy)) * Affine::rotate(xfrm.rot.to_radians()) * flip * Affine::translate(Vec2::new(-w / 2.0, -h / 2.0))
 }
 
-/// Width available to text inside the body insets, in points.
-pub fn text_width_pt(xfrm: &Xfrm, body: &TextBody) -> f32 {
-    ((xfrm.w - body.insets[0] - body.insets[2]).max(0) as f64 / EMU_PER_PT) as f32
+/// Where a shape's text goes: its frame, plus the preset's text rectangle
+/// (an ellipse keeps text away from its curve) as extra left/top/right/bottom insets.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextFrame {
+    pub xfrm: Xfrm,
+    pub inset: [Emu; 4],
+}
+
+impl TextFrame {
+    /// The whole frame (text boxes, table cells).
+    pub fn plain(xfrm: Xfrm) -> Self {
+        TextFrame { xfrm, inset: [0; 4] }
+    }
+
+    pub fn of(xfrm: Xfrm, geometry: &Geometry) -> Self {
+        let (w, h) = (xfrm.w as f64, xfrm.h as f64);
+        let inset = match geometry {
+            Geometry::Preset { name, adjust } => preset::text_rect(name, adjust, w, h)
+                .map(|[l, t, r, b]| [l.max(0.0), t.max(0.0), (w - r).max(0.0), (h - b).max(0.0)].map(|v| v.round() as Emu))
+                .unwrap_or([0; 4]),
+            Geometry::Custom(_) => [0; 4],
+        };
+        TextFrame { xfrm, inset }
+    }
+
+    fn insets(&self, body: &TextBody) -> [f64; 4] {
+        std::array::from_fn(|i| (self.inset[i] + body.insets[i]) as f64)
+    }
+}
+
+/// Width available to text inside the text rectangle and body insets, in points.
+pub fn text_width_pt(frame: &TextFrame, body: &TextBody) -> f32 {
+    let [l, _, r, _] = frame.insets(body);
+    ((frame.xfrm.w as f64 - l - r).max(0.0) / EMU_PER_PT) as f32
 }
 
 /// Maps text layout space (points, origin at the first line) to slide space,
 /// honoring insets and vertical anchoring. Text is never mirrored by flips.
-pub fn text_affine(xfrm: &Xfrm, body: &TextBody, content_height_pt: f32) -> Affine {
-    let inner_h = (xfrm.h - body.insets[1] - body.insets[3]) as f64 / EMU_PER_PT;
+pub fn text_affine(frame: &TextFrame, body: &TextBody, content_height_pt: f32) -> Affine {
+    let xfrm = &frame.xfrm;
+    let [l, t, _, b] = frame.insets(body);
+    let inner_h = (xfrm.h as f64 - t - b) / EMU_PER_PT;
     let content = content_height_pt as f64;
     let dy = match body.anchor {
         Anchor::Top => 0.0,
@@ -36,7 +69,7 @@ pub fn text_affine(xfrm: &Xfrm, body: &TextBody, content_height_pt: f32) -> Affi
         Anchor::Bottom => inner_h - content,
     };
     shape_affine(xfrm, false)
-        * Affine::translate(Vec2::new(body.insets[0] as f64, body.insets[1] as f64))
+        * Affine::translate(Vec2::new(l, t))
         * Affine::scale(EMU_PER_PT)
         * Affine::translate(Vec2::new(0.0, dy))
 }
@@ -46,18 +79,18 @@ pub struct Outline {
     pub path: BezPath,
     pub fill: bool,
     pub stroke: bool,
+    /// Lighten/darken applied over the fill (3D-looking presets).
+    pub shade: Shade,
 }
+
+pub use preset::{Shade, is_known as is_known_preset, text_rect as preset_text_rect};
 
 /// Builds the outlines for `geometry` at size `w` × `h` (any unit).
 pub fn outlines(geometry: &Geometry, w: f64, h: f64) -> Vec<Outline> {
     match geometry {
-        Geometry::Preset { name, adjust } => {
-            let adj = |key: &str, default: f64| {
-                adjust.iter().find(|(k, _)| k == key).map(|(_, v)| *v).unwrap_or(default) / 100_000.0
-            };
-            let line = geometry.is_line();
-            vec![Outline { path: preset_path(name, w, h, &adj), fill: !line, stroke: true }]
-        }
+        Geometry::Preset { name, adjust } => preset::outlines(name, adjust, w, h)
+            // Unknown presets show as their frame.
+            .unwrap_or_else(|| vec![Outline { path: kurbo::Rect::new(0.0, 0.0, w, h).to_path(0.1), fill: true, stroke: true, shade: Shade::Normal }]),
         Geometry::Custom(paths) => paths
             .iter()
             .map(|p| {
@@ -74,99 +107,9 @@ pub fn outlines(geometry: &Geometry, w: f64, h: f64) -> Vec<Outline> {
                         PathCmd::Close => path.close_path(),
                     }
                 }
-                Outline { path, fill: p.fill, stroke: p.stroke }
+                Outline { path, fill: p.fill, stroke: p.stroke, shade: if p.fill { Shade::Normal } else { Shade::None } }
             })
             .collect(),
-    }
-}
-
-fn polygon(points: &[(f64, f64)]) -> BezPath {
-    let mut path = BezPath::new();
-    for (i, &(x, y)) in points.iter().enumerate() {
-        if i == 0 {
-            path.move_to((x, y));
-        } else {
-            path.line_to((x, y));
-        }
-    }
-    path.close_path();
-    path
-}
-
-fn preset_path(name: &str, w: f64, h: f64, adj: &dyn Fn(&str, f64) -> f64) -> BezPath {
-    let ss = w.min(h);
-    match name {
-        "line" | "straightConnector1" | "bentConnector2" | "bentConnector3" | "curvedConnector3" => {
-            let mut path = BezPath::new();
-            path.move_to((0.0, 0.0));
-            path.line_to((w, h));
-            path
-        }
-        "ellipse" => Ellipse::new((w / 2.0, h / 2.0), (w / 2.0, h / 2.0), 0.0).to_path(0.1),
-        "roundRect" => {
-            let r = ss * adj("adj", 16_667.0);
-            RoundedRect::new(0.0, 0.0, w, h, r).to_path(0.1)
-        }
-        "triangle" => {
-            let apex = w * adj("adj", 50_000.0);
-            polygon(&[(apex, 0.0), (w, h), (0.0, h)])
-        }
-        "rtTriangle" => polygon(&[(0.0, 0.0), (w, h), (0.0, h)]),
-        "diamond" => polygon(&[(w / 2.0, 0.0), (w, h / 2.0), (w / 2.0, h), (0.0, h / 2.0)]),
-        "parallelogram" => {
-            let x = ss * adj("adj", 25_000.0);
-            polygon(&[(x, 0.0), (w, 0.0), (w - x, h), (0.0, h)])
-        }
-        "trapezoid" => {
-            let x = ss * adj("adj", 25_000.0);
-            polygon(&[(0.0, h), (x, 0.0), (w - x, 0.0), (w, h)])
-        }
-        "hexagon" => {
-            let x = ss * adj("adj", 25_000.0);
-            polygon(&[(0.0, h / 2.0), (x, 0.0), (w - x, 0.0), (w, h / 2.0), (w - x, h), (x, h)])
-        }
-        "octagon" => {
-            let x = ss * adj("adj", 29_289.0);
-            polygon(&[(x, 0.0), (w - x, 0.0), (w, x), (w, h - x), (w - x, h), (x, h), (0.0, h - x), (0.0, x)])
-        }
-        "pentagon" => polygon(&[
-            (w / 2.0, 0.0),
-            (w, h * 0.382),
-            (w * 0.809, h),
-            (w * 0.191, h),
-            (0.0, h * 0.382),
-        ]),
-        "star5" => {
-            let mut pts = Vec::with_capacity(10);
-            for i in 0..10 {
-                let r = if i % 2 == 0 { 0.5 } else { 0.5 * 0.382 };
-                let a = (-90.0 + 36.0 * i as f64).to_radians();
-                pts.push((w / 2.0 + w * r * a.cos(), h / 2.0 + h * r * a.sin()));
-            }
-            polygon(&pts)
-        }
-        "rightArrow" => {
-            let body = h * adj("adj1", 50_000.0);
-            let head = ss * adj("adj2", 50_000.0);
-            let (y1, y2) = ((h - body) / 2.0, (h + body) / 2.0);
-            polygon(&[(0.0, y1), (w - head, y1), (w - head, 0.0), (w, h / 2.0), (w - head, h), (w - head, y2), (0.0, y2)])
-        }
-        "leftArrow" => {
-            let body = h * adj("adj1", 50_000.0);
-            let head = ss * adj("adj2", 50_000.0);
-            let (y1, y2) = ((h - body) / 2.0, (h + body) / 2.0);
-            polygon(&[(w, y1), (head, y1), (head, 0.0), (0.0, h / 2.0), (head, h), (head, y2), (w, y2)])
-        }
-        "chevron" => {
-            let x = ss * adj("adj", 50_000.0);
-            polygon(&[(0.0, 0.0), (w - x, 0.0), (w, h / 2.0), (w - x, h), (0.0, h), (x, h / 2.0)])
-        }
-        "homePlate" => {
-            let x = ss * adj("adj", 50_000.0);
-            polygon(&[(0.0, 0.0), (w - x, 0.0), (w, h / 2.0), (w - x, h), (0.0, h)])
-        }
-        // "rect" and every preset not implemented yet.
-        _ => kurbo::Rect::new(0.0, 0.0, w, h).to_path(0.1),
     }
 }
 
@@ -196,7 +139,7 @@ mod tests {
         let x = Xfrm::new(0, 0, 254_000, 254_000);
         let body = TextBody { anchor: Anchor::Middle, insets: [0; 4], ..Default::default() };
         // 20pt box, 10pt content → content starts 5pt down.
-        let p = text_affine(&x, &body, 10.0) * Point::new(0.0, 0.0);
+        let p = text_affine(&TextFrame::plain(x), &body, 10.0) * Point::new(0.0, 0.0);
         assert!((p.y - 5.0 * EMU_PER_PT).abs() < 1e-6);
     }
 

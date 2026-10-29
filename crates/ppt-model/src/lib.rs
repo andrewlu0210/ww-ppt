@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
+pub use bullet::{Bullet, BulletKind};
 pub use table::Table;
 
+pub mod bullet;
 pub mod table;
 mod text;
 
@@ -145,10 +147,174 @@ impl Default for Geometry {
     }
 }
 
+/// How an area is painted.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Paint {
+    Solid(Color),
+    Gradient(Arc<Gradient>),
+}
+
+impl Paint {
+    /// A single representative color (the first gradient stop), for toolbars
+    /// and places that cannot draw gradients.
+    pub fn color(&self) -> Color {
+        match self {
+            Paint::Solid(c) => *c,
+            Paint::Gradient(g) => g.stops.first().map(|s| s.1).unwrap_or(Color::WHITE),
+        }
+    }
+}
+
+/// `a:gradFill`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Gradient {
+    /// (position 0..=1, color), sorted by position.
+    pub stops: Vec<(f32, Color)>,
+    pub kind: GradientKind,
+    /// The gradient turns with the shape (`rotWithShape`).
+    pub rotate_with_shape: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GradientKind {
+    /// `a:lin`: direction in degrees clockwise from the x axis. With `scaled`
+    /// the angle is applied to a unit square and stretched with the shape.
+    Linear { angle: f64, scaled: bool },
+    /// `a:path`: radiates from the focus rectangle (`fillToRect`, fractions
+    /// left/top/right/bottom) outwards; `circle` vs. `rect`/`shape` paths.
+    Path { circle: bool, focus: [f64; 4] },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Line {
     pub color: Color,
     pub width: Emu,
+    pub dash: Dash,
+    /// Decorations at the start (`a:headEnd`) and end (`a:tailEnd`) of the path.
+    pub head: LineEnd,
+    pub tail: LineEnd,
+}
+
+impl Line {
+    /// A solid line without arrowheads.
+    pub fn new(color: Color, width: Emu) -> Self {
+        Line { color, width, dash: Dash::Solid, head: LineEnd::NONE, tail: LineEnd::NONE }
+    }
+}
+
+/// `a:prstDash` values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Dash {
+    #[default]
+    Solid,
+    Dot,
+    Dash,
+    LgDash,
+    DashDot,
+    LgDashDot,
+    LgDashDotDot,
+    SysDash,
+    SysDot,
+    SysDashDot,
+    SysDashDotDot,
+}
+
+impl Dash {
+    pub fn parse(s: &str) -> Dash {
+        match s {
+            "dot" => Dash::Dot,
+            "dash" => Dash::Dash,
+            "lgDash" => Dash::LgDash,
+            "dashDot" => Dash::DashDot,
+            "lgDashDot" => Dash::LgDashDot,
+            "lgDashDotDot" => Dash::LgDashDotDot,
+            "sysDash" => Dash::SysDash,
+            "sysDot" => Dash::SysDot,
+            "sysDashDot" => Dash::SysDashDot,
+            "sysDashDotDot" => Dash::SysDashDotDot,
+            _ => Dash::Solid,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Dash::Solid => "solid",
+            Dash::Dot => "dot",
+            Dash::Dash => "dash",
+            Dash::LgDash => "lgDash",
+            Dash::DashDot => "dashDot",
+            Dash::LgDashDot => "lgDashDot",
+            Dash::LgDashDotDot => "lgDashDotDot",
+            Dash::SysDash => "sysDash",
+            Dash::SysDot => "sysDot",
+            Dash::SysDashDot => "sysDashDot",
+            Dash::SysDashDotDot => "sysDashDotDot",
+        }
+    }
+
+    /// Dash and gap lengths in multiples of the line width (ECMA-376 20.1.10.48).
+    pub fn pattern(self) -> &'static [f64] {
+        match self {
+            Dash::Solid => &[],
+            Dash::Dot => &[1.0, 3.0],
+            Dash::Dash => &[4.0, 3.0],
+            Dash::LgDash => &[8.0, 3.0],
+            Dash::DashDot => &[4.0, 3.0, 1.0, 3.0],
+            Dash::LgDashDot => &[8.0, 3.0, 1.0, 3.0],
+            Dash::LgDashDotDot => &[8.0, 3.0, 1.0, 3.0, 1.0, 3.0],
+            Dash::SysDash => &[3.0, 1.0],
+            Dash::SysDot => &[1.0, 1.0],
+            Dash::SysDashDot => &[3.0, 1.0, 1.0, 1.0],
+            Dash::SysDashDotDot => &[3.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+
+/// An arrowhead or other line-end decoration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineEnd {
+    pub kind: EndKind,
+    /// Width and length: 0 small, 1 medium, 2 large.
+    pub width: u8,
+    pub length: u8,
+}
+
+impl LineEnd {
+    pub const NONE: LineEnd = LineEnd { kind: EndKind::None, width: 1, length: 1 };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndKind {
+    None,
+    Triangle,
+    Stealth,
+    Diamond,
+    Oval,
+    Arrow,
+}
+
+impl EndKind {
+    pub fn parse(s: &str) -> EndKind {
+        match s {
+            "triangle" => EndKind::Triangle,
+            "stealth" => EndKind::Stealth,
+            "diamond" => EndKind::Diamond,
+            "oval" => EndKind::Oval,
+            "arrow" => EndKind::Arrow,
+            _ => EndKind::None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            EndKind::None => "none",
+            EndKind::Triangle => "triangle",
+            EndKind::Stealth => "stealth",
+            EndKind::Diamond => "diamond",
+            EndKind::Oval => "oval",
+            EndKind::Arrow => "arrow",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -179,6 +345,32 @@ pub struct RunStyle {
     pub latin_font: String,
     /// Resolved East Asian typeface; may be empty.
     pub ea_font: String,
+    /// Hyperlink on the run (`a:hlinkClick`).
+    pub link: Option<Arc<Link>>,
+}
+
+/// A hyperlink: a relationship of the slide plus how PowerPoint shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Link {
+    /// Relationship type (hyperlink, slide, ...).
+    pub kind: String,
+    /// URL for external links, part name for internal ones; empty for pure actions.
+    pub target: String,
+    pub external: bool,
+    /// `action`, e.g. `ppaction://hlinksldjump`.
+    pub action: Option<String>,
+    pub tooltip: Option<String>,
+    /// The theme's hyperlink color, which linked text is drawn in.
+    pub color: Option<Color>,
+}
+
+impl Link {
+    pub const HYPERLINK: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+
+    /// A link to a web address.
+    pub fn url(url: &str, color: Option<Color>) -> Self {
+        Link { kind: Self::HYPERLINK.to_string(), target: url.to_string(), external: true, action: None, tooltip: None, color }
+    }
 }
 
 impl Default for RunStyle {
@@ -191,6 +383,7 @@ impl Default for RunStyle {
             color: Color::BLACK,
             latin_font: "Calibri".to_string(),
             ea_font: String::new(),
+            link: None,
         }
     }
 }
@@ -206,7 +399,7 @@ pub struct Paragraph {
     pub runs: Vec<Run>,
     pub align: Align,
     pub level: u8,
-    pub bullet: Option<char>,
+    pub bullet: Option<Bullet>,
     /// Line spacing as a multiple of single spacing (`a:lnSpc/a:spcPct`).
     pub line_spacing: f32,
     /// Left margin of every line (`marL`).
@@ -271,7 +464,7 @@ pub struct TextBody {
 pub struct ParaDefaults {
     pub style: RunStyle,
     pub align: Align,
-    pub bullet: Option<char>,
+    pub bullet: Option<Bullet>,
     pub line_spacing: f32,
     pub mar_l: Emu,
     pub indent: Emu,
@@ -381,6 +574,9 @@ pub enum ShapeKind {
     Picture { media: Option<String>, crop: Crop },
     /// `a:tbl` in a graphic frame.
     Table(Box<Table>),
+    /// SmartArt, drawn from the pre-rendered drawing PowerPoint stores with it
+    /// and saved verbatim. `shapes` are relative to a `w` × `h` frame at the origin.
+    Diagram { shapes: Arc<Vec<Shape>>, w: Emu, h: Emu },
     /// Content the editor cannot edit yet (charts, SmartArt, ...).
     /// Kept verbatim on save; drawn as a labelled frame.
     Opaque { label: String },
@@ -393,10 +589,13 @@ pub struct Shape {
     pub kind: ShapeKind,
     pub xfrm: Xfrm,
     pub geometry: Geometry,
-    pub fill: Option<Color>,
+    pub fill: Option<Paint>,
     pub line: Option<Line>,
     pub text: Option<TextBody>,
     pub placeholder: Option<Placeholder>,
+    /// The (outermost) group the shape belongs to, identified by an id of its
+    /// own. Group members are kept contiguous in z-order.
+    pub group: Option<ShapeId>,
     /// Where the shape came from in the opened file, for lossless saving.
     pub source: Option<Arc<ShapeSource>>,
 }
@@ -432,10 +631,11 @@ pub struct ContainerSource {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParsedShape {
     pub xfrm: Xfrm,
-    pub fill: Option<Color>,
+    pub fill: Option<Paint>,
     pub line: Option<Line>,
     pub text: Option<TextBody>,
     pub kind: ShapeKind,
+    pub group: Option<ShapeId>,
 }
 
 impl ShapeSource {
@@ -457,6 +657,7 @@ impl Shape {
     pub fn text_bodies(&self) -> Box<dyn Iterator<Item = &TextBody> + '_> {
         let cells: Box<dyn Iterator<Item = &TextBody>> = match &self.kind {
             ShapeKind::Table(t) => Box::new(t.rows.iter().flat_map(|r| r.cells.iter().map(|c| &c.text))),
+            ShapeKind::Diagram { shapes, .. } => Box::new(shapes.iter().flat_map(|s| s.text.iter())),
             _ => Box::new(std::iter::empty()),
         };
         Box::new(self.text.iter().chain(cells))
@@ -482,6 +683,7 @@ impl Shape {
             line: None,
             text: None,
             placeholder: None,
+            group: None,
             source: None,
         }
     }
@@ -538,6 +740,8 @@ pub struct Presentation {
     pub package: Option<Arc<Vec<u8>>>,
     /// Style for new tables (the deck's default table style).
     pub table_style: Option<Arc<table::TableStyle>>,
+    /// The theme's hyperlink color, for links added in the editor.
+    pub link_color: Option<Color>,
     next_id: u32,
 }
 
@@ -553,6 +757,7 @@ impl Default for Presentation {
             text_defaults: None,
             package: None,
             table_style: None,
+            link_color: None,
             next_id: 1,
         }
     }
@@ -640,6 +845,11 @@ impl Presentation {
                     out.push(style.ea_font.clone());
                 }
                 emoji = emoji || p.runs.iter().any(|r| r.text.chars().any(is_emoji));
+                if let Some(b) = &p.bullet {
+                    let (label, font) = b.label(1);
+                    out.extend(font.map(str::to_string));
+                    emoji = emoji || label.chars().any(is_emoji);
+                }
             }
         }
         if emoji {

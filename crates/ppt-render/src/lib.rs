@@ -8,18 +8,134 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parley::{Layout, PositionedLayoutItem};
-use ppt_geometry::{outlines, shape_affine, text_affine, text_width_pt};
+use ppt_geometry::{Shade, TextFrame, outlines, shape_affine, text_affine, text_width_pt};
 use ppt_model::table::CellLook;
-use ppt_model::{Color, Presentation, Shape, ShapeId, ShapeKind, Slide, Table, TextBody, Xfrm};
+use ppt_model::{Color, Gradient, GradientKind, Paint, Presentation, Shape, ShapeId, ShapeKind, Slide, Table, TextBody, Xfrm};
 use ppt_text::{BodyLayout, TextEngine};
 use vello::Scene;
-use vello::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, Shape as _, Stroke, Vec2};
-use vello::peniko::{Blob, Color as PColor, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, StyleRef};
+use vello::kurbo::{Affine, BezPath, Cap, Circle, Line, ParamCurve, PathEl, PathSeg, Point, Rect, Shape as _, Stroke, Vec2};
+use vello::peniko::{Blob, Color as PColor, ColorStop, Fill, Gradient as PGradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat, StyleRef};
 
 pub use vello;
 
 pub fn color(c: Color) -> PColor {
     PColor::from_rgba8(c.r, c.g, c.b, c.a)
+}
+
+/// Strokes `path` with the line's width and dash pattern, plus arrowheads on open paths.
+pub fn stroke_line(scene: &mut Scene, tf: Affine, line: &ppt_model::Line, path: &BezPath) {
+    let width = line.width.max(1) as f64;
+    let mut stroke = Stroke::new(width).with_caps(Cap::Butt);
+    let pattern = line.dash.pattern();
+    if !pattern.is_empty() {
+        stroke = stroke.with_dashes(0.0, pattern.iter().map(|d| d * width));
+    }
+    let brush = color(line.color);
+    scene.stroke(&stroke, tf, brush, None, path);
+    let open = !matches!(path.elements().last(), Some(PathEl::ClosePath));
+    if !open {
+        return;
+    }
+    let segments: Vec<PathSeg> = path.segments().collect();
+    if let (Some(first), Some(last)) = (segments.first(), segments.last()) {
+        draw_line_end(scene, tf, line, line.head, first.start(), first.eval(0.05));
+        draw_line_end(scene, tf, line, line.tail, last.end(), last.eval(0.95));
+    }
+}
+
+/// An arrowhead at `tip`, pointing away from `toward` (a point just inside the path).
+fn draw_line_end(scene: &mut Scene, tf: Affine, line: &ppt_model::Line, end: ppt_model::LineEnd, tip: Point, toward: Point) {
+    use ppt_model::EndKind;
+    if end.kind == EndKind::None {
+        return;
+    }
+    let dir = tip - toward;
+    if dir.hypot() < 1e-9 {
+        return;
+    }
+    let d = dir.normalize();
+    let n = Vec2::new(-d.y, d.x);
+    // Sizes scale with the line width (small, medium, large = 2, 3, 5 times).
+    let lw = (line.width as f64).max(9_525.0);
+    let factor = |v: u8| [2.0, 3.0, 5.0][v.min(2) as usize] * lw;
+    let (len, half) = (factor(end.length), factor(end.width) / 2.0);
+    let base = tip - d * len;
+    let brush = color(line.color);
+    let mut shape = BezPath::new();
+    match end.kind {
+        EndKind::Triangle => {
+            shape.move_to(tip);
+            shape.line_to(base + n * half);
+            shape.line_to(base - n * half);
+            shape.close_path();
+        }
+        EndKind::Stealth => {
+            shape.move_to(tip);
+            shape.line_to(base + n * half);
+            shape.line_to(tip - d * (len * 0.6));
+            shape.line_to(base - n * half);
+            shape.close_path();
+        }
+        EndKind::Diamond => {
+            let c = tip - d * (len / 2.0);
+            shape.move_to(tip);
+            shape.line_to(c + n * half);
+            shape.line_to(base);
+            shape.line_to(c - n * half);
+            shape.close_path();
+        }
+        EndKind::Oval => {
+            let c = tip - d * (len / 2.0);
+            let angle = d.y.atan2(d.x);
+            shape = vello::kurbo::Ellipse::new(c, (len / 2.0, half), angle).to_path(0.1);
+        }
+        EndKind::Arrow => {
+            let mut open = BezPath::new();
+            open.move_to(base + n * half);
+            open.line_to(tip);
+            open.line_to(base - n * half);
+            scene.stroke(&Stroke::new(line.width.max(1) as f64), tf, brush, None, &open);
+            return;
+        }
+        EndKind::None => return,
+    }
+    scene.fill(Fill::NonZero, tf, brush, None, &shape);
+}
+
+/// Fills `path` (in a `w` × `h` local box mapped by `tf`) with a solid color or gradient.
+pub fn fill_paint(scene: &mut Scene, tf: Affine, paint: &Paint, w: f64, h: f64, path: &impl vello::kurbo::Shape) {
+    match paint {
+        Paint::Solid(c) => scene.fill(Fill::NonZero, tf, color(*c), None, path),
+        Paint::Gradient(g) => {
+            let stops: Vec<ColorStop> = g.stops.iter().map(|(pos, c)| ColorStop::from((pos.clamp(0.0, 1.0), color(*c)))).collect();
+            let (brush, brush_tf) = gradient_brush(g, w, h);
+            scene.fill(Fill::NonZero, tf, &brush.with_stops(stops.as_slice()), Some(brush_tf), path);
+        }
+    }
+}
+
+/// The peniko gradient for `g` over a `w` × `h` box, plus the brush transform.
+fn gradient_brush(g: &Gradient, w: f64, h: f64) -> (PGradient, Affine) {
+    let (w, h) = (w.max(1.0), h.max(1.0));
+    match g.kind {
+        GradientKind::Linear { angle, scaled } => {
+            let (sin, cos) = angle.to_radians().sin_cos();
+            // A scaled angle is set in a unit square, so its normal stretches inversely with the box.
+            let (ux, uy) = if scaled { (cos / w, sin / h) } else { (cos, sin) };
+            let len = ux.hypot(uy).max(1e-12);
+            let (ux, uy) = (ux / len, uy / len);
+            // Half the box's extent along the direction: the corners land on 0 and 1.
+            let half = ux.abs() * w / 2.0 + uy.abs() * h / 2.0;
+            let (cx, cy) = (w / 2.0, h / 2.0);
+            (PGradient::new_linear((cx - ux * half, cy - uy * half), (cx + ux * half, cy + uy * half)), Affine::IDENTITY)
+        }
+        GradientKind::Path { focus: [l, t, r, b], .. } => {
+            // Drawn in the unit square and stretched to the box, from the focus rectangle's center.
+            let (cx, cy) = ((l + (1.0 - r)) / 2.0, (t + (1.0 - b)) / 2.0);
+            let radius = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)].iter().map(|(x, y)| (x - cx).hypot(y - cy)).fold(0.0, f64::max);
+            (PGradient::new_radial((cx, cy), radius.max(1e-3) as f32), Affine::scale_non_uniform(w, h))
+        }
+    }
 }
 
 /// Decoded images keyed by media part name. Failed decodes are cached as `None`.
@@ -109,11 +225,19 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
         body.paragraphs[0].align = ppt_model::Align::Center;
         body.paragraphs[0].end_style = ppt_model::RunStyle { size_pt: 14.0, color: Color::rgb(0x80, 0x80, 0x80), ..pres.default_run_style() };
         body.set_plain_text(&format!("{label}（尚未支援編輯）"));
-        draw_body(scene, cx.engine, &body, xf, view);
+        draw_body(scene, cx.engine, &body, &TextFrame::plain(*xf), view);
         return;
     }
     let with_text = opts.skip_text != Some(shape.id);
 
+    if let ShapeKind::Diagram { shapes, w: dw, h: dh } = &shape.kind {
+        // The stored drawing, moved and stretched with the frame.
+        let place = view * Affine::translate((xf.x as f64, xf.y as f64)) * Affine::scale_non_uniform(w / (*dw).max(1) as f64, h / (*dh).max(1) as f64);
+        for child in shapes.iter() {
+            draw_shape(scene, cx, pres, child, place, &DrawOptions { editing: false, ..*opts });
+        }
+        return;
+    }
     if let ShapeKind::Table(table) = &shape.kind {
         draw_table(scene, cx.engine, table, xf, view, opts.skip_cell.filter(|_| !with_text));
         return;
@@ -150,21 +274,25 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
 
     for outline in outlines(&shape.geometry, w, h) {
         if outline.fill
-            && let Some(fill) = shape.fill
+            && let Some(fill) = &shape.fill
         {
-            scene.fill(Fill::NonZero, tf, color(fill), None, &outline.path);
+            fill_paint(scene, tf, fill, w, h, &outline.path);
+            if let Shade::Tint(t) = outline.shade {
+                let veil = if t > 0.0 { PColor::WHITE } else { PColor::BLACK };
+                scene.fill(Fill::NonZero, tf, veil.with_alpha(t.abs()), None, &outline.path);
+            }
         }
         if outline.stroke
             && let Some(line) = shape.line
         {
-            scene.stroke(&Stroke::new(line.width.max(1) as f64), tf, color(line.color), None, &outline.path);
+            stroke_line(scene, tf, &line, &outline.path);
         }
     }
 
     let Some(body) = &shape.text else { return };
     if !body.is_empty() {
         if with_text {
-            draw_body(scene, cx.engine, body, xf, view);
+            draw_body(scene, cx.engine, body, &TextFrame::of(*xf, &shape.geometry), view);
         }
         return;
     }
@@ -179,7 +307,7 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
             hint.set_plain_text(prompt);
             hint.apply_style(0..hint.len(), |s| s.color = Color::rgb(0x80, 0x80, 0x80));
             hint.apply_paragraphs(0..hint.len(), |p| p.bullet = None);
-            draw_body(scene, cx.engine, &hint, xf, view);
+            draw_body(scene, cx.engine, &hint, &TextFrame::of(*xf, &shape.geometry), view);
         }
     }
 }
@@ -198,7 +326,7 @@ pub fn draw_table(scene: &mut Scene, engine: &mut TextEngine, table: &Table, xf:
     for &(r, c, ref cx) in &cells {
         let body = &table.rows[r].cells[c].text;
         if !body.is_empty() && skip_cell != Some((r, c)) {
-            draw_body(scene, engine, body, cx, view);
+            draw_body(scene, engine, body, &TextFrame::plain(*cx), view);
         }
     }
     for ((_, _, cx), look) in cells.iter().zip(&looks) {
@@ -217,9 +345,9 @@ pub fn draw_table(scene: &mut Scene, engine: &mut TextEngine, table: &Table, xf:
     }
 }
 
-pub fn draw_body(scene: &mut Scene, engine: &mut TextEngine, body: &TextBody, xfrm: &Xfrm, view: Affine) {
-    let layout = engine.layout_body(body, text_width_pt(xfrm, body));
-    draw_body_layout(scene, &layout, view * text_affine(xfrm, body, layout.height));
+pub fn draw_body(scene: &mut Scene, engine: &mut TextEngine, body: &TextBody, frame: &TextFrame, view: Affine) {
+    let layout = engine.layout_body(body, text_width_pt(frame, body));
+    draw_body_layout(scene, &layout, view * text_affine(frame, body, layout.height));
 }
 
 /// Draws a laid-out text body (glyphs and bullets); `tf` maps points to device space.
