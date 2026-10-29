@@ -2,7 +2,8 @@
 // pixels relative to the canvas, e.g. `click 400 300 2`, `drag 1 2 3 4`,
 // `text 你好`, `compose ㄋㄧˇ`, `commit 你`, `key Enter meta`, `shot name`.
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { emit, emitTo } from "@tauri-apps/api/event";
+import { availableMonitors } from "@tauri-apps/api/window";
 import type { App } from "../wasm/ppt_wasm";
 import { inTauri, writeFile } from "./backend";
 import type { Command } from "./commands";
@@ -117,9 +118,9 @@ async function step(cmd: string, h: Hooks) {
       break;
     // Slide show input goes through the DOM layer, like real key presses.
     case "showkey": {
-      const layer = document.querySelector<HTMLElement>(".slide-show");
+      const layer = document.querySelector<HTMLElement>(".slide-show, .presenter");
       if (!layer) throw new Error("no slide show");
-      layer.dispatchEvent(new KeyboardEvent("keydown", { key: args[0] === "Space" ? " " : args[0], bubbles: true }));
+      layer.dispatchEvent(new KeyboardEvent("keydown", { key: args[0] === "Space" ? " " : args[0], altKey: has("alt"), bubbles: true }));
       break;
     }
     case "showclick": {
@@ -145,6 +146,19 @@ async function step(cmd: string, h: Hooks) {
     // Same path as a native menu item.
     case "menu":
       await emit("menu", args[0]);
+      break;
+    case "monitors":
+      await log(`monitors ${JSON.stringify((await availableMonitors()).map((m) => ({ name: m.name, pos: m.position, size: m.size, scale: m.scaleFactor })))}`);
+      break;
+    // Input as if pressed in the audience window.
+    case "audiencekey":
+      await emit("show-input", { name: args[0] });
+      break;
+    case "audienceshot":
+      await emitTo("audience", "audience-shot", args[0] ?? "audience");
+      break;
+    case "domshow":
+      await log(`dom presenter=${document.querySelector(".presenter") !== null} slideshow=${document.querySelector(".slide-show") !== null} count=${document.querySelector(".pv-count")?.textContent ?? ""} notes=${JSON.stringify(document.querySelector(".pv-notes")?.textContent?.slice(0, 40) ?? "")}`);
       break;
     case "blur":
       (document.activeElement as HTMLElement | null)?.blur();

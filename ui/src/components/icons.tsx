@@ -22,6 +22,13 @@ export const icons: Record<string, ReactNode> = {
       <path d="M8 20.5h8" />
     </Svg>
   ),
+  presenter: (
+    <Svg>
+      <rect x="2.5" y="4" width="12" height="9" rx="1" />
+      <rect x="16" y="4" width="5.5" height="4" rx="0.5" />
+      <path d="M16 11h5.5M16 13.5h4M2.5 16.5h12M2.5 19h8" />
+    </Svg>
+  ),
   playCurrent: (
     <Svg>
       <rect x="3.5" y="5" width="17" height="12" rx="1" />

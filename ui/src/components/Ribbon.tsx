@@ -71,9 +71,10 @@ interface Props {
   linkRequest: number;
   tableStyles: TableStyleInfo[];
   notesOpen: boolean;
+  usePresenter: boolean;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = isTableTab(chosen) && !status.inTable ? "常用" : chosen;
   const tabs: Tab[] = status.inTable ? [...TABS, ...TABLE_TABS] : [...TABS];
@@ -348,10 +349,19 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "表格設計" && <TableDesignTab status={status} styles={tableStyles} run={run} />}
         {tab === "版面配置" && <TableLayoutTab status={status} run={run} />}
         {tab === "投影片放映" && (
-          <Group label="開始投影片放映">
-            <Button icon={icons.playStart} label="從首張投影片" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: true })} />
-            <Button icon={icons.playCurrent} label="從目前投影片" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} />
-          </Group>
+          <>
+            <Group label="開始投影片放映">
+              <Button icon={icons.playStart} label="從首張投影片" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: true })} />
+              <Button icon={icons.playCurrent} label="從目前投影片" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} />
+              <Button icon={icons.presenter} label="簡報者檢視" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false, presenter: true })} />
+            </Group>
+            <Group label="螢幕">
+              <label className="rb-check" title="接上第二個螢幕時，投影片在外接螢幕放映，這個螢幕顯示簡報者檢視">
+                <input type="checkbox" checked={usePresenter} onChange={(e) => run({ kind: "usePresenter", on: e.target.checked })} />
+                使用簡報者檢視
+              </label>
+            </Group>
+          </>
         )}
         {tab === "檢視" && (
           <>

@@ -46,6 +46,22 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The deck being presented, handed from the main window to the audience window.
+#[derive(Default)]
+struct ShowDeck(std::sync::Mutex<Vec<u8>>);
+
+#[tauri::command]
+fn set_show_deck(deck: State<'_, ShowDeck>, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("expected raw body".into()) };
+    *deck.0.lock().map_err(|e| e.to_string())? = bytes.clone();
+    Ok(())
+}
+
+#[tauri::command]
+fn get_show_deck(deck: State<'_, ShowDeck>) -> Result<Response, String> {
+    Ok(Response::new(deck.0.lock().map_err(|e| e.to_string())?.clone()))
+}
+
 #[tauri::command]
 fn list_fonts(fonts: State<'_, FontService>) -> Vec<String> {
     fonts.families()
@@ -123,6 +139,7 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
     let show = SubmenuBuilder::new(app, "投影片放映")
         .item(&item("show_from_beginning", "從頭播放", Some("CmdOrCtrl+Shift+Enter"))?)
         .item(&item("show_from_current", "從目前的投影片播放", Some("CmdOrCtrl+Enter"))?)
+        .item(&item("show_presenter", "簡報者檢視", Some("Alt+Enter"))?)
         .build()?;
     let window = SubmenuBuilder::new(app, "視窗")
         .item(&PredefinedMenuItem::minimize(app, Some("縮到最小"))?)
@@ -136,6 +153,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(FontService::new())
+        .manage(ShowDeck::default())
         .setup(|app| {
             let menu = build_menu(app)?;
             app.set_menu(menu)?;
@@ -154,6 +172,8 @@ pub fn run() {
             list_fonts,
             resolve_font,
             startup_files,
+            set_show_deck,
+            get_show_deck,
             automation::automation_enabled,
             automation::automation_poll,
             automation::automation_log,

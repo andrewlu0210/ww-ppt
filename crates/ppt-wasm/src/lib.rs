@@ -58,6 +58,8 @@ pub struct App {
     media_counter: u32,
     /// Slide show in progress: the canvas shows only the slide, fitted edge to edge.
     show: Option<SlideShow>,
+    /// Where the show's slide goes (device pixels), instead of the whole canvas: the presenter view.
+    show_viewport: Option<Rect>,
 }
 
 fn js_err(e: impl std::fmt::Display) -> JsValue {
@@ -107,6 +109,7 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         last_frame_ms: 0.0,
         media_counter: 0,
         show: None,
+        show_viewport: None,
     })
 }
 
@@ -114,6 +117,9 @@ impl App {
     /// Device pixels per EMU.
     fn scale(&self) -> f64 {
         let pres = &self.editor.pres;
+        if let (Some(_), Some(r)) = (&self.show, self.show_viewport) {
+            return (r.width() / pres.slide_width as f64).min(r.height() / pres.slide_height as f64);
+        }
         let (margin, zoom) = if self.show.is_some() { (0.0, 1.0) } else { (FIT_MARGIN * self.dpr, self.zoom) };
         let sx = (self.width as f64 - 2.0 * margin).max(1.0) / pres.slide_width as f64;
         let sy = (self.height as f64 - 2.0 * margin).max(1.0) / pres.slide_height as f64;
@@ -122,6 +128,13 @@ impl App {
 
     /// Slide space (EMU) → canvas device pixels.
     fn view(&self) -> Affine {
+        if let (Some(_), Some(r)) = (&self.show, self.show_viewport) {
+            let pres = &self.editor.pres;
+            let s = (r.width() / pres.slide_width as f64).min(r.height() / pres.slide_height as f64);
+            let ox = r.x0 + (r.width() - pres.slide_width as f64 * s) / 2.0;
+            let oy = r.y0 + (r.height() - pres.slide_height as f64 * s) / 2.0;
+            return Affine::translate(Vec2::new(ox, oy)) * Affine::scale(s);
+        }
         let s = self.scale();
         let pres = &self.editor.pres;
         let ox = (self.width as f64 - pres.slide_width as f64 * s) / 2.0;
@@ -155,7 +168,16 @@ impl App {
             None => None,
         };
         let full = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
-        self.scene.fill(ppt_render::vello::peniko::Fill::NonZero, Affine::IDENTITY, blank.unwrap_or(PColor::BLACK), None, &full);
+        // In the presenter view, blanking shows on the slide area only.
+        let area = match self.show_viewport {
+            Some(_) => {
+                let pres = &self.editor.pres;
+                view.transform_rect_bbox(Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64))
+            }
+            None => full,
+        };
+        self.scene.fill(ppt_render::vello::peniko::Fill::NonZero, Affine::IDENTITY, PColor::BLACK, None, &full);
+        self.scene.fill(ppt_render::vello::peniko::Fill::NonZero, Affine::IDENTITY, blank.unwrap_or(PColor::BLACK), None, &area);
         if let (None, Screen::Slide(i)) = (blank, show.screen())
             && let Some(slide) = self.editor.pres.slides.get(i)
         {
@@ -820,6 +842,7 @@ impl App {
     /// Ends the show; the editor goes to the slide that was last shown (the last one after the end screen).
     #[wasm_bindgen(js_name = endShow)]
     pub fn end_show(&mut self) {
+        self.show_viewport = None;
         let last = self.editor.pres.slides.len().saturating_sub(1);
         match self.show.take().map(|s| s.screen()) {
             Some(Screen::Slide(i)) => self.editor.set_slide(&mut self.engine, i),
@@ -849,7 +872,29 @@ impl App {
         running
     }
 
-    /// `{ slide, count, blank }`: `slide` is -1 on the end screen, `blank` is "", "black" or "white".
+    /// Sets the show state exactly (`slide` -1 is the end screen), to mirror the presenter's window.
+    #[wasm_bindgen(js_name = showSet)]
+    pub fn show_set(&mut self, slide: i32, blank: &str) {
+        let Some(show) = self.show.as_mut() else { return };
+        let screen = if slide < 0 { Screen::End } else { Screen::Slide(slide as usize) };
+        let blank = match blank {
+            "black" => Some(Blank::Black),
+            "white" => Some(Blank::White),
+            _ => None,
+        };
+        show.set(screen, blank);
+        self.dirty = true;
+    }
+
+    /// Draws the show's slide into this rectangle (CSS pixels) instead of the whole canvas; w = 0 resets.
+    #[wasm_bindgen(js_name = setShowViewport)]
+    pub fn set_show_viewport(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        let d = self.dpr;
+        self.show_viewport = (w > 0.0 && h > 0.0).then(|| Rect::new(x * d, y * d, (x + w) * d, (y + h) * d));
+        self.dirty = true;
+    }
+
+    /// `{ slide, next, count, blank }`: `slide` / `next` are -1 for the end screen, `blank` is "", "black" or "white".
     /// Null when no show is running.
     #[wasm_bindgen(js_name = showState)]
     pub fn show_state(&self) -> JsValue {
@@ -864,7 +909,12 @@ impl App {
             Some(Blank::White) => "white",
             None => "",
         };
+        let next = match show.upcoming() {
+            Screen::Slide(i) => i as i32,
+            Screen::End => -1,
+        };
         let _ = Reflect::set(&o, &"slide".into(), &slide.into());
+        let _ = Reflect::set(&o, &"next".into(), &next.into());
         let _ = Reflect::set(&o, &"count".into(), &(show.slide_count() as u32).into());
         let _ = Reflect::set(&o, &"blank".into(), &blank.into());
         o.into()

@@ -115,6 +115,25 @@ impl SlideShow {
         }
     }
 
+    /// What [`SlideShow::advance`] would show next (ignoring blanking): the presenter's preview.
+    pub fn upcoming(&self) -> Screen {
+        match self.screen {
+            Screen::Slide(i) => self.visible_after(i).map_or(Screen::End, Screen::Slide),
+            Screen::End => Screen::End,
+        }
+    }
+
+    /// Sets the exact state, e.g. to mirror another window's show.
+    pub fn set(&mut self, screen: Screen, blank: Option<Blank>) {
+        if let Screen::Slide(i) = screen
+            && i >= self.hidden.len()
+        {
+            return;
+        }
+        self.screen = screen;
+        self.blank = blank;
+    }
+
     /// Blanks the screen with `kind`, or shows the slide again if it is already blanked that way.
     pub fn toggle_blank(&mut self, kind: Blank) {
         self.blank = if self.blank == Some(kind) { None } else { Some(kind) };
@@ -170,6 +189,21 @@ mod tests {
         assert_eq!(s.screen(), Screen::Slide(3));
         // Starting from a hidden slide shows it.
         assert_eq!(SlideShow::new(&pres, 2).unwrap().screen(), Screen::Slide(2));
+    }
+
+    #[test]
+    fn upcoming_skips_hidden_and_mirroring_sets_state() {
+        let pres = deck(&[false, true, false]);
+        let mut s = SlideShow::new(&pres, 0).unwrap();
+        assert_eq!(s.upcoming(), Screen::Slide(2));
+        s.goto(2);
+        assert_eq!(s.upcoming(), Screen::End);
+        s.set(Screen::Slide(1), Some(Blank::White));
+        assert_eq!((s.screen(), s.blank()), (Screen::Slide(1), Some(Blank::White)));
+        s.set(Screen::Slide(9), None);
+        assert_eq!(s.screen(), Screen::Slide(1));
+        s.set(Screen::End, None);
+        assert_eq!(s.screen(), Screen::End);
     }
 
     #[test]

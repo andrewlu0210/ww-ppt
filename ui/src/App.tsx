@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
+import { emitTo, listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { availableMonitors, currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import type { App as Engine } from "./wasm/ppt_wasm";
 import { CanvasHost, focusCanvas } from "./components/CanvasHost";
 import { Ribbon } from "./components/Ribbon";
 import { SlidePane } from "./components/SlidePane";
 import { SlideShow } from "./components/SlideShow";
+import { PresenterView, type ShowTimer } from "./components/PresenterView";
+import { AUDIENCE_LABEL, type ShowCommand, type ShowState } from "./lib/show";
 import { MIN_NOTES_HEIGHT, NotesPane, notesFocused } from "./components/NotesPane";
 import { StatusBar } from "./components/StatusBar";
 import {
@@ -27,6 +32,15 @@ import { EMPTY_STATUS, type Status } from "./lib/status";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
+const PRESENTER_KEY = "ww-ppt.presenter";
+
+function loadPresenterPref(): boolean {
+  try {
+    return localStorage.getItem(PRESENTER_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 /** Notes pane visibility and height, remembered per machine. */
 function loadNotesPrefs(): { open: boolean; height: number } {
@@ -56,7 +70,23 @@ export function App() {
   const [thumbs, setThumbs] = useState<Map<number, ImageData>>(new Map());
   const [linkRequest, setLinkRequest] = useState(0);
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
-  const [showing, setShowing] = useState(false);
+  /** Slide show in progress: the slides full screen, or the presenter view. */
+  const [showMode, setShowMode] = useState<"slides" | "presenter" | null>(null);
+  const showing = showMode !== null;
+  const [showState, setShowState] = useState<ShowState | null>(null);
+  /** Whether the slides are on another display (the audience window is open). */
+  const [audienceOpen, setAudienceOpen] = useState(false);
+  const showTimer = useRef<ShowTimer>({ elapsed: 0, since: null });
+  const [usePresenter, setUsePresenter] = useState(loadPresenterPref);
+  const usePresenterRef = useRef(usePresenter);
+  usePresenterRef.current = usePresenter;
+  useEffect(() => {
+    try {
+      localStorage.setItem(PRESENTER_KEY, usePresenter ? "1" : "0");
+    } catch {
+      // Not remembered; fine.
+    }
+  }, [usePresenter]);
   const [notesPrefs, setNotesPrefs] = useState(loadNotesPrefs);
   useEffect(() => {
     try {
@@ -226,33 +256,111 @@ export function App() {
   );
 
   // --- Slide show ----------------------------------------------------------------
-  const startShow = useCallback(async (fromBeginning: boolean) => {
+  /** Opens the audience window full screen on a display other than this window's. */
+  const openAudience = useCallback(async (forceWindowed = false) => {
     const engine = engineRef.current;
-    if (!engine || showingRef.current || !engine.startShow(fromBeginning)) return;
-    setShowing(true);
-    if (inTauri) {
-      const win = getCurrentWindow();
-      wasFullscreen.current = await win.isFullscreen();
-      if (!wasFullscreen.current) await win.setFullscreen(true);
-    }
+    if (!engine) return false;
+    const monitors = await availableMonitors();
+    const here = await currentMonitor();
+    const target = monitors.find((m) => m.name !== here?.name || m.position.x !== here.position.x || m.position.y !== here.position.y);
+    if (!target && !forceWindowed) return false;
+    // The audience window loads its own copy of the deck, unsaved edits included.
+    await invoke("set_show_deck", engine.savePptx());
+    const at = target ?? here;
+    const scale = at?.scaleFactor ?? 1;
+    const win = new WebviewWindow(AUDIENCE_LABEL, {
+      url: "index.html?audience",
+      title: "投影片放映",
+      x: (at?.position.x ?? 0) / scale + (target ? 0 : 60),
+      y: (at?.position.y ?? 0) / scale + (target ? 0 : 60),
+      width: target ? target.size.width / scale : 800,
+      height: target ? target.size.height / scale : 450,
+      focus: false,
+    });
+    await new Promise<void>((resolve, reject) => {
+      void win.once("tauri://created", () => resolve());
+      void win.once("tauri://error", (e) => reject(new Error(String(e.payload))));
+    });
+    if (target) await win.setFullscreen(true);
+    void win.onCloseRequested(() => setAudienceOpen(false));
+    setAudienceOpen(true);
+    return true;
   }, []);
+
+  /** Sends the engine's show state to the views and the audience window. */
+  const syncShow = useCallback(() => {
+    const st = engineRef.current?.showState() as ShowState | null;
+    setShowState(st);
+    if (st) void emitTo(AUDIENCE_LABEL, "show-sync", st).catch(() => {});
+  }, []);
+
+  const startShow = useCallback(
+    async (fromBeginning: boolean, presenter?: boolean, forceAudience = false) => {
+      const engine = engineRef.current;
+      if (!engine || showingRef.current || !engine.startShow(fromBeginning)) return;
+      showTimer.current = { elapsed: 0, since: Date.now() };
+      syncShow();
+      const wantPresenter = presenter ?? usePresenterRef.current;
+      const external = inTauri && (wantPresenter || forceAudience) ? await openAudience(forceAudience).catch(() => false) : false;
+      // Presenter view: always with a second display (when wanted), or when asked for explicitly (⌥↩).
+      setShowMode(external || presenter ? "presenter" : "slides");
+      if (inTauri) {
+        const win = getCurrentWindow();
+        wasFullscreen.current = await win.isFullscreen();
+        if (!wasFullscreen.current) await win.setFullscreen(true);
+        if (external) await win.setFocus();
+      }
+    },
+    [openAudience, syncShow],
+  );
 
   const endShow = useCallback(async () => {
     const engine = engineRef.current;
-    if (!engine) return;
+    if (!engine || !showingRef.current) return;
     engine.endShow();
-    setShowing(false);
+    setShowMode(null);
+    setShowState(null);
+    setAudienceOpen(false);
+    if (inTauri) await (await WebviewWindow.getByLabel(AUDIENCE_LABEL))?.close();
     refresh();
     focusCanvas();
     if (inTauri && !wasFullscreen.current) await getCurrentWindow().setFullscreen(false);
   }, [refresh]);
+
+  const showCommand = useCallback(
+    (c: ShowCommand) => {
+      const engine = engineRef.current;
+      if (!engine || !showingRef.current) return;
+      if (c.name === "end" || !engine.showCommand(c.name, c.index ?? 0)) {
+        void endShow();
+        return;
+      }
+      syncShow();
+    },
+    [endShow, syncShow],
+  );
+
+  // Input forwarded from the audience window; it asks for the state once it has loaded.
+  useEffect(() => {
+    if (!inTauri) return;
+    const a = listen<ShowCommand>("show-input", (e) => showCommand(e.payload));
+    const b = listen("audience-ready", () => syncShow());
+    return () => {
+      void a.then((f) => f());
+      void b.then((f) => f());
+    };
+  }, [showCommand, syncShow]);
 
   const run = useCallback(
     async (c: Command) => {
       const engine = engineRef.current;
       if (!engine) return;
       if (c.kind === "slideShow") {
-        await startShow(c.fromBeginning);
+        await startShow(c.fromBeginning, c.presenter, c.forceAudience);
+        return;
+      }
+      if (c.kind === "usePresenter") {
+        setUsePresenter(c.on);
         return;
       }
       if (c.kind === "toggleNotes") {
@@ -452,6 +560,7 @@ export function App() {
       zoom_fit: { kind: "zoom", factor: "fit" },
       show_from_beginning: { kind: "slideShow", fromBeginning: true },
       show_from_current: { kind: "slideShow", fromBeginning: false },
+      show_presenter: { kind: "slideShow", fromBeginning: false, presenter: true },
       toggle_notes: { kind: "toggleNotes" },
     };
     const unlisten = onMenu((id) => {
@@ -532,7 +641,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}
@@ -547,7 +656,16 @@ export function App() {
         <section className={showing ? "editor-area showing" : "editor-area"}>
           <div className="canvas-area">
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
-            {showing && engineRef.current && <SlideShow engine={engineRef.current} onEnd={() => void endShow()} />}
+            {showMode === "slides" && <SlideShow state={showState} command={showCommand} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}
+            {showMode === "presenter" && engineRef.current && showState && (
+              <PresenterView
+                engine={engineRef.current}
+                state={showState}
+                command={showCommand}
+                timer={showTimer.current}
+                onToggleView={audienceOpen ? undefined : () => setShowMode("slides")}
+              />
+            )}
             {error && (
               <div className="banner" role="alert">
                 {error}
