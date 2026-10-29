@@ -4,6 +4,7 @@ import type { App as Engine } from "./wasm/ppt_wasm";
 import { CanvasHost, focusCanvas } from "./components/CanvasHost";
 import { Ribbon } from "./components/Ribbon";
 import { SlidePane } from "./components/SlidePane";
+import { SlideShow } from "./components/SlideShow";
 import { StatusBar } from "./components/StatusBar";
 import {
   askSaveChanges,
@@ -43,6 +44,11 @@ export function App() {
   const [thumbs, setThumbs] = useState<Map<number, ImageData>>(new Map());
   const [linkRequest, setLinkRequest] = useState(0);
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
+  const [showing, setShowing] = useState(false);
+  const showingRef = useRef(false);
+  showingRef.current = showing;
+  /** Whether the window was already full screen when the show started (so ending it leaves it so). */
+  const wasFullscreen = useRef(false);
 
   const dirty = status.revision !== doc.savedRevision;
   const docRef = useRef(doc);
@@ -199,10 +205,36 @@ export function App() {
     [documentReplaced],
   );
 
+  // --- Slide show ----------------------------------------------------------------
+  const startShow = useCallback(async (fromBeginning: boolean) => {
+    const engine = engineRef.current;
+    if (!engine || showingRef.current || !engine.startShow(fromBeginning)) return;
+    setShowing(true);
+    if (inTauri) {
+      const win = getCurrentWindow();
+      wasFullscreen.current = await win.isFullscreen();
+      if (!wasFullscreen.current) await win.setFullscreen(true);
+    }
+  }, []);
+
+  const endShow = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.endShow();
+    setShowing(false);
+    refresh();
+    focusCanvas();
+    if (inTauri && !wasFullscreen.current) await getCurrentWindow().setFullscreen(false);
+  }, [refresh]);
+
   const run = useCallback(
     async (c: Command) => {
       const engine = engineRef.current;
       if (!engine) return;
+      if (c.kind === "slideShow") {
+        await startShow(c.fromBeginning);
+        return;
+      }
       let structural = false;
       switch (c.kind) {
         case "open": {
@@ -371,7 +403,7 @@ export function App() {
       refresh();
       focusCanvas();
     },
-    [confirmDiscard, documentReplaced, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs],
+    [confirmDiscard, documentReplaced, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow],
   );
 
   // Native menu items are forwarded here by the backend.
@@ -394,9 +426,13 @@ export function App() {
       zoom_in: { kind: "zoom", factor: 1.25 },
       zoom_out: { kind: "zoom", factor: 0.8 },
       zoom_fit: { kind: "zoom", factor: "fit" },
+      show_from_beginning: { kind: "slideShow", fromBeginning: true },
+      show_from_current: { kind: "slideShow", fromBeginning: false },
     };
     const unlisten = onMenu((id) => {
       const engine = engineRef.current;
+      // Editing commands must not touch the deck while it is being presented.
+      if (showingRef.current) return;
       if (id === "insert_link") {
         setLinkRequest((n) => n + 1);
       } else if (id === "select_all" && engine) {
@@ -408,6 +444,17 @@ export function App() {
     });
     return () => void unlisten.then((f) => f());
   }, [run, refresh]);
+
+  // F5 / Shift+F5 start the show, as in PowerPoint for Windows.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "F5" || showingRef.current) return;
+      e.preventDefault();
+      void run({ kind: "slideShow", fromBeginning: !e.shiftKey });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [run]);
 
   // Unsaved changes: window title marker and a prompt before closing.
   useEffect(() => {
@@ -462,8 +509,9 @@ export function App() {
           }}
           run={run}
         />
-        <section className="editor-area">
+        <section className={showing ? "editor-area showing" : "editor-area"}>
           <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
+          {showing && engineRef.current && <SlideShow engine={engineRef.current} onEnd={() => void endShow()} />}
           {error && (
             <div className="banner" role="alert">
               {error}

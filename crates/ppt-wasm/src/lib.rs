@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use js_sys::{Array, Object, Reflect, Uint8Array};
+use ppt_editor::show::{Blank, Screen, SlideShow};
 use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
 use ppt_model::{Align, Color, EMU_PER_PT, Presentation};
@@ -55,6 +56,8 @@ pub struct App {
     dirty: bool,
     last_frame_ms: f64,
     media_counter: u32,
+    /// Slide show in progress: the canvas shows only the slide, fitted edge to edge.
+    show: Option<SlideShow>,
 }
 
 fn js_err(e: impl std::fmt::Display) -> JsValue {
@@ -103,6 +106,7 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         dirty: true,
         last_frame_ms: 0.0,
         media_counter: 0,
+        show: None,
     })
 }
 
@@ -110,10 +114,10 @@ impl App {
     /// Device pixels per EMU.
     fn scale(&self) -> f64 {
         let pres = &self.editor.pres;
-        let margin = FIT_MARGIN * self.dpr;
+        let (margin, zoom) = if self.show.is_some() { (0.0, 1.0) } else { (FIT_MARGIN * self.dpr, self.zoom) };
         let sx = (self.width as f64 - 2.0 * margin).max(1.0) / pres.slide_width as f64;
         let sy = (self.height as f64 - 2.0 * margin).max(1.0) / pres.slide_height as f64;
-        sx.min(sy) * self.zoom
+        sx.min(sy) * zoom
     }
 
     /// Slide space (EMU) → canvas device pixels.
@@ -143,10 +147,34 @@ impl App {
         changed
     }
 
+    /// The slide show frame: the slide only, or a blank / end screen.
+    fn build_show_scene(&mut self, show: &SlideShow, view: Affine, s: f64) {
+        let blank = match show.blank() {
+            Some(Blank::White) => Some(PColor::WHITE),
+            Some(Blank::Black) => Some(PColor::BLACK),
+            None => None,
+        };
+        let full = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
+        self.scene.fill(ppt_render::vello::peniko::Fill::NonZero, Affine::IDENTITY, blank.unwrap_or(PColor::BLACK), None, &full);
+        if let (None, Screen::Slide(i)) = (blank, show.screen())
+            && let Some(slide) = self.editor.pres.slides.get(i)
+        {
+            let opts = DrawOptions { editing: false, emu_per_px: 1.0 / s, ..Default::default() };
+            let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+            draw_slide(&mut self.scene, &mut cx, &self.editor.pres, slide, view, &opts);
+        }
+    }
+
     fn build_scene(&mut self) {
+        self.scene.reset();
         let view = self.view();
         let s = self.scale();
-        self.scene.reset();
+        // The view above is computed while the show is set (edge-to-edge fit).
+        if let Some(show) = self.show.take() {
+            self.build_show_scene(&show, view, s);
+            self.show = Some(show);
+            return;
+        }
         {
             let pres = &self.editor.pres;
             if let Some(slide) = pres.slides.get(self.editor.slide) {
@@ -757,6 +785,71 @@ impl App {
         self.touch(changed)
     }
 
+    // --- Slide show -----------------------------------------------------------------
+
+    /// Starts a slide show from the first slide or from the current one. Returns false for an empty deck.
+    #[wasm_bindgen(js_name = startShow)]
+    pub fn start_show(&mut self, from_beginning: bool) -> bool {
+        self.editor.end_text_edit(&mut self.engine);
+        let pres = &self.editor.pres;
+        self.show = if from_beginning { SlideShow::from_beginning(pres) } else { SlideShow::new(pres, self.editor.slide) };
+        self.dirty = true;
+        self.show.is_some()
+    }
+
+    /// Ends the show; the editor goes to the slide that was last shown (the last one after the end screen).
+    #[wasm_bindgen(js_name = endShow)]
+    pub fn end_show(&mut self) {
+        let last = self.editor.pres.slides.len().saturating_sub(1);
+        match self.show.take().map(|s| s.screen()) {
+            Some(Screen::Slide(i)) => self.editor.set_slide(&mut self.engine, i),
+            Some(Screen::End) => self.editor.set_slide(&mut self.engine, last),
+            None => {}
+        }
+        self.dirty = true;
+    }
+
+    /// Navigates the show: "next" (false means the show is over), "prev",
+    /// "first", "last", "black", "white", or "goto" with a 0-based `index`.
+    #[wasm_bindgen(js_name = showCommand)]
+    pub fn show_command(&mut self, command: &str, index: usize) -> bool {
+        let Some(show) = self.show.as_mut() else { return false };
+        let mut running = true;
+        match command {
+            "next" => running = show.advance(),
+            "prev" => show.back(),
+            "first" => show.first(),
+            "last" => show.last(),
+            "goto" => show.goto(index),
+            "black" => show.toggle_blank(Blank::Black),
+            "white" => show.toggle_blank(Blank::White),
+            _ => {}
+        }
+        self.dirty = true;
+        running
+    }
+
+    /// `{ slide, count, blank }`: `slide` is -1 on the end screen, `blank` is "", "black" or "white".
+    /// Null when no show is running.
+    #[wasm_bindgen(js_name = showState)]
+    pub fn show_state(&self) -> JsValue {
+        let Some(show) = &self.show else { return JsValue::NULL };
+        let o = Object::new();
+        let slide = match show.screen() {
+            Screen::Slide(i) => i as i32,
+            Screen::End => -1,
+        };
+        let blank = match show.blank() {
+            Some(Blank::Black) => "black",
+            Some(Blank::White) => "white",
+            None => "",
+        };
+        let _ = Reflect::set(&o, &"slide".into(), &slide.into());
+        let _ = Reflect::set(&o, &"count".into(), &(show.slide_count() as u32).into());
+        let _ = Reflect::set(&o, &"blank".into(), &blank.into());
+        o.into()
+    }
+
     // --- Slides --------------------------------------------------------------------
 
     #[wasm_bindgen(js_name = setSlide)]
@@ -972,7 +1065,7 @@ impl App {
         self.build_scene();
         let gpu = &mut self.gpu;
         let dev = &gpu.cx.devices[gpu.surface.dev_id];
-        let params = RenderParams { base_color: WORKSPACE, width: self.width, height: self.height, antialiasing_method: AaConfig::Area };
+        let params = RenderParams { base_color: if self.show.is_some() { PColor::BLACK } else { WORKSPACE }, width: self.width, height: self.height, antialiasing_method: AaConfig::Area };
         gpu.renderer.render_to_texture(&dev.device, &dev.queue, &self.scene, &gpu.surface.target_view, &params).map_err(js_err)?;
         let texture = match gpu.surface.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => t,

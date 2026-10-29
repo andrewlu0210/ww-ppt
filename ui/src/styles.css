@@ -233,6 +233,31 @@ button {
   min-height: 0;
 }
 
+/* Slide show: the editor area covers the whole (full screen) window. */
+.editor-area.showing {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+}
+
+.slide-show {
+  position: absolute;
+  inset: 0;
+  outline: none;
+}
+
+.show-end {
+  position: absolute;
+  top: 16px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #fff;
+  font-size: 15px;
+  user-select: none;
+}
+
 .canvas-host {
   position: absolute;
   inset: 0;

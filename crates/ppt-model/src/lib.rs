@@ -716,6 +716,8 @@ pub struct Slide {
     pub background_shapes: Vec<Shape>,
     pub shapes: Vec<Shape>,
     pub background: Option<Color>,
+    /// Skipped in slide shows (`p:sld/@show="0"`).
+    pub hidden: bool,
     pub source: Option<Arc<SlideSource>>,
 }
 
@@ -821,6 +823,7 @@ impl Presentation {
             background_shapes: fresh(layout.background_shapes),
             shapes: fresh(layout.placeholders),
             background: layout.background,
+            hidden: false,
             source: None,
         }
     }

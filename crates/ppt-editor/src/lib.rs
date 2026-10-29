@@ -5,6 +5,7 @@
 
 mod group;
 mod richedit;
+pub mod show;
 mod table;
 
 use std::collections::HashMap;

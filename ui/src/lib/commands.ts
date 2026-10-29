@@ -43,7 +43,8 @@ export type Command =
   | { kind: "lineWidth"; width: number }
   | { kind: "reorder"; order: "front" | "forward" | "backward" | "back" }
   | { kind: "alignShapes"; to: "left" | "center" | "right" | "top" | "middle" | "bottom" }
-  | { kind: "zoom"; factor: number | "fit" };
+  | { kind: "zoom"; factor: number | "fit" }
+  | { kind: "slideShow"; fromBeginning: boolean };
 
 /** A gallery table style with the colors its preview needs (`App::tableStyles()`). */
 export interface TableStyleInfo {

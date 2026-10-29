@@ -335,6 +335,7 @@ impl Parser<'_> {
         let mut slide = Slide {
             layout: Some(layout.index),
             background: background(root, &master.ctx).or(layout.bg).or(master.bg).or(Some(Color::WHITE)),
+            hidden: attr_bool(root, "show") == Some(false),
             ..Default::default()
         };
         let show_master = attr_bool(root, "showMasterSp").unwrap_or(true);

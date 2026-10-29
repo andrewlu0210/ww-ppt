@@ -118,11 +118,15 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
         .item(&item("zoom_out", "縮小", Some("CmdOrCtrl+-"))?)
         .item(&item("zoom_fit", "符合視窗大小", Some("CmdOrCtrl+0"))?)
         .build()?;
+    let show = SubmenuBuilder::new(app, "投影片放映")
+        .item(&item("show_from_beginning", "從頭播放", Some("CmdOrCtrl+Shift+Enter"))?)
+        .item(&item("show_from_current", "從目前的投影片播放", Some("CmdOrCtrl+Enter"))?)
+        .build()?;
     let window = SubmenuBuilder::new(app, "視窗")
         .item(&PredefinedMenuItem::minimize(app, Some("縮到最小"))?)
         .item(&PredefinedMenuItem::fullscreen(app, Some("進入全螢幕"))?)
         .build()?;
-    MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &insert, &arrange, &view, &window]).build()
+    MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &insert, &arrange, &view, &show, &window]).build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

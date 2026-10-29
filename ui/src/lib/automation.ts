@@ -114,6 +114,22 @@ async function step(cmd: string, h: Hooks) {
     case "shot":
       await capture(engine, args[0] ?? "shot");
       break;
+    // Slide show input goes through the DOM layer, like real key presses.
+    case "showkey": {
+      const layer = document.querySelector<HTMLElement>(".slide-show");
+      if (!layer) throw new Error("no slide show");
+      layer.dispatchEvent(new KeyboardEvent("keydown", { key: args[0] === "Space" ? " " : args[0], bubbles: true }));
+      break;
+    }
+    case "showclick": {
+      const layer = document.querySelector<HTMLElement>(".slide-show");
+      if (!layer) throw new Error("no slide show");
+      layer.dispatchEvent(new PointerEvent("pointerdown", { button: num(0) || 0, bubbles: true }));
+      break;
+    }
+    case "showstate":
+      await log(`showstate ${JSON.stringify(engine.showState())} end=${document.querySelector(".show-end") !== null} slide=${(engine.status() as { slideIndex: number }).slideIndex}`);
+      break;
     case "status":
       await log(`status ${JSON.stringify(engine.status())} ime=${JSON.stringify(Array.from(engine.imeRect()))}`);
       break;
