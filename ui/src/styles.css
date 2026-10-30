@@ -1091,6 +1091,95 @@ button {
   align-items: center;
   padding: 1px 8px;
   white-space: nowrap;
+  cursor: default;
+}
+
+.anim-row:hover {
+  background: #f2f4f7;
+}
+
+.anim-row.active {
+  background: #dce8fb;
+}
+
+.anim-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  width: 360px;
+}
+
+.anim-gallery-title {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.anim-gallery-title.entr {
+  color: #2f6b22;
+}
+
+.anim-gallery-title.emph {
+  color: #7a5a00;
+}
+
+.anim-gallery-title.exit {
+  color: #9b2d22;
+}
+
+.anim-gallery-items {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.anim-preset {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  cursor: default;
+}
+
+.anim-preset:hover {
+  background: #f2f4f7;
+}
+
+.anim-preset.active {
+  border-color: #4a7fd6;
+  background: #dce8fb;
+}
+
+/* Click numbers beside animated shapes on the canvas. */
+.anim-badges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.anim-badge {
+  position: absolute;
+  transform: translate(-100%, 0);
+  margin-left: -3px;
+  min-width: 14px;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  color: #444;
+  background: #fff;
+  border: 1px solid #999;
+  white-space: nowrap;
+}
+
+.anim-badge.selected {
+  color: #fff;
+  background: #4a7fd6;
+  border-color: #4a7fd6;
 }
 
 .anim-click {

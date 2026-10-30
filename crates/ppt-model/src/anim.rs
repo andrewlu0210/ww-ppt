@@ -7,12 +7,42 @@
 //! so effects without special support still work.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::{Color, ShapeId};
 
-#[derive(Clone, Debug, PartialEq)]
+mod edit;
+mod preset;
+
+pub use edit::Trigger;
+pub use edit::{effect_duration, effect_elements, set_effect_duration};
+pub use preset::{PRESETS, Preset, build_effect};
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Timing {
     pub root: TimeNode,
+    /// Shape ids (`spid`) of the loaded XML → the shape or group they name,
+    /// to rewrite ids inside kept original XML.
+    pub spids: HashMap<u32, ShapeId>,
+    /// The loaded build list (`p:bldLst` entries).
+    pub builds: Vec<Build>,
+}
+
+/// A `p:bldP` / `p:bldGraphic` entry: how a shape's text builds for the
+/// effects with the same group id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Build {
+    pub element: ShapeId,
+    pub grp_id: u32,
+    pub xml: Arc<str>,
+}
+
+/// An element's original XML, kept so effects that were not edited save as they were.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawXml {
+    pub xml: Arc<str>,
+    /// Factor applied to every time inside when saving (duration edits).
+    pub time_scale: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -37,7 +67,12 @@ pub struct TimeNode {
     /// `entr`, `exit`, `emph`, `path`, ...
     pub preset_class: String,
     pub preset_id: Option<u32>,
+    pub preset_subtype: Option<u32>,
+    /// Links an effect to its build list entry.
+    pub grp_id: Option<u32>,
     pub children: Vec<TimeNode>,
+    /// The loaded XML of effects and of top-level sequences other than the main one.
+    pub source: Option<RawXml>,
 }
 
 impl Default for TimeNode {
@@ -56,7 +91,10 @@ impl Default for TimeNode {
             node_type: String::new(),
             preset_class: String::new(),
             preset_id: None,
+            preset_subtype: None,
+            grp_id: None,
             children: Vec::new(),
+            source: None,
         }
     }
 }
@@ -74,6 +112,8 @@ pub enum NodeKind {
 /// range of paragraphs of their text.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Target {
+    /// The shape, or the group (by its group id), the XML names.
+    pub element: ShapeId,
     pub shapes: Vec<ShapeId>,
     pub paragraphs: Option<(usize, usize)>,
 }
@@ -376,7 +416,7 @@ fn simple_dur(n: &TimeNode) -> f64 {
     }
 }
 
-fn active_dur(n: &TimeNode) -> f64 {
+pub(crate) fn active_dur(n: &TimeNode) -> f64 {
     simple_dur(n) * n.repeat.max(0.0) * if n.auto_rev { 2.0 } else { 1.0 }
 }
 
@@ -582,14 +622,14 @@ fn collect_effects(n: &TimeNode, click: usize, begin: f64, out: &mut Vec<EffectI
     }
 }
 
-fn find_main_seq(n: &TimeNode) -> Option<&TimeNode> {
+pub(crate) fn find_main_seq(n: &TimeNode) -> Option<&TimeNode> {
     if n.node_type == "mainSeq" {
         return Some(n);
     }
     n.children.iter().find_map(find_main_seq)
 }
 
-fn visit_behaviors<'a>(n: &'a TimeNode, f: &mut impl FnMut(&'a Target, &'a Behavior)) {
+pub(crate) fn visit_behaviors<'a>(n: &'a TimeNode, f: &mut impl FnMut(&'a Target, &'a Behavior)) {
     if let NodeKind::Behavior(t, b) = &n.kind {
         f(t, b);
     }
@@ -874,7 +914,7 @@ mod tests {
     }
 
     fn behavior(id: u32, b: Behavior, delay: f64, dur: f64) -> TimeNode {
-        TimeNode { kind: NodeKind::Behavior(Target { shapes: vec![ShapeId(id)], paragraphs: None }, b), delay_ms: delay, dur_ms: Some(dur), fill_hold: true, ..Default::default() }
+        TimeNode { kind: NodeKind::Behavior(Target { element: ShapeId(id), shapes: vec![ShapeId(id)], paragraphs: None }, b), delay_ms: delay, dur_ms: Some(dur), fill_hold: true, ..Default::default() }
     }
 
     fn appear(id: u32) -> TimeNode {
@@ -889,7 +929,7 @@ mod tests {
     fn timing(groups: Vec<(bool, Vec<TimeNode>)>) -> Timing {
         let groups = groups.into_iter().map(|(click, effects)| TimeNode { click, children: effects, fill_hold: true, ..Default::default() }).collect();
         let main = TimeNode { kind: NodeKind::Seq, node_type: "mainSeq".into(), children: groups, ..Default::default() };
-        Timing { root: TimeNode { node_type: "tmRoot".into(), children: vec![main], ..Default::default() } }
+        Timing { root: TimeNode { node_type: "tmRoot".into(), children: vec![main], ..Default::default() }, ..Default::default() }
     }
 
     #[test]
@@ -932,7 +972,7 @@ mod tests {
         let g2 = TimeNode { delay_ms: 500.0, children: vec![effect(vec![appear(3)], "afterEffect", 0.0)], fill_hold: true, ..Default::default() };
         let click = TimeNode { click: true, children: vec![g1, g2], fill_hold: true, ..Default::default() };
         let main = TimeNode { kind: NodeKind::Seq, node_type: "mainSeq".into(), children: vec![click], ..Default::default() };
-        let t = Timing { root: TimeNode { children: vec![main], ..Default::default() } };
+        let t = Timing { root: TimeNode { children: vec![main], ..Default::default() }, ..Default::default() };
         let p = Player::new(&t);
         let f = p.frame(&TestStage, 1, 250.0);
         assert!((f.shapes[&ShapeId(1)].opacity - 0.5).abs() < 1e-9);
@@ -950,7 +990,7 @@ mod tests {
         let mut first = TimeNode { click: true, auto_begin: true, children: vec![effect(vec![path, hide], "afterEffect", 0.0)], fill_hold: true, ..Default::default() };
         first.children[0].preset_class = "exit".into();
         let main = TimeNode { kind: NodeKind::Seq, node_type: "mainSeq".into(), children: vec![first], ..Default::default() };
-        let t = Timing { root: TimeNode { children: vec![main], ..Default::default() } };
+        let t = Timing { root: TimeNode { children: vec![main], ..Default::default() }, ..Default::default() };
         let p = Player::new(&t);
         assert_eq!(p.clicks(), 0);
         let f = p.frame(&TestStage, 0, 0.0);
@@ -1006,7 +1046,7 @@ mod tests {
     #[test]
     fn paragraphs_build_one_at_a_time() {
         let para = |i: usize| TimeNode {
-            kind: NodeKind::Behavior(Target { shapes: vec![ShapeId(1)], paragraphs: Some((i, i)) }, Behavior::Set { attr: "style.visibility".into(), to: Value::Str("visible".into()) }),
+            kind: NodeKind::Behavior(Target { element: ShapeId(1), shapes: vec![ShapeId(1)], paragraphs: Some((i, i)) }, Behavior::Set { attr: "style.visibility".into(), to: Value::Str("visible".into()) }),
             dur_ms: Some(1.0),
             fill_hold: true,
             ..Default::default()

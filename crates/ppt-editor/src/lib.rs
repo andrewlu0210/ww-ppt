@@ -3,6 +3,7 @@
 //! All pointer coordinates are in slide space (EMU). The host converts from
 //! screen coordinates and passes tolerances already scaled to EMU.
 
+mod anim;
 mod group;
 mod richedit;
 pub mod show;
@@ -1312,6 +1313,7 @@ impl Editor {
         let selection = std::mem::take(&mut self.selection);
         let Some(slide) = self.pres.slides.get_mut(self.slide) else { return false };
         slide.shapes.retain(|s| !selection.contains(&s.id));
+        self.prune_animations();
         self.push_undo(before);
         true
     }
@@ -1549,10 +1551,16 @@ impl Editor {
         for s in src.background_shapes {
             copy.background_shapes.push(Shape { id: self.pres.alloc_id(), ..s });
         }
-        let mut groups: HashMap<ShapeId, ShapeId> = HashMap::new();
+        let mut ids: HashMap<ShapeId, ShapeId> = HashMap::new();
         for s in src.shapes {
-            let group = s.group.map(|g| *groups.entry(g).or_insert_with(|| self.pres.alloc_id()));
-            copy.shapes.push(Shape { id: self.pres.alloc_id(), group, ..s });
+            let group = s.group.map(|g| *ids.entry(g).or_insert_with(|| self.pres.alloc_id()));
+            let id = self.pres.alloc_id();
+            ids.insert(s.id, id);
+            copy.shapes.push(Shape { id, group, ..s });
+        }
+        // The copy's animations play on its own shapes.
+        if let Some(t) = &mut copy.timing {
+            std::sync::Arc::make_mut(t).remap(&ids);
         }
         self.pres.slides.insert(index + 1, copy);
         self.slide = index + 1;

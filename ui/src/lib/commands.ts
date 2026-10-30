@@ -49,6 +49,13 @@ export type Command =
   | { kind: "setTransition"; id: string; option: string; durationMs: number; onClick: boolean; afterMs: number; all: boolean }
   | { kind: "previewTransition" }
   | { kind: "previewAnimations" }
+  | { kind: "addAnimation"; class: string; id: number; subtype?: number }
+  | { kind: "changeAnimation"; index: number; class: string; id: number; subtype?: number }
+  | { kind: "removeAnimation"; index: number }
+  | { kind: "moveAnimation"; from: number; to: number }
+  | { kind: "setAnimationTrigger"; index: number; trigger: string }
+  | { kind: "setAnimationTiming"; index: number; delayMs?: number; durMs?: number }
+  | { kind: "selectAnimation"; index: number }
   | { kind: "toggleNotes" };
 
 /** A gallery table style with the colors its preview needs (`App::tableStyles()`). */

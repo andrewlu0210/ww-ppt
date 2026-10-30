@@ -25,7 +25,7 @@ use std::sync::Arc;
 use package::{Package, REL_NS, Rel};
 use ppt_model::{
     Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
-    PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeId, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
+    PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
 use ppt_model::table::TableStyle;
 use roxmltree::{Document, Node};
@@ -370,6 +370,7 @@ impl Parser<'_> {
             namespaces: src.namespaces.clone(),
             shape_ids: slide.shapes.iter().map(|s| s.id).collect(),
             transition: slide.transition.clone(),
+            timing: slide.timing.clone(),
         }));
         Ok(slide)
     }
@@ -1128,7 +1129,7 @@ fn para_defaults(s: &LevelStyle, finalize: &dyn Fn(&LevelStyle) -> RunStyle) -> 
 /// Animation targets: each `cNvPr` id in the shape tree → the shapes it stands for
 /// (a group's id covers all its members).
 fn spid_map(tree: Node, shapes: &[Shape]) -> anim::SpidMap {
-    let by_start: HashMap<usize, ShapeId> = shapes.iter().filter_map(|s| s.source.as_ref().map(|src| (src.range.start, s.id))).collect();
+    let by_start: HashMap<usize, &Shape> = shapes.iter().filter_map(|s| s.source.as_ref().map(|src| (src.range.start, s))).collect();
     let mut map = anim::SpidMap::new();
     for n in tree.descendants().filter(|n| matches!(n.tag_name().name(), "sp" | "cxnSp" | "pic" | "graphicFrame" | "grpSp")) {
         let Some(id) = n
@@ -1139,14 +1140,15 @@ fn spid_map(tree: Node, shapes: &[Shape]) -> anim::SpidMap {
         else {
             continue;
         };
-        let members: Vec<ShapeId> = if n.tag_name().name() == "grpSp" {
+        let members: Vec<&Shape> = if n.tag_name().name() == "grpSp" {
             n.descendants().filter_map(|d| by_start.get(&d.range().start)).copied().collect()
         } else {
             by_start.get(&n.range().start).into_iter().copied().collect()
         };
-        if !members.is_empty() {
-            map.insert(id, members);
-        }
+        let Some(first) = members.first() else { continue };
+        // A group is named by its (outermost) group id; nested groups are flattened into it.
+        let element = if n.tag_name().name() == "grpSp" { first.group.unwrap_or(first.id) } else { first.id };
+        map.insert(id, (element, members.iter().map(|s| s.id).collect()));
     }
     map
 }

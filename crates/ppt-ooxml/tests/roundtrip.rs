@@ -567,3 +567,68 @@ fn transitions_round_trip_and_edit() {
     let xml = String::from_utf8(parts(&saved2)["ppt/slides/slide1.xml"].clone()).unwrap();
     assert_eq!(xml.matches("<p:transition").count(), 1, "{xml}");
 }
+
+#[test]
+fn animations_are_written_kept_and_edited() {
+    use ppt_model::anim::{Player, Target, Timing, Trigger, build_effect, effect_duration, set_effect_duration};
+    let mut pres = sample();
+    let shapes: Vec<_> = pres.slides[0].shapes.iter().map(|s| (s.id, s.text.is_some())).collect();
+    let (a, b) = (shapes[0].0, shapes[1].0);
+    let target = |id| Target { element: id, shapes: vec![id], paragraphs: None };
+    let mut fly = build_effect("entr", 2, Some(8), &target(a)).unwrap();
+    fly.grp_id = Some(0);
+    let mut spin = build_effect("emph", 8, None, &target(b)).unwrap();
+    spin.node_type = Trigger::After.node_type().into();
+    spin.delay_ms = 300.0;
+    let mut out = build_effect("exit", 10, None, &target(a)).unwrap();
+    out.grp_id = Some(1);
+    let mut t = Timing::new();
+    t.set_effects(vec![fly, spin, out]);
+    pres.slides[0].timing = Some(std::sync::Arc::new(t));
+
+    let saved = save_pptx(&pres).unwrap();
+    let xml = slide_xml(&saved, 1);
+    assert!(roxmltree::Document::parse(&xml).is_ok());
+    let ids: Vec<&str> = xml.match_indices("<p:cTn id=\"").map(|(i, _)| xml[i + 11..].split('"').next().unwrap()).collect();
+    let unique: std::collections::HashSet<_> = ids.iter().collect();
+    assert_eq!(ids.len(), unique.len(), "cTn ids must be unique: {xml}");
+    if shapes[0].1 {
+        assert!(xml.contains(r#"grpId="1" animBg="1"/>"#), "{xml}");
+    }
+    let re = parse_pptx(&saved).unwrap();
+    let timing = re.slides[0].timing.as_deref().unwrap();
+    let effects = timing.effects();
+    assert_eq!(effects.iter().map(|e| (e.preset_class.as_str(), e.preset_id, Trigger::of(e))).collect::<Vec<_>>(), vec![("entr", Some(2), Trigger::Click), ("emph", Some(8), Trigger::After), ("exit", Some(10), Trigger::Click)]);
+    assert_eq!((effects[1].delay_ms, effect_duration(effects[1])), (300.0, 2000.0));
+    assert_eq!(Player::new(timing).clicks(), 2);
+
+    // Unedited animations save as they were.
+    let again = save_pptx(&re).unwrap();
+    assert_eq!(slide_xml(&again, 1), xml);
+
+    // Editing one effect rewrites the sequence but keeps the others' XML.
+    let mut pres = re;
+    let mut t = pres.slides[0].timing.as_deref().unwrap().clone();
+    let mut effects: Vec<_> = t.effects().into_iter().cloned().collect();
+    set_effect_duration(&mut effects[0], 1500.0);
+    effects[2].node_type = Trigger::With.node_type().into();
+    effects.remove(1);
+    t.set_effects(effects);
+    pres.slides[0].timing = Some(std::sync::Arc::new(t));
+    let saved = save_pptx(&pres).unwrap();
+    let xml2 = slide_xml(&saved, 1);
+    assert_eq!(xml2.matches("<p:timing>").count(), 1);
+    let re = parse_pptx(&saved).unwrap();
+    let effects = re.slides[0].timing.as_deref().unwrap().effects().into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(effects.len(), 2);
+    assert_eq!((effect_duration(&effects[0]), Trigger::of(&effects[1])), (1500.0, Trigger::With));
+    assert!(xml2.contains(r#"dur="1500""#) && !xml2.contains(r#"presetID="8""#), "{xml2}");
+
+    // Without effects the timing goes away.
+    let mut pres = re;
+    let mut t = pres.slides[0].timing.as_deref().unwrap().clone();
+    t.set_effects(Vec::new());
+    pres.slides[0].timing = (!t.is_empty()).then(|| std::sync::Arc::new(t));
+    let xml3 = slide_xml(&save_pptx(&pres).unwrap(), 1);
+    assert!(!xml3.contains("<p:timing"), "{xml3}");
+}

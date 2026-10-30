@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use ppt_editor::show::{Blank, Screen, SlideShow};
-use ppt_model::anim::{Player, SlideStage};
+use ppt_model::anim::{PRESETS, Player, SlideStage, Trigger, effect_elements};
 use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
 use ppt_model::{Align, Color, EMU_PER_PT, Presentation};
@@ -1070,28 +1070,117 @@ impl App {
         self.dirty = true;
     }
 
-    /// The current slide's animations in playing order:
-    /// `[{ click, trigger, class, presetId, shapes, startMs, durMs }]` (`shapes` are names).
+    /// The current slide's animations in playing order: `[{ click, trigger,
+    /// class, presetId, subtype, shapes, startMs, durMs, delayMs, selected, badge }]`
+    /// (`shapes` are names; `badge` is the top-left of the animated shapes in CSS pixels).
     pub fn animations(&self) -> Array {
         let e = &self.editor;
         let Some(slide) = e.pres.slides.get(e.slide) else { return Array::new() };
         let Some(timing) = slide.timing.as_deref() else { return Array::new() };
+        let view = self.view();
         Player::new(timing)
             .effects()
             .into_iter()
-            .map(|fx| {
+            .zip(timing.effects())
+            .map(|(fx, node)| {
                 let o = Object::new();
-                let names: Array = fx.shapes.iter().filter_map(|id| slide.shapes.iter().find(|s| s.id == *id)).map(|s| JsValue::from(s.name.as_str())).collect();
+                let shapes: Vec<&ppt_model::Shape> = fx.shapes.iter().filter_map(|id| slide.shapes.iter().find(|s| s.id == *id)).collect();
+                let names: Array = shapes.iter().map(|s| JsValue::from(s.name.as_str())).collect();
+                let elements = effect_elements(node);
+                let members: Vec<&ppt_model::Shape> = slide.shapes.iter().filter(|s| elements.contains(&s.id) || s.group.is_some_and(|g| elements.contains(&g))).collect();
+                let selected = members.iter().any(|s| e.is_selected(s.id));
+                let corner = members.iter().map(|s| (s.xfrm.x, s.xfrm.y)).reduce(|a, b| (a.0.min(b.0), a.1.min(b.1)));
+                let badge: JsValue = match corner {
+                    Some((x, y)) => {
+                        let p = view * Point::new(x as f64, y as f64);
+                        Array::of2(&(p.x / self.dpr).into(), &(p.y / self.dpr).into()).into()
+                    }
+                    None => JsValue::NULL,
+                };
                 let _ = Reflect::set(&o, &"click".into(), &(fx.click as u32).into());
                 let _ = Reflect::set(&o, &"trigger".into(), &fx.trigger.into());
                 let _ = Reflect::set(&o, &"class".into(), &fx.class.into());
                 let _ = Reflect::set(&o, &"presetId".into(), &fx.preset_id.map_or(JsValue::NULL, JsValue::from));
+                let _ = Reflect::set(&o, &"subtype".into(), &node.preset_subtype.map_or(JsValue::NULL, JsValue::from));
                 let _ = Reflect::set(&o, &"shapes".into(), &names.into());
                 let _ = Reflect::set(&o, &"startMs".into(), &fx.start_ms.into());
                 let _ = Reflect::set(&o, &"durMs".into(), &fx.dur_ms.into());
+                let _ = Reflect::set(&o, &"delayMs".into(), &node.delay_ms.into());
+                let _ = Reflect::set(&o, &"selected".into(), &selected.into());
+                let _ = Reflect::set(&o, &"badge".into(), &badge);
                 JsValue::from(o)
             })
             .collect()
+    }
+
+    /// The effects the editor can add: `[{ class, id, subtype, durMs, directional }]`.
+    #[wasm_bindgen(js_name = animationPresets)]
+    pub fn animation_presets(&self) -> Array {
+        PRESETS
+            .iter()
+            .map(|p| {
+                let o = Object::new();
+                let _ = Reflect::set(&o, &"class".into(), &p.class.into());
+                let _ = Reflect::set(&o, &"id".into(), &p.id.into());
+                let _ = Reflect::set(&o, &"subtype".into(), &p.subtype.into());
+                let _ = Reflect::set(&o, &"durMs".into(), &p.dur_ms.into());
+                let _ = Reflect::set(&o, &"directional".into(), &p.directional.into());
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
+    /// Adds an effect to every selected shape; `subtype < 0` uses the default option.
+    #[wasm_bindgen(js_name = addAnimation)]
+    pub fn add_animation(&mut self, class: &str, id: u32, subtype: i32) -> bool {
+        self.editor.end_text_edit(&mut self.engine);
+        let changed = self.editor.add_animation(class, id, (subtype >= 0).then_some(subtype as u32));
+        self.touch(changed)
+    }
+
+    /// Replaces effect `index`; `subtype < 0` uses the default option.
+    #[wasm_bindgen(js_name = changeAnimation)]
+    pub fn change_animation(&mut self, index: usize, class: &str, id: u32, subtype: i32) -> bool {
+        let changed = self.editor.change_animation(index, class, id, (subtype >= 0).then_some(subtype as u32));
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = removeAnimation)]
+    pub fn remove_animation(&mut self, index: usize) -> bool {
+        let changed = self.editor.remove_animation(index);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = moveAnimation)]
+    pub fn move_animation(&mut self, from: usize, to: usize) -> bool {
+        let changed = self.editor.move_animation(from, to);
+        self.touch(changed)
+    }
+
+    /// `trigger`: "clickEffect", "withEffect" or "afterEffect".
+    #[wasm_bindgen(js_name = setAnimationTrigger)]
+    pub fn set_animation_trigger(&mut self, index: usize, trigger: &str) -> bool {
+        let t = match trigger {
+            "withEffect" => Trigger::With,
+            "afterEffect" => Trigger::After,
+            _ => Trigger::Click,
+        };
+        let changed = self.editor.set_animation_trigger(index, t);
+        self.touch(changed)
+    }
+
+    /// Sets effect `index`'s delay and duration (ms); a negative value leaves it unchanged.
+    #[wasm_bindgen(js_name = setAnimationTiming)]
+    pub fn set_animation_timing(&mut self, index: usize, delay_ms: f64, dur_ms: f64) -> bool {
+        let changed = self.editor.set_animation_timing(index, (delay_ms >= 0.0).then_some(delay_ms), (dur_ms > 0.0).then_some(dur_ms));
+        self.touch(changed)
+    }
+
+    /// Selects the shapes effect `index` animates.
+    #[wasm_bindgen(js_name = selectAnimation)]
+    pub fn select_animation(&mut self, index: usize) -> bool {
+        let changed = self.editor.select_animation(&mut self.engine, index);
+        self.touch(changed)
     }
 
     /// Plays the current slide's transition in the editor (from the previous slide).
@@ -1326,6 +1415,7 @@ impl App {
         let marks: Array = e.pres.slides.iter().map(|s| JsValue::from(s.transition.as_ref().is_some_and(|t| t.animates()))).collect();
         set("transitionSlides", marks.into());
         set("animations", self.animations().into());
+        set("canAnimate", e.can_animate().into());
         set("zoom", self.zoom.into());
         set("frameMs", self.last_frame_ms.into());
         set("revision", (e.revision() as f64).into());

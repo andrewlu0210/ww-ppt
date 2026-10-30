@@ -267,14 +267,14 @@ mod tests {
     fn animation_clicks_come_before_the_next_slide() {
         use ppt_model::anim::{Behavior, NodeKind, Target, TimeNode, Timing, Value};
         let appear = |id| TimeNode {
-            kind: NodeKind::Behavior(Target { shapes: vec![ppt_model::ShapeId(id)], paragraphs: None }, Behavior::Set { attr: "style.visibility".into(), to: Value::Str("visible".into()) }),
+            kind: NodeKind::Behavior(Target { element: ppt_model::ShapeId(id), shapes: vec![ppt_model::ShapeId(id)], paragraphs: None }, Behavior::Set { attr: "style.visibility".into(), to: Value::Str("visible".into()) }),
             dur_ms: Some(1.0),
             ..Default::default()
         };
         let click = |id| TimeNode { click: true, children: vec![TimeNode { children: vec![appear(id)], ..Default::default() }], ..Default::default() };
         let main = TimeNode { kind: NodeKind::Seq, node_type: "mainSeq".into(), children: vec![click(1), click(2)], ..Default::default() };
         let mut pres = deck(&[false, false]);
-        pres.slides[0].timing = Some(std::sync::Arc::new(Timing { root: TimeNode { children: vec![main], ..Default::default() } }));
+        pres.slides[0].timing = Some(std::sync::Arc::new(Timing { root: TimeNode { children: vec![main], ..Default::default() }, ..Default::default() }));
         let mut s = SlideShow::new(&pres, 0).unwrap();
         assert_eq!((s.step(), s.steps()), (0, 2));
         s.advance();

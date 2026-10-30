@@ -28,7 +28,8 @@ import {
 import { startAutomation } from "./lib/automation";
 import { SHAPES_MARKER, type Command, type TableStyleInfo } from "./lib/commands";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
-import { EMPTY_STATUS, type Status } from "./lib/status";
+import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
+import { AnimationBadges } from "./components/AnimationTab";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
@@ -70,6 +71,8 @@ export function App() {
   const [thumbs, setThumbs] = useState<Map<number, ImageData>>(new Map());
   const [linkRequest, setLinkRequest] = useState(0);
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
+  const [animPresets, setAnimPresets] = useState<AnimationPreset[]>([]);
+  const [ribbonTab, setRibbonTab] = useState("");
   /** Slide show in progress: the slides full screen, or the presenter view. */
   const [showMode, setShowMode] = useState<"slides" | "presenter" | null>(null);
   const showing = showMode !== null;
@@ -200,6 +203,7 @@ export function App() {
       setDoc({ name, path, savedRevision: engine.revision() });
       setLayoutNames(engine.layoutNames() as string[]);
       setTableStyles(engine.tableStyles() as TableStyleInfo[]);
+      setAnimPresets(engine.animationPresets() as AnimationPreset[]);
       setLayoutThumbs([]);
       setThumbs(new Map());
       refresh();
@@ -549,6 +553,27 @@ export function App() {
         case "previewAnimations":
           engine.previewAnimations();
           break;
+        case "addAnimation":
+          engine.addAnimation(c.class, c.id, c.subtype ?? -1);
+          break;
+        case "changeAnimation":
+          engine.changeAnimation(c.index, c.class, c.id, c.subtype ?? -1);
+          break;
+        case "removeAnimation":
+          engine.removeAnimation(c.index);
+          break;
+        case "moveAnimation":
+          engine.moveAnimation(c.from, c.to);
+          break;
+        case "setAnimationTrigger":
+          engine.setAnimationTrigger(c.index, c.trigger);
+          break;
+        case "setAnimationTiming":
+          engine.setAnimationTiming(c.index, c.delayMs ?? -1, c.durMs ?? -1);
+          break;
+        case "selectAnimation":
+          engine.selectAnimation(c.index);
+          break;
       }
       if (structural) scheduleThumbs(true);
       refresh();
@@ -660,7 +685,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} animPresets={animPresets} onTabChange={setRibbonTab} />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}
@@ -676,6 +701,7 @@ export function App() {
         <section className={showing ? "editor-area showing" : "editor-area"}>
           <div className="canvas-area">
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
+            {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}
             {showMode === "slides" && <SlideShow state={showState} command={showCommand} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}
             {showMode === "presenter" && engineRef.current && showState && (
               <PresenterView

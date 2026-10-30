@@ -739,6 +739,8 @@ pub struct SlideSource {
     pub shape_ids: Vec<ShapeId>,
     /// The transition as loaded, to tell whether it was edited.
     pub transition: Option<Transition>,
+    /// The animations as loaded, to tell whether they were edited.
+    pub timing: Option<Arc<anim::Timing>>,
 }
 
 /// A slide layout: what a new slide based on it starts with.

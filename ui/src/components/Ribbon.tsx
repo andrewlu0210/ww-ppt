@@ -9,7 +9,7 @@ import { TransitionTab } from "./TransitionTab";
 import { AnimationTab } from "./AnimationTab";
 import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
-import type { Status } from "../lib/status";
+import type { AnimationPreset, Status } from "../lib/status";
 
 const TABS = ["常用", "插入", "圖形格式", "轉場", "動畫", "投影片放映", "檢視"] as const;
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
@@ -74,11 +74,15 @@ interface Props {
   tableStyles: TableStyleInfo[];
   notesOpen: boolean;
   usePresenter: boolean;
+  animPresets: AnimationPreset[];
+  /** Told which tab is showing (the canvas shows animation order on 動畫). */
+  onTabChange: (tab: string) => void;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, animPresets, onTabChange }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = isTableTab(chosen) && !status.inTable ? "常用" : chosen;
+  useEffect(() => onTabChange(tab), [tab, onTabChange]);
   const tabs: Tab[] = status.inTable ? [...TABS, ...TABLE_TABS] : [...TABS];
   useEffect(() => {
     if (linkRequest > 0) setTab("插入");
@@ -351,7 +355,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "表格設計" && <TableDesignTab status={status} styles={tableStyles} run={run} />}
         {tab === "版面配置" && <TableLayoutTab status={status} run={run} />}
         {tab === "轉場" && <TransitionTab status={status} run={run} />}
-        {tab === "動畫" && <AnimationTab status={status} run={run} />}
+        {tab === "動畫" && <AnimationTab status={status} run={run} presets={animPresets} />}
         {tab === "投影片放映" && (
           <>
             <Group label="開始投影片放映">

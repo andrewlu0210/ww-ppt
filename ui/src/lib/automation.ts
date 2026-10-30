@@ -171,6 +171,17 @@ async function step(cmd: string, h: Hooks) {
       await log(`transition slide=${st.slideIndex} ${JSON.stringify(st.transition ?? null)} marks=${JSON.stringify(st.transitionSlides)}`);
       break;
     }
+    case "tab":
+      Array.from(document.querySelectorAll<HTMLButtonElement>(".rb-tabs [role=tab]"))
+        .find((b) => b.textContent === rest)
+        ?.click();
+      break;
+    case "dom": {
+      // Count and text of the elements matching a selector, e.g. `dom .anim-badge`.
+      const els = Array.from(document.querySelectorAll<HTMLElement>(rest));
+      await log(`dom ${rest} n=${els.length} ${JSON.stringify(els.slice(0, 12).map((e) => `${e.textContent?.trim().slice(0, 60)}${e.style.left ? `@${e.style.left},${e.style.top}` : ""}`))}`);
+      break;
+    }
     case "status":
       await log(`status ${JSON.stringify(engine.status())} ime=${JSON.stringify(Array.from(engine.imeRect()))}`);
       break;

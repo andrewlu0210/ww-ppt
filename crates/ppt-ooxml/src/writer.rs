@@ -18,6 +18,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::Error;
+use crate::anim::{TimingCx, timing_xml};
 use crate::transition::{transition_edit, transition_xml};
 use crate::notes::{CT_NOTES_MASTER, CT_NOTES_SLIDE, CT_THEME, notes_master_xml, notes_slide_xml, notes_text, with_notes_text};
 use crate::table_writer::{TABLE_URI, patch_table, style_xml as table_style_xml, table_xml};
@@ -487,6 +488,8 @@ struct SlideOut<'a> {
     media: &'a mut MediaOut,
     /// Namespace declarations raw shapes need on the root element.
     namespaces: Vec<(String, String)>,
+    /// The id each shape (and group, by its group id) was written with, for animations.
+    written: HashMap<ppt_model::ShapeId, u32>,
 }
 
 impl SlideOut<'_> {
@@ -532,7 +535,7 @@ fn shape_unchanged(shape: &Shape, src: &ShapeSource) -> bool {
 }
 
 /// Parses a shape's XML out of context by wrapping it with its namespace declarations.
-fn wrap(xml: &str, namespaces: &[(String, String)]) -> (String, usize) {
+pub(crate) fn wrap(xml: &str, namespaces: &[(String, String)]) -> (String, usize) {
     let decls: String = namespaces
         .iter()
         .map(|(p, u)| if p.is_empty() { format!(r#" xmlns="{}""#, esc(u)) } else { format!(r#" xmlns:{p}="{}""#, esc(u)) })
@@ -557,6 +560,7 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
     {
         let want: u32 = attr.value().parse().unwrap_or(0);
         let id = out.take_id(want);
+        out.written.insert(shape.id, id);
         if id != want {
             edits.push((attr.range_value(), id.to_string()));
         }
@@ -688,6 +692,7 @@ fn rebuild_sp_pr(src: &str, sp_pr: Option<Node>, shape: &Shape, xfrm: bool, fill
 /// XML for a shape created in the editor.
 fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
     let id = out.take_id(0);
+    out.written.insert(shape.id, id);
     let name = esc(&shape.name);
     let ph = shape.placeholder.as_ref().map(|ph| {
         let ty = if ph.kind == "obj" { String::new() } else { format!(r#" type="{}""#, esc(&ph.kind)) };
@@ -761,6 +766,7 @@ fn shape_xml(shape: &Shape, out: &mut SlideOut) -> String {
     if !grouped && src.part == out.part && shape_unchanged(shape, src) && !out.used_ids.contains(&raw_id(src)) && out.media.owned_free(src, &out.part) && keeps_owned(out) {
         out.need_namespaces(&src.namespaces);
         out.used_ids.insert(raw_id(src));
+        out.written.insert(shape.id, raw_id(src));
         src.xml().to_string()
     } else {
         patch_shape(shape, src, grouped, out)
@@ -848,9 +854,11 @@ fn group_xml(members: &[Shape], out: &mut SlideOut) -> String {
             out.need_namespaces(&src.namespaces);
             let group = &src.doc[container.range.clone()];
             if let Ok(doc) = Document::parse(&wrap(group, &src.namespaces).0) {
-                for id in doc.descendants().filter(|n| n.tag_name().name() == "cNvPr").filter_map(|n| n.attribute("id")?.parse().ok()) {
-                    out.used_ids.insert(id);
+                let ids: Vec<u32> = doc.descendants().filter(|n| n.tag_name().name() == "cNvPr").filter_map(|n| n.attribute("id")?.parse().ok()).collect();
+                if let (Some(g), Some(&id)) = (members[0].group, ids.first()) {
+                    out.written.insert(g, id);
                 }
+                out.used_ids.extend(ids);
             }
             return moved.unwrap_or_else(|| group.to_string());
         }
@@ -859,6 +867,9 @@ fn group_xml(members: &[Shape], out: &mut SlideOut) -> String {
     let (x0, y0, x1, y1) = bounds_of(members);
     let (w, h) = ((x1 - x0).max(0), (y1 - y0).max(0));
     let id = out.take_id(0);
+    if let Some(g) = members[0].group {
+        out.written.insert(g, id);
+    }
     let inner: String = members.iter().map(|s| shape_xml(s, out)).collect();
     format!(
         r#"<p:grpSp><p:nvGrpSpPr><p:cNvPr id="{id}" name="群組 {id}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="{x0}" y="{y0}"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="{x0}" y="{y0}"/><a:chExt cx="{w}" cy="{h}"/></a:xfrm></p:grpSpPr>{inner}</p:grpSp>"#
@@ -901,8 +912,10 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
     let Some(t) = template else {
         let extra: String = out.namespaces.iter().filter(|(p, _)| !matches!(p.as_str(), "a" | "r" | "p")).map(|(p, u)| format!(r#" xmlns:{p}="{}""#, esc(u))).collect();
         let transition = slide.transition.as_ref().map(transition_xml).unwrap_or_default();
+        let ns: Vec<(String, String)> = [("a", "http://schemas.openxmlformats.org/drawingml/2006/main"), ("p", "http://schemas.openxmlformats.org/presentationml/2006/main")].iter().map(|(p, u)| (p.to_string(), u.to_string())).collect();
+        let timing = edited_timing(slide, &ns, out).unwrap_or_default();
         return format!(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld {NS_DECLS}{extra}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}</p:sld>"#
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld {NS_DECLS}{extra}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}{timing}</p:sld>"#
         );
     };
     let doc_text = &t.doc;
@@ -921,8 +934,18 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
     if slide.transition != t.transition {
         edits.push(transition_edit(doc_text, root, slide.transition.as_ref()));
     }
-    // Animations that point at shapes we no longer write would make PowerPoint repair the file.
-    if let Some(timing) = child(root, "timing") {
+    if slide.timing != t.timing {
+        let xml = edited_timing(slide, &t.namespaces, out).unwrap_or_default();
+        let at = match child(root, "timing") {
+            Some(old) => old.range(),
+            None => {
+                let at = child(root, "extLst").map_or_else(|| close_tag_start(doc_text, root), |e| e.range().start);
+                at..at
+            }
+        };
+        edits.push((at, xml));
+    } else if let Some(timing) = child(root, "timing") {
+        // Animations that point at shapes we no longer write would make PowerPoint repair the file.
         let dangling = timing.descendants().filter_map(|n| n.attribute("spid")).filter_map(|v| v.parse::<u32>().ok()).any(|id| !out.used_ids.contains(&id));
         if dangling {
             edits.push((timing.range(), String::new()));
@@ -938,8 +961,17 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
     apply_edits(doc_text, edits)
 }
 
+/// `p:timing` for a slide whose animations were edited (`None`: no animations).
+fn edited_timing(slide: &Slide, namespaces: &[(String, String)], out: &SlideOut) -> Option<String> {
+    let timing = slide.timing.as_deref()?;
+    let ids = |id: ppt_model::ShapeId| out.written.get(&id).copied();
+    let has_text = |id: ppt_model::ShapeId| slide.shapes.iter().any(|s| s.id == id && s.group.is_none() && s.text.is_some());
+    timing_xml(timing, &TimingCx { ids: &ids, has_text: &has_text, namespaces })
+}
+
 fn slide_unchanged(slide: &Slide, src: &SlideSource) -> bool {
     slide.transition == src.transition
+        && slide.timing == src.timing
         && slide.shapes.len() == src.shape_ids.len()
         && slide.shapes.iter().zip(&src.shape_ids).all(|(s, id)| s.id == *id)
         && slide.shapes.iter().all(|s| s.source.as_ref().is_some_and(|ss| ss.part == src.part && shape_unchanged(s, ss)))
@@ -1131,7 +1163,7 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
                 // Only the relationships change when a notes slide was added.
                 rels_changed.then(|| (src.doc.to_string(), rels_xml(&rels, &src.part)))
             } else {
-                let mut out = SlideOut { part: src.part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new() };
+                let mut out = SlideOut { part: src.part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new(), written: HashMap::new() };
                 let xml = slide_xml(slide, Some(src), &mut out);
                 Some((xml, rels_xml(&out.rels, &src.part)))
             };
@@ -1153,7 +1185,7 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
         if let Some(lp) = layout_part {
             rels.push(RelEntry { id: "rId1".into(), kind: format!("{REL_BASE}slideLayout"), target: lp, external: false });
         }
-        let mut out = SlideOut { part: part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new() };
+        let mut out = SlideOut { part: part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new(), written: HashMap::new() };
         let xml = slide_xml(slide, slide.source.as_deref(), &mut out);
         let mut slide_rels = out.rels;
         add_notes(&mut zip, &mut pres_rels, &mut taken_parts, &mut notes, slide, &part, &mut slide_rels);

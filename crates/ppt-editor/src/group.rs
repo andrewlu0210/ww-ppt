@@ -98,6 +98,7 @@ impl Editor {
         let tail = rest.split_off(below);
         *shapes = [rest, members, tail].concat();
         self.entered_group = None;
+        self.prune_animations();
         self.push_undo(before);
         true
     }
@@ -111,6 +112,7 @@ impl Editor {
         }
         self.selection = self.current_shapes().iter().filter(|s| before.pres.shape(self.slide, s.id).is_some_and(|b| b.group == Some(g))).map(|s| s.id).collect();
         self.entered_group = None;
+        self.prune_animations();
         self.push_undo(before);
         true
     }

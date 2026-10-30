@@ -43,6 +43,8 @@ export interface Status {
   transitionSlides?: boolean[];
   /** The current slide's animations in playing order. */
   animations?: AnimationInfo[];
+  /** Whether the selection can get an animation. */
+  canAnimate?: boolean;
 }
 
 export interface AnimationInfo {
@@ -53,10 +55,28 @@ export interface AnimationInfo {
   /** "entr" | "exit" | "emph" | "path" */
   class: string;
   presetId: number | null;
+  /** Effect option (direction, ...). */
+  subtype: number | null;
   /** Names of the animated shapes. */
   shapes: string[];
+  /** Start relative to its click, and length (ms). */
   startMs: number;
   durMs: number;
+  /** The effect's own delay (ms). */
+  delayMs: number;
+  /** Whether its shapes are selected. */
+  selected: boolean;
+  /** Top-left of its shapes on the canvas (CSS pixels). */
+  badge: [number, number] | null;
+}
+
+/** An effect the editor can add (`App::animationPresets()`). */
+export interface AnimationPreset {
+  class: string;
+  id: number;
+  subtype: number;
+  durMs: number;
+  directional: boolean;
 }
 
 export interface TransitionInfo {

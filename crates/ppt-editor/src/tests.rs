@@ -878,3 +878,56 @@ fn transitions_apply_to_one_or_all_slides_with_undo() {
     assert!(e.undo(&mut eng));
     assert_eq!(e.pres.slides[1].transition, None);
 }
+
+#[test]
+fn animations_are_added_edited_and_follow_shapes() {
+    use ppt_model::anim::{Player, Trigger, effect_duration, effect_elements};
+    let mut eng = engine();
+    let (mut e, a) = editor();
+    let b = add_rect(&mut e, 3 * IN, IN);
+    assert!(!e.add_animation("entr", 10, None), "nothing selected");
+    e.selection = vec![a, b];
+    assert!(e.add_animation("entr", 10, None));
+    let list = e.animations();
+    assert_eq!(list.iter().map(|x| (Trigger::of(x), effect_elements(x))).collect::<Vec<_>>(), vec![(Trigger::Click, vec![a]), (Trigger::With, vec![b])]);
+    // A second effect on the same shape gets its own build group.
+    e.selection = vec![a];
+    assert!(e.add_animation("exit", 2, Some(8)));
+    assert_eq!(e.animations()[2].grp_id, Some(1));
+    assert_eq!(Player::new(e.pres.slides[0].timing.as_deref().unwrap()).clicks(), 2);
+
+    assert!(e.set_animation_trigger(2, Trigger::After));
+    assert!(e.set_animation_timing(2, Some(250.0), Some(1000.0)));
+    assert_eq!((e.animations()[2].delay_ms, effect_duration(e.animations()[2])), (250.0, 1000.0));
+    // Another direction keeps the duration; another effect takes its own.
+    assert!(e.change_animation(2, "exit", 2, Some(1)));
+    assert_eq!((e.animations()[2].preset_subtype, effect_duration(e.animations()[2])), (Some(1), 1000.0));
+    assert!(e.change_animation(2, "exit", 10, None));
+    assert_eq!(effect_duration(e.animations()[2]), 500.0);
+    assert_eq!(Trigger::of(e.animations()[2]), Trigger::After);
+
+    assert!(e.move_animation(2, 0));
+    assert_eq!(e.animations()[0].preset_class, "exit");
+    assert!(e.remove_animation(0));
+    assert_eq!(e.animations().len(), 2);
+
+    // Deleting a shape drops its effects; undo brings them back.
+    e.selection = vec![b];
+    assert!(e.delete_selected());
+    assert_eq!(e.animations().len(), 1);
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.animations().len(), 2);
+    // Grouping drops the members' effects (only the group can be animated).
+    e.selection = vec![a, b];
+    assert!(e.group_selected());
+    assert!(e.animations().is_empty() && e.pres.slides[0].timing.is_none());
+    assert!(e.add_animation("entr", 1, None));
+    let g = e.pres.shape(0, a).unwrap().group.unwrap();
+    assert_eq!(effect_elements(e.animations()[0]), vec![g]);
+
+    // A duplicated slide animates its own shapes.
+    assert!(e.duplicate_slide(&mut eng, 0));
+    let copy = &e.pres.slides[1];
+    let el = effect_elements(copy.timing.as_deref().unwrap().effects()[0])[0];
+    assert!(el != g && copy.shapes.iter().any(|s| s.group == Some(el)));
+}
