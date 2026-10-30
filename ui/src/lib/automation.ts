@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo } from "@tauri-apps/api/event";
 import { availableMonitors } from "@tauri-apps/api/window";
 import type { App } from "../wasm/ppt_wasm";
-import { exportVideo, inTauri, onVideoEvents, writeFile } from "./backend";
+import { exportVideo, inTauri, onVideoEvents, recoveryList, recoveryRead, writeFile } from "./backend";
 import type { Command } from "./commands";
 
 interface Hooks {
@@ -15,6 +15,7 @@ interface Hooks {
   openPath: (path: string) => Promise<void>;
   refresh: () => void;
   run: (c: Command) => Promise<void>;
+  documentReplaced: (name: string, path: string | null, recovered?: string) => Promise<void>;
 }
 
 const log = (line: string) => invoke("automation_log", { line });
@@ -256,6 +257,17 @@ async function step(cmd: string, h: Hooks) {
       });
       await exportVideo(args[0], engine.savePptx(), { width: num(1) || 1280, fps: 30, seconds: num(2) || 2, timings: true });
       await log(`video ${await result}`);
+      break;
+    }
+    // Crash recovery: list the copies left by other sessions, and restore one without the prompt.
+    case "recoverylist":
+      await log(`recoverylist ${JSON.stringify(await recoveryList())}`);
+      break;
+    case "recover": {
+      const info = (await recoveryList()).find((r) => r.id === args[0]);
+      if (!info) throw new Error(`no recovery ${args[0]}`);
+      await engine.loadPptx(await recoveryRead(info.id));
+      await h.documentReplaced(info.name, info.path, info.id);
       break;
     }
     case "notesget": {

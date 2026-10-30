@@ -112,3 +112,42 @@ export async function onVideoEvents(progress: (done: number, total: number) => v
     b();
   };
 }
+
+/** An autosaved copy left by a session that did not end normally (`recovery_list`). */
+export interface RecoveryInfo {
+  id: string;
+  name: string;
+  path: string | null;
+  /** Milliseconds since the epoch. */
+  savedAt: number;
+}
+
+/** Autosaves the open document for crash recovery. */
+export function recoveryWrite(id: string, name: string, path: string | null, bytes: Uint8Array): Promise<void> {
+  if (!inTauri) return Promise.resolve();
+  return invoke("recovery_write", bytes, { headers: { id, name: encodeURIComponent(name), path: encodeURIComponent(path ?? "") } });
+}
+
+/** Removes a recovery copy (the document was saved or discarded). */
+export function recoveryClear(id: string): Promise<void> {
+  return inTauri ? invoke("recovery_clear", { id }) : Promise.resolve();
+}
+
+export function recoveryList(): Promise<RecoveryInfo[]> {
+  return inTauri ? invoke<RecoveryInfo[]>("recovery_list") : Promise.resolve([]);
+}
+
+export async function recoveryRead(id: string): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("recovery_read", { id }));
+}
+
+/** Offers an autosaved copy: "recover", "discard" or "later" (kept for next time). */
+export async function askRecover(info: RecoveryInfo): Promise<"recover" | "discard" | "later"> {
+  const when = new Date(info.savedAt).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const result = await message(`ww-ppt 上次沒有正常結束。要復原「${info.name}」嗎？\n\n自動儲存的版本：${when}`, {
+    title: "復原文件",
+    kind: "warning",
+    buttons: { yes: "復原", no: "捨棄", cancel: "稍後再說" },
+  });
+  return result === "復原" ? "recover" : result === "捨棄" ? "discard" : "later";
+}

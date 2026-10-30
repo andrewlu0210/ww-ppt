@@ -25,6 +25,11 @@ import {
   readFile,
   showError,
   startupFiles,
+  askRecover,
+  recoveryClear,
+  recoveryList,
+  recoveryRead,
+  recoveryWrite,
   writeFile,
 } from "./lib/backend";
 import { startAutomation } from "./lib/automation";
@@ -97,6 +102,12 @@ interface ViewPrefs {
 }
 
 /** Ruler, gridlines and sorter size, remembered per machine. */
+/** Autosave a few seconds after editing stops, at most this often. */
+const AUTOSAVE_IDLE_MS = 3000;
+const AUTOSAVE_EVERY_MS = 30_000;
+
+const newSessionId = () => crypto.randomUUID();
+
 function loadViewPrefs(): ViewPrefs {
   try {
     const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as Partial<ViewPrefs> | null;
@@ -262,6 +273,49 @@ export function App() {
   docRef.current = doc;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+
+  // --- Crash recovery: the open document is autosaved while it has unsaved changes.
+  const sessionId = useRef<string>(newSessionId());
+  /** Revision of the last autosave, or null when no copy exists for this session. */
+  const autosaved = useRef<number | null>(null);
+  const autosave = useRef({ timer: 0, since: 0, last: 0 });
+  useEffect(() => {
+    const a = autosave.current;
+    window.clearTimeout(a.timer);
+    if (!dirty) {
+      a.since = 0;
+      if (autosaved.current !== null) {
+        autosaved.current = null;
+        void recoveryClear(sessionId.current);
+      }
+      return;
+    }
+    const now = Date.now();
+    a.since ||= now;
+    // A few seconds after editing stops, at most every AUTOSAVE_EVERY_MS, and not
+    // postponed for longer than that by continuous editing.
+    const idle = now - a.since >= AUTOSAVE_EVERY_MS ? 0 : AUTOSAVE_IDLE_MS;
+    const wait = Math.max(idle, a.last + AUTOSAVE_EVERY_MS - now);
+    a.timer = window.setTimeout(() => {
+      const engine = engineRef.current;
+      if (!engine || !dirtyRef.current || autosaved.current === engine.revision()) return;
+      a.since = 0;
+      a.last = Date.now();
+      const revision = engine.revision();
+      try {
+        const t0 = performance.now();
+        const bytes = engine.savePptx();
+        mark("autosave: serialize", performance.now() - t0);
+        void recoveryWrite(sessionId.current, docRef.current.name, docRef.current.path, bytes).then(
+          () => void (autosaved.current = revision),
+          (e) => console.warn("autosave failed", e),
+        );
+      } catch (e) {
+        console.warn("autosave failed", e);
+      }
+    }, wait);
+    return () => window.clearTimeout(a.timer);
+  }, [dirty, status.revision]);
 
   // --- Thumbnails -------------------------------------------------------------
   // Slide thumbnails are rendered one at a time from a queue of stale slides,
@@ -571,12 +625,17 @@ export function App() {
     }
   }, [loadFonts]);
 
-  /** Called after a document is loaded or created. */
+  /** Called after a document is loaded or created. `recovered`: it is the autosaved copy with this id. */
   const documentReplaced = useCallback(
-    async (name: string, path: string | null) => {
+    async (name: string, path: string | null, recovered?: string) => {
       const engine = engineRef.current;
       if (!engine) return;
-      setDoc({ name, path, savedRevision: engine.revision() });
+      // The previous document was saved or discarded: its autosave goes, and the new one gets its own.
+      if (autosaved.current !== null) void recoveryClear(sessionId.current);
+      sessionId.current = recovered ?? newSessionId();
+      autosaved.current = recovered ? -1 : null;
+      // A recovered document has unsaved changes.
+      setDoc({ name, path, savedRevision: recovered ? -1 : engine.revision() });
       setLayoutNames(engine.layoutNames() as string[]);
       setTableStyles(engine.tableStyles() as TableStyleInfo[]);
       setAnimPresets(engine.animationPresets() as AnimationPreset[]);
@@ -1249,10 +1308,34 @@ export function App() {
     const unlisten = getCurrentWindow().onCloseRequested(async (event) => {
       if (!dirtyRef.current) return;
       event.preventDefault();
-      if (await confirmDiscard()) await getCurrentWindow().destroy();
+      if (await confirmDiscard()) {
+        // Saved or discarded on purpose: nothing to recover.
+        await recoveryClear(sessionId.current);
+        await getCurrentWindow().destroy();
+      }
     });
     return () => void unlisten.then((f) => f());
   }, [confirmDiscard]);
+
+  /** Offers the newest autosave left by a session that crashed; true when it was opened. */
+  const offerRecovery = useCallback(
+    async (engine: Engine) => {
+      const [newest] = await recoveryList().catch(() => []);
+      if (!newest) return false;
+      const answer = await askRecover(newest);
+      if (answer === "discard") await recoveryClear(newest.id);
+      if (answer !== "recover") return false;
+      try {
+        await engine.loadPptx(await recoveryRead(newest.id));
+        await documentReplaced(newest.name, newest.path, newest.id);
+        return true;
+      } catch (e) {
+        await showError(`無法復原「${newest.name}」：${String(e)}`);
+        return false;
+      }
+    },
+    [documentReplaced],
+  );
 
   const onReady = useCallback(
     async (engine: Engine) => {
@@ -1262,12 +1345,14 @@ export function App() {
       if (!inTauri) setError("目前在瀏覽器中執行：沒有原生字型與檔案存取，請用 npm run tauri dev 啟動。");
       void listFonts().then(setFonts);
       await loadFonts(FALLBACK_FAMILIES);
-      const [first] = await startupFiles();
-      if (first) await openPath(first);
-      else await documentReplaced("簡報1", null);
-      void startAutomation({ engine: () => engineRef.current, openPath, refresh, run });
+      if (!(await offerRecovery(engine))) {
+        const [first] = await startupFiles();
+        if (first) await openPath(first);
+        else await documentReplaced("簡報1", null);
+      }
+      void startAutomation({ engine: () => engineRef.current, openPath, refresh, run, documentReplaced });
     },
-    [documentReplaced, loadFonts, openPath, refresh, run],
+    [documentReplaced, loadFonts, offerRecovery, openPath, refresh, run],
   );
 
   return (

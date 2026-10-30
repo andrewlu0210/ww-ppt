@@ -116,7 +116,7 @@ ww-ppt/
 ### 8. Tauri v2 後端
 - 會用到的 plugins：`fs`、`dialog`、`clipboard-manager`、`updater`、`window-state`、`single-instance`、`deep-link`。
 - 大型二進位資料（圖片、字型、整份檔案）用 `tauri::ipc::Response` 和 `Channel` 傳原始位元組，避免 JSON 加 base64 的開銷。
-- Autosave 加當機復原：定期把 operation log 寫到 `~/Library/Application Support`。
+- Autosave 加當機復原：有未儲存的變更時，停止編輯 3 秒後（最多每 30 秒一次）把整份簡報寫到 `~/Library/Application Support/com.ww.ppt/Recovery`；儲存、捨棄或關閉後刪除。啟動時若有已結束的程序留下的版本，詢問要不要復原。（已完成；不用 operation log，見 M5 的決定。）
 - 發佈：Developer ID 簽章、notarization、`.pptx` 的 UTI 檔案關聯。Quick Look 預覽需要另外寫一個 Swift app extension（之後再做）。
 
 ## 五、效能目標

@@ -2,6 +2,7 @@
 //! The editor itself runs in the webview (see `crates/ppt-wasm`).
 
 mod automation;
+mod recovery;
 mod spell;
 mod video;
 
@@ -195,6 +196,10 @@ pub fn run() {
             set_show_deck,
             get_show_deck,
             video::export_video,
+            recovery::recovery_write,
+            recovery::recovery_clear,
+            recovery::recovery_list,
+            recovery::recovery_read,
             video::cancel_video_export,
             spell::spell_check,
             spell::spell_guesses,

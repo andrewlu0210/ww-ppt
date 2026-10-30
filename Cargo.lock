@@ -5563,12 +5563,14 @@ dependencies = [
 name = "ww-ppt"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "objc2-app-kit",
  "objc2-foundation",
  "ppt-fonts",
  "ppt-ooxml",
  "ppt-video",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
