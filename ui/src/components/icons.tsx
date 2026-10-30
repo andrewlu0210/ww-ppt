@@ -8,6 +8,13 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  spelling: (
+    <Svg>
+      <path d="M4 14l3.5-9 3.5 9M5.3 11h4.4" />
+      <path d="M13 12.5l2.5 2.5 5-6" />
+      <path d="M3.5 18.5c1 .9 2 .9 3 0s2-.9 3 0 2 .9 3 0 2-.9 3 0 2 .9 3 0" stroke="#d93025" />
+    </Svg>
+  ),
   notes: (
     <Svg>
       <rect x="4" y="3.5" width="16" height="17" rx="1" />

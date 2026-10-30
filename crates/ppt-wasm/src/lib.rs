@@ -5,6 +5,7 @@
 //! supplies file and font bytes.
 #![cfg(target_arch = "wasm32")]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use js_sys::{Array, Object, Reflect, Uint8Array};
@@ -73,6 +74,8 @@ pub struct App {
     step_running: bool,
     /// When the editor's animation preview started (ms), while it plays.
     preview_start_ms: Option<f64>,
+    /// Misspellings by text key (`spellKey`): the text they were found in, and byte ranges.
+    spelling: HashMap<String, (String, Vec<std::ops::Range<usize>>)>,
 }
 
 /// A running transition: both slides pre-encoded in slide space.
@@ -82,6 +85,24 @@ struct Anim {
     kind: ppt_model::TransitionKind,
     start_ms: f64,
     duration_ms: f64,
+}
+
+/// Key of a text for spelling results: `s<id>` for a shape, `c<id>:<row>:<col>` for a cell.
+fn spell_key(place: FindPlace) -> String {
+    match place {
+        FindPlace::Shape(id) => format!("s{}", id.0),
+        FindPlace::Cell(id, r, c) => format!("c{}:{r}:{c}", id.0),
+        FindPlace::Notes => "n".into(),
+    }
+}
+
+fn parse_spell_key(key: &str) -> Option<FindPlace> {
+    let id = |v: &str| v.parse().ok().map(ppt_model::ShapeId);
+    if let Some(rest) = key.strip_prefix('s') {
+        return Some(FindPlace::Shape(id(rest)?));
+    }
+    let mut parts = key.strip_prefix('c')?.split(':');
+    Some(FindPlace::Cell(id(parts.next()?)?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
 
 fn js_err(e: impl std::fmt::Display) -> JsValue {
@@ -137,6 +158,7 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         step_animate: false,
         step_running: false,
         preview_start_ms: None,
+        spelling: HashMap::new(),
     })
 }
 
@@ -337,6 +359,8 @@ impl App {
             };
             draw_text_overlay(&mut self.scene, &overlay, tf);
         }
+
+        self.draw_spelling(view);
 
         let to_dev = |(x, y): (f64, f64)| view * Point::new(x, y);
         let tol = self.tolerance();
@@ -610,6 +634,85 @@ impl App {
         vec![x0 / d, y0 / d, (x1 - x0) / d, (y1 - y0) / d]
     }
 
+    // --- Spelling ----------------------------------------------------------------
+
+    /// The current slide's texts to spell check: `[{ key, text }]`.
+    #[wasm_bindgen(js_name = spellTexts)]
+    pub fn spell_texts(&self) -> Array {
+        self.editor
+            .slide_texts()
+            .into_iter()
+            .filter(|(_, t)| t.chars().any(|c| c.is_alphabetic()))
+            .map(|(place, text)| {
+                let o = Object::new();
+                let _ = Reflect::set(&o, &"key".into(), &spell_key(place).into());
+                let _ = Reflect::set(&o, &"text".into(), &text.into());
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
+    /// Records the misspellings found in `text` (the text of `key` when it was
+    /// checked): `[start, length, ...]` in UTF-16 units.
+    #[wasm_bindgen(js_name = setSpelling)]
+    pub fn set_spelling(&mut self, key: &str, text: &str, ranges: Vec<u32>) {
+        let bytes: Vec<std::ops::Range<usize>> = ranges.chunks_exact(2).map(|r| utf16_to_byte_offset(text, r[0] as usize)..utf16_to_byte_offset(text, (r[0] + r[1]) as usize)).collect();
+        let changed = match self.spelling.get(key) {
+            Some((t, old)) => t != text || *old != bytes,
+            None => !bytes.is_empty(),
+        };
+        if bytes.is_empty() {
+            self.spelling.remove(key);
+        } else {
+            self.spelling.insert(key.to_string(), (text.to_string(), bytes));
+        }
+        self.dirty |= changed;
+    }
+
+    /// Forgets every misspelling (spell checking turned off).
+    #[wasm_bindgen(js_name = clearSpelling)]
+    pub fn clear_spelling(&mut self) {
+        self.dirty |= !self.spelling.is_empty();
+        self.spelling.clear();
+    }
+
+    /// The misspelled word under a point (CSS pixels): `{ key, text, start, length, word }`
+    /// (UTF-16 units) or null.
+    #[wasm_bindgen(js_name = spellingAt)]
+    pub fn spelling_at(&mut self, x: f64, y: f64) -> JsValue {
+        let view = self.view();
+        let p = Point::new(x * self.dpr, y * self.dpr);
+        for (place, text, ranges) in self.current_spelling() {
+            let Some((layout, tf)) = self.editor.text_geometry(&mut self.engine, place) else { continue };
+            let local = (view * tf).inverse() * p;
+            for r in ranges {
+                let hit = ppt_editor::range_rects(&layout, r.clone()).iter().any(|b| local.x >= b.x0 - 1.0 && local.x <= b.x1 + 1.0 && local.y >= b.y0 && local.y <= b.y1 + 2.0);
+                if hit {
+                    let u16 = |b: usize| text[..b].encode_utf16().count() as u32;
+                    let o = Object::new();
+                    let _ = Reflect::set(&o, &"key".into(), &spell_key(place).into());
+                    let _ = Reflect::set(&o, &"text".into(), &text.as_str().into());
+                    let _ = Reflect::set(&o, &"start".into(), &u16(r.start).into());
+                    let _ = Reflect::set(&o, &"length".into(), &(u16(r.end) - u16(r.start)).into());
+                    let _ = Reflect::set(&o, &"word".into(), &text[r.clone()].into());
+                    return o.into();
+                }
+            }
+        }
+        JsValue::NULL
+    }
+
+    /// Replaces `length` UTF-16 units at `start` of text `key` (a correction), as an edit there.
+    #[wasm_bindgen(js_name = replaceSpelling)]
+    pub fn replace_spelling(&mut self, key: &str, start: u32, length: u32, with: &str) -> bool {
+        let Some(place) = parse_spell_key(key) else { return false };
+        let Some((_, text)) = self.editor.slide_texts().into_iter().find(|(p, _)| *p == place) else { return false };
+        let range = utf16_to_byte_offset(&text, start as usize)..utf16_to_byte_offset(&text, (start + length) as usize);
+        let m = FindMatch { slide: self.editor.slide, place, range };
+        let changed = self.editor.replace_range(&mut self.engine, &m, with);
+        self.touch(changed)
+    }
+
     // --- Find and replace ---------------------------------------------------------
 
     /// Selects the next (or previous) match of `query` after the current
@@ -670,6 +773,52 @@ impl App {
         let n = self.editor.replace_all(&mut self.engine, query, with, FindOptions { match_case, whole_word });
         self.touch(n > 0);
         n as u32
+    }
+
+    /// Misspellings of the current slide's texts that still match what was checked.
+    fn current_spelling(&self) -> Vec<(FindPlace, String, Vec<std::ops::Range<usize>>)> {
+        if self.spelling.is_empty() {
+            return Vec::new();
+        }
+        self.editor
+            .slide_texts()
+            .into_iter()
+            .filter_map(|(place, text)| {
+                let (checked, ranges) = self.spelling.get(&spell_key(place))?;
+                (*checked == text).then(|| (place, text, ranges.clone()))
+            })
+            .collect()
+    }
+
+    /// Red wavy lines under misspelled words.
+    fn draw_spelling(&mut self, view: Affine) {
+        let d = self.dpr;
+        for (place, _, ranges) in self.current_spelling() {
+            let Some((layout, tf)) = self.editor.text_geometry(&mut self.engine, place) else { continue };
+            let tf = view * tf;
+            for r in ranges {
+                for b in ppt_editor::range_rects(&layout, r) {
+                    let (a, z) = (tf * Point::new(b.x0, b.y1), tf * Point::new(b.x1, b.y1));
+                    let len = (z - a).hypot();
+                    if len < 1.0 {
+                        continue;
+                    }
+                    let dir = (z - a) / len;
+                    let down = Vec2::new(-dir.y, dir.x);
+                    let mut path = ppt_render::vello::kurbo::BezPath::new();
+                    let (step, amp) = (2.0 * d, 1.0 * d);
+                    let mut t = 0.0;
+                    let mut k = 0;
+                    while t <= len {
+                        let pt = a + dir * t + down * (if k % 2 == 0 { 0.0 } else { amp } + amp);
+                        if k == 0 { path.move_to(pt) } else { path.line_to(pt) }
+                        t += step;
+                        k += 1;
+                    }
+                    self.scene.stroke(&ppt_render::vello::kurbo::Stroke::new(1.0 * d), Affine::IDENTITY, PColor::from_rgba8(0xE0, 0x24, 0x24, 255), None, &path);
+                }
+            }
+        }
     }
 
     fn notes_range(&self, start: i32, end: i32) -> Option<std::ops::Range<usize>> {

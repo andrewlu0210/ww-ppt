@@ -84,7 +84,7 @@ fn replace_ranges(body: &mut TextBody, ranges: &[Range<usize>], with: &str) {
 impl Editor {
     /// Every place that holds text, in search order, with its current text
     /// (the live text of a box being edited).
-    fn find_places(&self) -> Vec<(usize, FindPlace, String)> {
+    pub(crate) fn find_places(&self) -> Vec<(usize, FindPlace, String)> {
         let mut out = Vec::new();
         for (i, slide) in self.pres.slides.iter().enumerate() {
             for shape in &slide.shapes {
@@ -213,7 +213,13 @@ impl Editor {
             self.push_undo(before);
             return true;
         }
-        if !self.select_match(engine, m) {
+        self.replace_range(engine, m, with)
+    }
+
+    /// Replaces the text of `m` (a shape or cell match) with `with` through the
+    /// text editor, leaving it editing there.
+    pub fn replace_range(&mut self, engine: &mut TextEngine, m: &FindMatch, with: &str) -> bool {
+        if m.place == FindPlace::Notes || !self.select_match(engine, m) {
             return false;
         }
         let Some(t) = &mut self.text else { return false };

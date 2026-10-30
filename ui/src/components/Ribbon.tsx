@@ -11,7 +11,7 @@ import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { AnimationPreset, Status } from "../lib/status";
 
-const TABS = ["常用", "插入", "圖形格式", "轉場", "動畫", "投影片放映", "檢視"] as const;
+const TABS = ["常用", "插入", "圖形格式", "轉場", "動畫", "投影片放映", "校閱", "檢視"] as const;
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
 const TABLE_TABS = ["表格設計", "版面配置"] as const;
 type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number];
@@ -74,12 +74,14 @@ interface Props {
   tableStyles: TableStyleInfo[];
   notesOpen: boolean;
   usePresenter: boolean;
+  /** Spell checking as you type. */
+  spellOn: boolean;
   animPresets: AnimationPreset[];
   /** Told which tab is showing (the canvas shows animation order on 動畫). */
   onTabChange: (tab: string) => void;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, animPresets, onTabChange }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = isTableTab(chosen) && !status.inTable ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -370,6 +372,11 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               </label>
             </Group>
           </>
+        )}
+        {tab === "校閱" && (
+          <Group label="校訂">
+            <Button large icon={icons.spelling} label="拼字檢查" active={spellOn} onClick={() => run({ kind: "spellCheck", on: !spellOn })} />
+          </Group>
         )}
         {tab === "檢視" && (
           <>

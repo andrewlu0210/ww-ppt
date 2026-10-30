@@ -31,14 +31,26 @@ import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
 import { AnimationBadges } from "./components/AnimationTab";
 import { FindBar, type FindBarHandle } from "./components/FindBar";
+import { SpellMenu, type SpellHit } from "./components/SpellMenu";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
 const PRESENTER_KEY = "ww-ppt.presenter";
+const SPELL_KEY = "ww-ppt.spell";
+/** Quiet time after a change before the slide's text is spell checked again. */
+const SPELL_DELAY_MS = 400;
 
 function loadPresenterPref(): boolean {
   try {
     return localStorage.getItem(PRESENTER_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function loadSpellPref(): boolean {
+  try {
+    return localStorage.getItem(SPELL_KEY) !== "0";
   } catch {
     return true;
   }
@@ -93,6 +105,18 @@ export function App() {
     }
   }, [usePresenter]);
   const [notesPrefs, setNotesPrefs] = useState(loadNotesPrefs);
+  const [spellOn, setSpellOn] = useState(loadSpellPref);
+  const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; hit: SpellHit; guesses: string[] | null } | null>(null);
+  /** Misspellings by checked text, so unchanged texts aren't sent again. */
+  const spellCache = useRef(new Map<string, number[]>());
+  const [spellEpoch, setSpellEpoch] = useState(0);
+  useEffect(() => {
+    try {
+      localStorage.setItem(SPELL_KEY, spellOn ? "1" : "0");
+    } catch {
+      // Not remembered; fine.
+    }
+  }, [spellOn]);
   useEffect(() => {
     try {
       localStorage.setItem(NOTES_KEY, JSON.stringify(notesPrefs));
@@ -188,6 +212,54 @@ export function App() {
       back?.focus({ preventScroll: true });
     }, 60);
   }, []);
+
+  // Spell check the current slide's text a moment after it changes (results are drawn by the engine).
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || showing) return;
+    if (!spellOn || !inTauri) {
+      engine.clearSpelling();
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      const texts = engine.spellTexts() as { key: string; text: string }[];
+      const cache = spellCache.current;
+      const todo = texts.filter((t) => !cache.has(t.text));
+      if (todo.length > 0) {
+        const found = await invoke<[number, number][][]>("spell_check", { texts: todo.map((t) => t.text) }).catch(() => null);
+        if (!found) return;
+        todo.forEach((t, i) => cache.set(t.text, found[i].flat()));
+      }
+      for (const t of texts) engine.setSpelling(t.key, t.text, Uint32Array.from(cache.get(t.text) ?? []));
+    }, SPELL_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [status, spellOn, showing, spellEpoch]);
+
+  /** After ignoring or learning a word: check everything again. */
+  const recheckSpelling = useCallback(() => {
+    spellCache.current.clear();
+    setSpellEpoch((n) => n + 1);
+  }, []);
+
+  /** Right click on a misspelled word: its corrections. */
+  const onCanvasContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      const engine = engineRef.current;
+      const canvas = document.querySelector(".canvas-host canvas");
+      if (!engine || !canvas || !spellOn || showingRef.current) return;
+      const r = canvas.getBoundingClientRect();
+      const hit = engine.spellingAt(e.clientX - r.left, e.clientY - r.top) as SpellHit | null;
+      if (!hit) return;
+      e.preventDefault();
+      const area = e.currentTarget.getBoundingClientRect();
+      const at = { x: e.clientX - area.left, y: e.clientY - area.top, hit };
+      setSpellMenu({ ...at, guesses: null });
+      void invoke<string[]>("spell_guesses", { text: hit.text, start: hit.start, len: hit.length })
+        .catch(() => [])
+        .then((guesses) => setSpellMenu((m) => (m?.hit === hit ? { ...m, guesses } : m)));
+    },
+    [spellOn],
+  );
 
   const loadLayoutThumbs = useCallback(async () => {
     const engine = engineRef.current;
@@ -410,6 +482,10 @@ export function App() {
       }
       if (c.kind === "usePresenter") {
         setUsePresenter(c.on);
+        return;
+      }
+      if (c.kind === "spellCheck") {
+        setSpellOn(c.on);
         return;
       }
       if (c.kind === "toggleNotes") {
@@ -740,7 +816,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} animPresets={animPresets} onTabChange={setRibbonTab} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}
@@ -754,7 +830,7 @@ export function App() {
           run={run}
         />
         <section className={showing ? "editor-area showing" : "editor-area"}>
-          <div className="canvas-area">
+          <div className="canvas-area" onContextMenu={onCanvasContextMenu}>
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
             {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}
@@ -766,6 +842,18 @@ export function App() {
                 command={showCommand}
                 timer={showTimer.current}
                 onToggleView={audienceOpen ? undefined : () => setShowMode("slides")}
+              />
+            )}
+            {spellMenu && (
+              <SpellMenu
+                {...spellMenu}
+                onPick={(word) => {
+                  engineRef.current?.replaceSpelling(spellMenu.hit.key, spellMenu.hit.start, spellMenu.hit.length, word);
+                  refresh();
+                }}
+                onIgnore={() => void invoke("spell_ignore", { word: spellMenu.hit.word }).then(recheckSpelling)}
+                onLearn={() => void invoke("spell_learn", { word: spellMenu.hit.word }).then(recheckSpelling)}
+                onClose={() => setSpellMenu(null)}
               />
             )}
             {error && (
@@ -782,6 +870,7 @@ export function App() {
               engine={engineRef.current}
               slideIndex={status.slideIndex}
               revision={status.revision}
+              spellCheck={spellOn}
               height={notesPrefs.height}
               onResize={(height) => setNotesPrefs((p) => ({ ...p, height }))}
               onChange={refresh}

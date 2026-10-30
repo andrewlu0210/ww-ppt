@@ -2,6 +2,7 @@
 //! The editor itself runs in the webview (see `crates/ppt-wasm`).
 
 mod automation;
+mod spell;
 
 use ppt_fonts::{FontService, ResolvedFont};
 use tauri::ipc::Response;
@@ -181,6 +182,10 @@ pub fn run() {
             startup_files,
             set_show_deck,
             get_show_deck,
+            spell::spell_check,
+            spell::spell_guesses,
+            spell::spell_ignore,
+            spell::spell_learn,
             automation::automation_enabled,
             automation::automation_poll,
             automation::automation_log,

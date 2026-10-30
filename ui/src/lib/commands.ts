@@ -57,7 +57,8 @@ export type Command =
   | { kind: "setAnimationTrigger"; index: number; trigger: string }
   | { kind: "setAnimationTiming"; index: number; delayMs?: number; durMs?: number }
   | { kind: "selectAnimation"; index: number }
-  | { kind: "toggleNotes" };
+  | { kind: "toggleNotes" }
+  | { kind: "spellCheck"; on: boolean };
 
 /** A gallery table style with the colors its preview needs (`App::tableStyles()`). */
 export interface TableStyleInfo {

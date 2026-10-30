@@ -5468,6 +5468,8 @@ dependencies = [
 name = "ww-ppt"
 version = "0.1.0"
 dependencies = [
+ "objc2-app-kit",
+ "objc2-foundation",
  "ppt-fonts",
  "serde",
  "tauri",

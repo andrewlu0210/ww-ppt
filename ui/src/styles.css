@@ -1307,3 +1307,48 @@ button {
 .find-toggle-mode.spacer {
   visibility: hidden;
 }
+
+/* Right-click menu on a misspelled word. */
+.spell-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 160px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+}
+
+.spell-item {
+  font: inherit;
+  text-align: left;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: default;
+}
+
+.spell-item:hover {
+  background: #4a7fd6;
+  color: #fff;
+}
+
+.spell-item.guess {
+  font-weight: 600;
+}
+
+.spell-note {
+  padding: 3px 10px;
+  color: var(--muted);
+}
+
+.spell-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}

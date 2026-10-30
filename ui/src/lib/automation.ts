@@ -190,6 +190,13 @@ async function step(cmd: string, h: Hooks) {
       el.dispatchEvent(new KeyboardEvent("keydown", { key: args[1], shiftKey: has("shift"), bubbles: true }));
       break;
     }
+    case "rclick": {
+      // A right click on the canvas, in canvas CSS pixels.
+      const canvas = document.querySelector<HTMLCanvasElement>(".canvas-host canvas")!;
+      const r = canvas.getBoundingClientRect();
+      canvas.dispatchEvent(new MouseEvent("contextmenu", { clientX: r.left + num(0), clientY: r.top + num(1), bubbles: true, cancelable: true }));
+      break;
+    }
     case "clickel":
       document.querySelector<HTMLElement>(rest)?.click();
       break;

@@ -6,6 +6,8 @@ interface Props {
   slideIndex: number;
   /** Document revision: notes may have changed through undo/redo. */
   revision: number;
+  /** System spell checking in the notes. */
+  spellCheck: boolean;
   height: number;
   onResize: (height: number) => void;
   onChange: () => void;
@@ -17,7 +19,7 @@ export const MIN_NOTES_HEIGHT = 48;
  * Speaker notes of the current slide, under the canvas. The textarea is
  * uncontrolled so WebKit keeps its own undo history while typing.
  */
-export function NotesPane({ engine, slideIndex, revision, height, onResize, onChange }: Props) {
+export function NotesPane({ engine, slideIndex, revision, spellCheck, height, onResize, onChange }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const shownSlide = useRef(-1);
 
@@ -54,7 +56,7 @@ export function NotesPane({ engine, slideIndex, revision, height, onResize, onCh
         className="notes-input"
         placeholder="按一下以新增備忘稿"
         aria-label="備忘稿"
-        spellCheck={false}
+        spellCheck={spellCheck}
         onFocus={() => {
           engine?.beginNotesEdit();
           onChange();

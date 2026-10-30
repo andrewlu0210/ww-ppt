@@ -7,6 +7,7 @@ mod anim;
 mod find;
 mod group;
 mod richedit;
+mod spell;
 pub mod show;
 mod table;
 
@@ -23,6 +24,7 @@ use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
 
 pub use find::{FindMatch, FindOptions, FindPlace, find_in};
 pub use richedit::{Move, RichEdit};
+pub use spell::range_rects;
 pub use table::{BorderSet, CellRange};
 
 /// Smallest width/height a resize can produce (2pt), except for lines.
