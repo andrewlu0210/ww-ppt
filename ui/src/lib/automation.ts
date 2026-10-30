@@ -30,6 +30,99 @@ async function capture(engine: App, name: string) {
   await invoke("automation_write", new Uint8Array(await blob.arrayBuffer()), { headers: { name } });
 }
 
+
+/** p50 / p95 / max of `xs`, formatted. */
+function spread(xs: number[]): string {
+  if (xs.length === 0) return "-";
+  const s = [...xs].sort((a, b) => a - b);
+  const q = (p: number) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
+  return `p50 ${q(0.5).toFixed(1)} / p95 ${q(0.95).toFixed(1)} / max ${s[s.length - 1].toFixed(1)} ms`;
+}
+
+const frame = () => new Promise<number>((r) => requestAnimationFrame((t) => r(t)));
+
+type A11yItem = { id: number; role: string; rect: [number, number, number, number] };
+
+/** Drags an object of the current slide around for `frames` frames, one move per frame. */
+async function benchDrag(engine: App, frames: number, pick: string) {
+  const items = (engine.a11ySlide() as { items: A11yItem[] }).items;
+  // A picture or shape (else anything), not too large to grab.
+  const target = items.find((i) => i.role === pick) ?? items.find((i) => i.role === "image" || i.role === "shape") ?? items[0];
+  if (!target) throw new Error("no object to drag");
+  const [x, y, w, h] = target.rect;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  // Let idle work (thumbnails, prefetching) finish, then hold the pointer down
+  // the way a real drag does, so background work stays out of the way.
+  await new Promise((r) => setTimeout(r, 1500));
+  window.dispatchEvent(new PointerEvent("pointerdown"));
+  engine.pointerDown(cx, cy, false, true, false, 1);
+  const handle: number[] = [];
+  const scene: number[] = [];
+  const total: number[] = [];
+  const intervals: number[] = [];
+  let last = await frame();
+  for (let i = 1; i <= frames; i++) {
+    const a = (i / frames) * Math.PI * 4;
+    const t0 = performance.now();
+    engine.pointerMove(cx + Math.cos(a) * 60 - 60, cy + Math.sin(a) * 40, false, i % 2 === 0, false);
+    handle.push(performance.now() - t0);
+    const t = await frame();
+    intervals.push(t - last);
+    last = t;
+    const st = engine.status() as { frameMs: number; sceneMs: number };
+    scene.push(st.sceneMs);
+    total.push(st.frameMs);
+  }
+  engine.pointerUp(cx, cy, false, false, false);
+  window.dispatchEvent(new PointerEvent("pointerup"));
+  engine.undo();
+  const refresh = intervals.slice().sort((a, b) => a - b)[Math.floor(intervals.length / 2)];
+  const dropped = intervals.filter((d) => d > refresh * 1.5).length;
+  return [
+    `bench drag (${target.role}, ${frames} frames): display frame ${refresh.toFixed(1)} ms (${(1000 / refresh).toFixed(0)} Hz), dropped ${dropped}`,
+    `  pointer move ${spread(handle)}`,
+    `  scene build  ${spread(scene)}`,
+    `  whole frame  ${spread(total)}`,
+    `  frame interval ${spread(intervals)}`,
+  ];
+}
+
+/** Types `count` characters at the end of the current slide's first text, timing each to its frame. */
+async function benchType(engine: App, count: number) {
+  const items = (engine.a11ySlide() as { items: A11yItem[] }).items;
+  const target = items.find((i) => i.role === "text") ?? items.find((i) => i.role === "heading");
+  if (!target) throw new Error("no text on this slide");
+  const [x, y, w, h] = target.rect;
+  engine.pointerDown(x + w / 2, y + h / 2, false, false, false, 2);
+  engine.pointerUp(x + w / 2, y + h / 2, false, false, false);
+  engine.keyDown("End", false, false, true, false);
+  await new Promise((r) => setTimeout(r, 1500));
+  await frame();
+  const handle: number[] = [];
+  const latency: number[] = [];
+  const scene: number[] = [];
+  const chars = "測試文字abc ";
+  for (let i = 0; i < count; i++) {
+    // A key press, as typing makes (background work waits for quiet).
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified" }));
+    const t0 = performance.now();
+    engine.insertText(chars[i % chars.length]);
+    handle.push(performance.now() - t0);
+    // The app's own frame callback (registered first) renders; this one runs after it.
+    await frame();
+    latency.push(performance.now() - t0);
+    scene.push((engine.status() as { sceneMs: number }).sceneMs);
+  }
+  engine.keyDown("Escape", false, false, false, false);
+  for (let i = 0; i < count + 2; i++) engine.undo();
+  return [
+    `bench type (${count} characters): input to frame ${spread(latency)}`,
+    `  insert (layout) ${spread(handle)}`,
+    `  scene build     ${spread(scene)}`,
+  ];
+}
+
 async function step(cmd: string, h: Hooks) {
   const engine = h.engine();
   if (!engine) throw new Error("engine not ready");
@@ -222,6 +315,14 @@ async function step(cmd: string, h: Hooks) {
       await log(`time ${rest}: ${(performance.now() - t).toFixed(1)} ms`);
       break;
     }
+    case "benchdrag":
+      // `benchdrag 120 [image|shape|text]`
+      for (const line of await benchDrag(engine, num(0) || 120, args[1] ?? "image")) await log(line);
+      break;
+    case "benchtype":
+      // `benchtype 40`
+      for (const line of await benchType(engine, num(0) || 40)) await log(line);
+      break;
     case "spoken":
       // The last screen reader announcement.
       await log(`spoken ${lastAnnouncement}`);

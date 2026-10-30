@@ -60,6 +60,8 @@ pub struct App {
     caret_on: bool,
     dirty: bool,
     last_frame_ms: f64,
+    /// Of that, building the scene (slide drawing, text layout, overlays).
+    last_scene_ms: f64,
     media_counter: u32,
     /// Slide show in progress: the canvas shows only the slide, fitted edge to edge.
     show: Option<SlideShow>,
@@ -158,6 +160,15 @@ unsafe impl std::alloc::GlobalAlloc for CountingAlloc {
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc;
 
+/// A high-resolution clock (`performance.now()`), in milliseconds.
+fn now_ms() -> f64 {
+    js_sys::Reflect::get(&js_sys::global(), &"performance".into())
+        .ok()
+        .and_then(|p| js_sys::Reflect::get(&p, &"now".into()).ok().and_then(|f| f.dyn_into::<js_sys::Function>().ok()).and_then(|f| f.call0(&p).ok()))
+        .and_then(|v| v.as_f64())
+        .unwrap_or_else(js_sys::Date::now)
+}
+
 fn js_err(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
@@ -203,6 +214,7 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         caret_on: true,
         dirty: true,
         last_frame_ms: 0.0,
+        last_scene_ms: 0.0,
         media_counter: 0,
         show: None,
         show_viewport: None,
@@ -2424,6 +2436,7 @@ impl App {
         set("canAnimate", e.can_animate().into());
         set("zoom", self.zoom.into());
         set("frameMs", self.last_frame_ms.into());
+        set("sceneMs", self.last_scene_ms.into());
         set("revision", (e.revision() as f64).into());
         set("selectionName", e.selected_shape().map(|s| s.name.clone()).unwrap_or_default().into());
         let fmt = e.text_format();
@@ -2497,8 +2510,9 @@ impl App {
         if !self.dirty {
             return Ok(false);
         }
-        let start = js_sys::Date::now();
+        let start = now_ms();
         self.build_scene();
+        self.last_scene_ms = now_ms() - start;
         let gpu = &mut self.gpu;
         let dev = &gpu.cx.devices[gpu.surface.dev_id];
         let params = RenderParams { base_color: if self.show.is_some() { PColor::BLACK } else { WORKSPACE }, width: self.width, height: self.height, antialiasing_method: AaConfig::Area };
@@ -2518,7 +2532,7 @@ impl App {
         dev.queue.present(texture);
         // Keep drawing frames while a transition or an animation plays.
         self.dirty = self.anim.is_some() || self.step_running;
-        self.last_frame_ms = js_sys::Date::now() - start;
+        self.last_frame_ms = now_ms() - start;
         Ok(true)
     }
 }
