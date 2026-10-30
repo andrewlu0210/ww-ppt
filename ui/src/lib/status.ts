@@ -42,6 +42,11 @@ export interface Status {
   canChangeShape?: boolean;
   /** The shape the next drag draws, "" when none. */
   drawTool?: string;
+  showGrid?: boolean;
+  showGuides?: boolean;
+  snapToGrid?: boolean;
+  /** EMU. */
+  gridSpacing?: number;
   /** Cropping of the selected picture (fractions), present only for pictures. */
   crop?: { left: number; top: number; right: number; bottom: number };
   cropMode?: boolean;

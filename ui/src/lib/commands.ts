@@ -86,6 +86,13 @@ export type Command =
   | { kind: "setAnimationTiming"; index: number; delayMs?: number; durMs?: number }
   | { kind: "selectAnimation"; index: number }
   | { kind: "toggleNotes" }
+  | { kind: "viewMode"; mode: "normal" | "sorter" }
+  | { kind: "toggleRuler" }
+  | { kind: "showGrid"; on: boolean }
+  | { kind: "showGuides"; on: boolean }
+  | { kind: "snapToGrid"; on: boolean }
+  | { kind: "gridSpacing"; emu: number }
+  | { kind: "addGuide"; vertical: boolean }
   | { kind: "spellCheck"; on: boolean };
 
 /** A gallery table style with the colors its preview needs (`App::tableStyles()`). */

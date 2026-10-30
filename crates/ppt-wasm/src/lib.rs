@@ -77,6 +77,8 @@ pub struct App {
     preview_start_ms: Option<f64>,
     /// Misspellings by text key (`spellKey`): the text they were found in, and byte ranges.
     spelling: HashMap<String, (String, Vec<std::ops::Range<usize>>)>,
+    /// Gridlines are shown (a viewing preference, not saved with the deck).
+    show_grid: bool,
 }
 
 /// A running transition: both slides pre-encoded in slide space.
@@ -170,6 +172,7 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         step_running: false,
         preview_start_ms: None,
         spelling: HashMap::new(),
+        show_grid: false,
     })
 }
 
@@ -200,6 +203,49 @@ impl App {
         let ox = (self.width as f64 - pres.slide_width as f64 * s) / 2.0;
         let oy = (self.height as f64 - pres.slide_height as f64 * s) / 2.0;
         Affine::translate(Vec2::new(ox, oy)) * Affine::scale(s)
+    }
+
+    /// Gridlines over the slide and drawing guides across the canvas.
+    fn draw_grid_and_guides(&mut self, view: Affine) {
+        use ppt_render::vello::kurbo::{Line, Stroke};
+        let pres = &self.editor.pres;
+        let (w, h) = (pres.slide_width as f64, pres.slide_height as f64);
+        let s = self.scale();
+        let hair = Stroke::new(1.0);
+        if self.show_grid {
+            // Lines at the grid spacing, thinned out until they are at least 8 CSS px apart.
+            let mut step = pres.view.grid_spacing.max(1) as f64;
+            for k in [2.0, 2.5, 2.0].iter().cycle().take(30) {
+                if step * s >= 8.0 * self.dpr {
+                    break;
+                }
+                step *= k;
+            }
+            let color = PColor::from_rgba8(0x80, 0x80, 0x80, 0x50);
+            let lines = |extent: f64, c: f64| {
+                let n = (c / step).ceil() as i64;
+                (-n..=n).map(move |i| c + i as f64 * step).filter(move |v| *v > 0.0 && *v < extent)
+            };
+            for x in lines(w, w / 2.0) {
+                let (a, b) = (view * Point::new(x, 0.0), view * Point::new(x, h));
+                self.scene.stroke(&hair, Affine::IDENTITY, color, None, &Line::new((a.x.round() + 0.5, a.y), (b.x.round() + 0.5, b.y)));
+            }
+            for y in lines(h, h / 2.0) {
+                let (a, b) = (view * Point::new(0.0, y), view * Point::new(w, y));
+                self.scene.stroke(&hair, Affine::IDENTITY, color, None, &Line::new((a.x, a.y.round() + 0.5), (b.x, b.y.round() + 0.5)));
+            }
+        }
+        if pres.view.show_guides {
+            let dragged = self.editor.dragged_guide();
+            let dash = Stroke::new(1.0 * self.dpr).with_dashes(0.0, [5.0 * self.dpr, 3.0 * self.dpr]);
+            let (cw, ch) = (self.width as f64, self.height as f64);
+            for (i, g) in pres.view.guides.iter().enumerate() {
+                let color = if dragged == Some(i) { PColor::from_rgba8(0x43, 0x7E, 0xC9, 0xFF) } else { PColor::from_rgba8(0x70, 0x70, 0x70, 0xC0) };
+                let p = view * Point::new(g.pos as f64, g.pos as f64);
+                let line = if g.vertical { Line::new((p.x, 0.0), (p.x, ch)) } else { Line::new((0.0, p.y), (cw, p.y)) };
+                self.scene.stroke(&dash, Affine::IDENTITY, color, None, &line);
+            }
+        }
     }
 
     fn tolerance(&self) -> Tolerance {
@@ -373,6 +419,7 @@ impl App {
 
         self.draw_spelling(view);
         self.draw_crop_view(view);
+        self.draw_grid_and_guides(view);
 
         let to_dev = |(x, y): (f64, f64)| view * Point::new(x, y);
         let tol = self.tolerance();
@@ -1276,6 +1323,71 @@ impl App {
         self.touch(changed)
     }
 
+    // --- View -------------------------------------------------------------------------
+
+    /// `{ showGrid, showGuides, snapToGrid, gridSpacing (EMU), guides (count) }`.
+    #[wasm_bindgen(js_name = viewSettings)]
+    pub fn view_settings(&self) -> Object {
+        let v = &self.editor.pres.view;
+        let o = Object::new();
+        let _ = Reflect::set(&o, &"showGrid".into(), &self.show_grid.into());
+        let _ = Reflect::set(&o, &"showGuides".into(), &v.show_guides.into());
+        let _ = Reflect::set(&o, &"snapToGrid".into(), &v.snap_to_grid.into());
+        let _ = Reflect::set(&o, &"gridSpacing".into(), &(v.grid_spacing as f64).into());
+        let _ = Reflect::set(&o, &"guides".into(), &(v.guides.len() as u32).into());
+        o
+    }
+
+    #[wasm_bindgen(js_name = setShowGrid)]
+    pub fn set_show_grid(&mut self, show: bool) {
+        self.show_grid = show;
+        self.dirty = true;
+    }
+
+    #[wasm_bindgen(js_name = setShowGuides)]
+    pub fn set_show_guides(&mut self, show: bool) -> bool {
+        let changed = self.editor.set_show_guides(&mut self.engine, show);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = setSnapToGrid)]
+    pub fn set_snap_to_grid(&mut self, snap: bool) -> bool {
+        let changed = self.editor.set_snap_to_grid(&mut self.engine, snap);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = setGridSpacing)]
+    pub fn set_grid_spacing(&mut self, emu: f64) -> bool {
+        let changed = self.editor.set_grid_spacing(&mut self.engine, emu.round() as i64);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = addGuide)]
+    pub fn add_guide(&mut self, vertical: bool) -> bool {
+        let changed = self.editor.add_guide(&mut self.engine, vertical);
+        self.touch(changed)
+    }
+
+    /// While a guide is dragged: its distance from the center in cm (else "").
+    #[wasm_bindgen(js_name = guideLabel)]
+    pub fn guide_label(&self) -> String {
+        self.editor.guide_label().unwrap_or_default()
+    }
+
+    /// For the rulers: `[left, top, width, height]` of the slide in canvas CSS pixels,
+    /// then the selection's `[x0, y0, x1, y1]` in EMU when something is selected.
+    #[wasm_bindgen(js_name = rulerInfo)]
+    pub fn ruler_info(&self) -> Vec<f64> {
+        let pres = &self.editor.pres;
+        let r = self.view().transform_rect_bbox(Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64));
+        let mut out = vec![r.x0 / self.dpr, r.y0 / self.dpr, r.width() / self.dpr, r.height() / self.dpr];
+        let frame = self.editor.selection_frame();
+        if let Some(x) = frame {
+            out.extend([x.x as f64, x.y as f64, (x.x + x.w) as f64, (x.y + x.h) as f64]);
+        }
+        out
+    }
+
     // --- Design -----------------------------------------------------------------------
 
     /// The current slide's background: `{ kind: "solid" | "gradient" | "picture", color,
@@ -2009,6 +2121,10 @@ impl App {
         let e = &self.editor;
         set("slideIndex", (e.slide as u32).into());
         set("slideCount", (e.pres.slides.len() as u32).into());
+        set("showGrid", self.show_grid.into());
+        set("showGuides", e.pres.view.show_guides.into());
+        set("snapToGrid", e.pres.view.snap_to_grid.into());
+        set("gridSpacing", (e.pres.view.grid_spacing as f64).into());
         set("selectionCount", (e.selection.len() as u32).into());
         set("hasSelection", (!e.selection.is_empty()).into());
         set("editingText", e.is_editing_text().into());

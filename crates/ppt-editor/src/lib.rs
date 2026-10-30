@@ -15,6 +15,7 @@ mod richedit;
 mod spell;
 pub mod show;
 mod table;
+mod view;
 
 use std::collections::HashMap;
 
@@ -188,6 +189,8 @@ enum DragKind {
     TableRow(usize),
     /// Drawing a new shape with the picked tool.
     Draw(ShapeId),
+    /// Moving drawing guide `index`.
+    Guide(usize),
 }
 
 struct Drag {
@@ -518,6 +521,7 @@ impl Editor {
                 DragKind::Draw(_) => CursorIcon::Crosshair,
                 DragKind::TableCol(_) => CursorIcon::Resize(0.0),
                 DragKind::TableRow(_) => CursorIcon::Resize(90.0),
+                DragKind::Guide(i) => guide_cursor(self.pres.view.guides.get(i).is_some_and(|g| g.vertical)),
             };
         }
         if let Some(edit) = &self.text
@@ -534,7 +538,21 @@ impl Editor {
             let xfrm = self.selected_shape().map(|s| s.xfrm).unwrap_or_default();
             return if h == Handle::Rotate { CursorIcon::Rotate } else { resize_cursor(h, &xfrm) };
         }
-        if self.hit_test(ev.x, ev.y, tol.handle).is_some() { CursorIcon::Move } else { CursorIcon::Default }
+        if self.hit_test(ev.x, ev.y, tol.handle).is_some() {
+            return CursorIcon::Move;
+        }
+        match self.guide_at(ev.x, ev.y, tol.handle) {
+            Some(i) => guide_cursor(self.pres.view.guides[i].vertical),
+            None => CursorIcon::Default,
+        }
+    }
+
+    /// The guide being dragged.
+    pub fn dragged_guide(&self) -> Option<usize> {
+        match self.drag.as_ref()?.kind {
+            DragKind::Guide(i) => Some(i),
+            _ => None,
+        }
     }
 
     // --- Pointer -----------------------------------------------------------
@@ -597,6 +615,13 @@ impl Editor {
             return true;
         }
 
+        // Guides are grabbed where no shape is.
+        if self.hit_test(ev.x, ev.y, tol.handle).is_none()
+            && let Some(i) = self.guide_at(ev.x, ev.y, tol.handle)
+        {
+            self.drag = Some(Drag { kind: DragKind::Guide(i), start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+            return true;
+        }
         match self.hit_test(ev.x, ev.y, tol.handle) {
             Some(id) => {
                 let group = self.pres.shape(self.slide, id).and_then(|s| s.group);
@@ -741,6 +766,7 @@ impl Editor {
                 }
             }
             DragKind::Draw(id) => self.draw_move(id, start, ev),
+            DragKind::Guide(i) => self.guide_move(i, ev),
             DragKind::Resize(handle) if origs.len() > 1 => {
                 // A group: scale every member with the group's frame.
                 let Some(frame) = group::union_frame(origs.iter().map(|o| o.1)) else { return false };
@@ -806,6 +832,16 @@ impl Editor {
             }
             return true;
         }
+        if let DragKind::Guide(i) = drag.kind {
+            if !drag.moved {
+                return false;
+            }
+            self.guide_end(i);
+            if let Some(before) = drag.before {
+                self.push_undo(before);
+            }
+            return true;
+        }
         if !drag.moved
             && let Some((group, member)) = pending
         {
@@ -826,6 +862,11 @@ impl Editor {
         let (w, h) = (self.pres.slide_width as f64, self.pres.slide_height as f64);
         let mut xs = vec![(0.0, 0.0, h), (w / 2.0, 0.0, h), (w, 0.0, h)];
         let mut ys = vec![(0.0, 0.0, w), (h / 2.0, 0.0, w), (h, 0.0, w)];
+        if self.pres.view.show_guides {
+            for g in &self.pres.view.guides {
+                if g.vertical { xs.push((g.pos as f64, 0.0, h)) } else { ys.push((g.pos as f64, 0.0, w)) }
+            }
+        }
         for s in self.current_shapes().iter().filter(|s| !exclude.contains(&s.id)) {
             let (x0, y0, x1, y1) = bounds(&s.xfrm);
             for x in [x0, (x0 + x1) / 2.0, x1] {
@@ -856,11 +897,21 @@ impl Editor {
         let mut guides = Vec::new();
         let mut sx = 0.0;
         let mut sy = 0.0;
-        if !lock_x && let Some((d, _)) = best([b.0, (b.0 + b.2) / 2.0, b.2], &xs) {
-            sx = d;
+        let grid = self.pres.view.snap_to_grid;
+        if !lock_x {
+            match best([b.0, (b.0 + b.2) / 2.0, b.2], &xs) {
+                Some((d, _)) => sx = d,
+                // Otherwise the left edge goes to the nearest grid line.
+                None if grid => sx = self.grid_round(b.0, self.pres.slide_width) - b.0,
+                None => {}
+            }
         }
-        if !lock_y && let Some((d, _)) = best([b.1, (b.1 + b.3) / 2.0, b.3], &ys) {
-            sy = d;
+        if !lock_y {
+            match best([b.1, (b.1 + b.3) / 2.0, b.3], &ys) {
+                Some((d, _)) => sy = d,
+                None if grid => sy = self.grid_round(b.1, self.pres.slide_height) - b.1,
+                None => {}
+            }
         }
         // Report every line the snapped box now touches, like PowerPoint.
         let b = (b.0 + sx, b.1 + sy, b.2 + sx, b.3 + sy);
@@ -894,6 +945,9 @@ impl Editor {
                 let d = d.round() as i64;
                 if sx > 0.0 { x.w += d } else { x.x += d; x.w -= d }
                 self.guides.push(Guide { vertical: true, pos: t.0, from: t.1.min(x.y as f64), to: t.2.max((x.y + x.h) as f64) });
+            } else if self.pres.view.snap_to_grid {
+                let d = (self.grid_round(edge, self.pres.slide_width) - edge).round() as i64;
+                if sx > 0.0 { x.w += d } else { x.x += d; x.w -= d }
             }
         }
         if sy != 0.0 {
@@ -902,6 +956,9 @@ impl Editor {
                 let d = d.round() as i64;
                 if sy > 0.0 { x.h += d } else { x.y += d; x.h -= d }
                 self.guides.push(Guide { vertical: false, pos: t.0, from: t.1.min(x.x as f64), to: t.2.max((x.x + x.w) as f64) });
+            } else if self.pres.view.snap_to_grid {
+                let d = (self.grid_round(edge, self.pres.slide_height) - edge).round() as i64;
+                if sy > 0.0 { x.h += d } else { x.y += d; x.h -= d }
             }
         }
         x
@@ -1833,6 +1890,11 @@ fn resize(orig: &Xfrm, handle: Handle, dx: f64, dy: f64, keep_aspect: bool, min:
     let (ocx, ocy) = orig.center();
     let (cx, cy) = (ocx + lcx * c - lcy * s, ocy + lcx * s + lcy * c);
     Xfrm { x: (cx - w / 2.0).round() as i64, y: (cy - h / 2.0).round() as i64, w: w.round() as i64, h: h.round() as i64, ..*orig }
+}
+
+/// Cursor over a guide: vertical guides move sideways.
+fn guide_cursor(vertical: bool) -> CursorIcon {
+    CursorIcon::Resize(if vertical { 0.0 } else { 90.0 })
 }
 
 fn resize_cursor(handle: Handle, xfrm: &Xfrm) -> CursorIcon {

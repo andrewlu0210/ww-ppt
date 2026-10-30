@@ -26,6 +26,7 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<App | null>(null);
 
   useEffect(() => {
@@ -132,12 +133,23 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
           }
         }
         canvas.style.cursor = app.cursor(x, y);
+        showGuideLabel(dragging ? app.guideLabel() : "", x, y);
+      };
+      // The distance of a dragged guide from the slide's center, next to the pointer.
+      const showGuideLabel = (text: string, x: number, y: number) => {
+        const label = labelRef.current;
+        if (!label) return;
+        label.hidden = !text;
+        label.textContent = text;
+        label.style.left = `${x + 14}px`;
+        label.style.top = `${y + 14}px`;
       };
       const onUp = (e: PointerEvent) => {
         if (!dragging) return;
         dragging = false;
         const { x, y } = local(e);
         app.pointerUp(x, y, e.shiftKey, e.altKey, e.metaKey);
+        showGuideLabel("", 0, 0);
         changed();
       };
       canvas.addEventListener("pointerdown", onDown);
@@ -245,6 +257,7 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
   return (
     <div className="canvas-host" ref={containerRef}>
       <canvas ref={canvasRef} />
+      <div ref={labelRef} className="guide-label" hidden />
       <textarea
         ref={inputRef}
         className="ime-input"

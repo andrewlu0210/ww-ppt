@@ -12,6 +12,8 @@ import { PresenterView, type ShowTimer } from "./components/PresenterView";
 import { AUDIENCE_LABEL, type ShowCommand, type ShowState } from "./lib/show";
 import { MIN_NOTES_HEIGHT, NotesPane, notesFocused } from "./components/NotesPane";
 import { StatusBar } from "./components/StatusBar";
+import { Rulers } from "./components/Ruler";
+import { SlideSorter } from "./components/SlideSorter";
 import {
   askSaveChanges,
   inTauri,
@@ -70,6 +72,27 @@ function loadNotesPrefs(): { open: boolean; height: number } {
   }
 }
 
+const VIEW_KEY = "ww-ppt.view";
+/** Sorter thumbnail width (CSS px) at 100%. */
+const SORTER_BASE = 200;
+
+interface ViewPrefs {
+  ruler: boolean;
+  grid: boolean;
+  /** Slide sorter thumbnail width in CSS px. */
+  sorterSize: number;
+}
+
+/** Ruler, gridlines and sorter size, remembered per machine. */
+function loadViewPrefs(): ViewPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as Partial<ViewPrefs> | null;
+    return { ruler: v?.ruler === true, grid: v?.grid === true, sorterSize: typeof v?.sorterSize === "number" ? v.sorterSize : SORTER_BASE };
+  } catch {
+    return { ruler: false, grid: false, sorterSize: SORTER_BASE };
+  }
+}
+
 interface Doc {
   name: string;
   path: string | null;
@@ -114,6 +137,18 @@ export function App() {
     }
   }, [usePresenter]);
   const [notesPrefs, setNotesPrefs] = useState(loadNotesPrefs);
+  const [viewPrefs, setViewPrefs] = useState(loadViewPrefs);
+  const [viewMode, setViewMode] = useState<"normal" | "sorter">("normal");
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, JSON.stringify(viewPrefs));
+    } catch {
+      // Not remembered; the defaults apply next time.
+    }
+    engineRef.current?.setShowGrid(viewPrefs.grid);
+  }, [viewPrefs]);
   const [spellOn, setSpellOn] = useState(loadSpellPref);
   const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; hit: SpellHit; guesses: string[] | null } | null>(null);
   /** Misspellings by checked text, so unchanged texts aren't sent again. */
@@ -527,6 +562,23 @@ export function App() {
         setNotesPrefs((p) => ({ ...p, open: !p.open }));
         return;
       }
+      if (c.kind === "viewMode") {
+        setViewMode(c.mode);
+        if (c.mode === "normal") focusCanvas();
+        return;
+      }
+      if (c.kind === "toggleRuler") {
+        setViewPrefs((p) => ({ ...p, ruler: !p.ruler }));
+        return;
+      }
+      if (c.kind === "showGrid") {
+        setViewPrefs((p) => ({ ...p, grid: c.on }));
+        return;
+      }
+      if (c.kind === "zoom" && viewModeRef.current === "sorter") {
+        setViewPrefs((p) => ({ ...p, sorterSize: c.factor === "fit" ? SORTER_BASE : Math.max(100, Math.min(480, Math.round(p.sorterSize * c.factor))) }));
+        return;
+      }
       let structural = false;
       switch (c.kind) {
         case "open": {
@@ -707,6 +759,18 @@ export function App() {
         case "insertSymbol":
           engine.insertSymbol(c.text);
           break;
+        case "showGuides":
+          engine.setShowGuides(c.on);
+          break;
+        case "snapToGrid":
+          engine.setSnapToGrid(c.on);
+          break;
+        case "gridSpacing":
+          engine.setGridSpacing(c.emu);
+          break;
+        case "addGuide":
+          engine.addGuide(c.vertical);
+          break;
         case "background":
           if (c.fill === "solid") engine.setBackgroundSolid(c.color);
           else engine.setBackgroundGradient(c.start, c.end, c.radial, c.angle);
@@ -818,7 +882,9 @@ export function App() {
       }
       if (structural) scheduleThumbs(true);
       refresh();
-      focusCanvas();
+      // In the slide sorter, keys belong to the sorter, not the hidden canvas.
+      if (viewModeRef.current === "sorter") document.querySelector<HTMLElement>(".slide-sorter")?.focus({ preventScroll: true });
+      else focusCanvas();
     },
     [confirmDiscard, deckStyleChanged, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow],
   );
@@ -853,6 +919,12 @@ export function App() {
       const engine = engineRef.current;
       // Editing commands must not touch the deck while it is being presented.
       if (showingRef.current) return;
+      // The slide sorter has no shapes to edit: inserting goes back to the normal view,
+      // and the other shape commands do nothing there.
+      if (viewModeRef.current === "sorter") {
+        if (id.startsWith("insert_") || id === "find" || id === "replace") setViewMode("normal");
+        else if (["cut", "copy", "paste", "delete", "duplicate", "select_all", "group", "ungroup"].includes(id)) return;
+      }
       if (id === "find" || id === "replace") {
         findRef.current?.open(id === "replace");
         return;
@@ -920,6 +992,7 @@ export function App() {
     async (engine: Engine) => {
       engineRef.current = engine;
       engine.setFallbackFonts([...FALLBACK_FAMILIES, EMOJI_FAMILY]);
+      engine.setShowGrid(loadViewPrefs().grid);
       if (!inTauri) setError("目前在瀏覽器中執行：沒有原生字型與檔案存取，請用 npm run tauri dev 啟動。");
       void listFonts().then(setFonts);
       await loadFonts(FALLBACK_FAMILIES);
@@ -948,8 +1021,30 @@ export function App() {
         fontSchemes={schemes.fonts}
         slideSize={slideSize}
         loadBackground={() => (engineRef.current?.background() as BackgroundInfo | undefined) ?? null}
+        viewMode={viewMode}
+        rulerOn={viewPrefs.ruler}
       />
-      <main className="workspace">
+      <main className={viewMode === "sorter" && !showing ? "workspace sorting" : "workspace"}>
+        {viewMode === "sorter" && !showing && (
+          <SlideSorter
+            count={status.slideCount}
+            current={status.slideIndex}
+            thumbs={thumbs}
+            transitions={status.transitionSlides}
+            size={viewPrefs.sorterSize}
+            onSelect={(i) => {
+              engineRef.current?.setSlide(i);
+              refresh();
+            }}
+            onOpen={(i) => {
+              engineRef.current?.setSlide(i);
+              setViewMode("normal");
+              refresh();
+              focusCanvas();
+            }}
+            run={run}
+          />
+        )}
         <SlidePane
           count={status.slideCount}
           transitions={status.transitionSlides}
@@ -962,8 +1057,9 @@ export function App() {
           run={run}
         />
         <section className={showing ? "editor-area showing" : "editor-area"}>
-          <div className="canvas-area" onContextMenu={onCanvasContextMenu}>
+          <div className={viewPrefs.ruler && !showing ? "canvas-area with-ruler" : "canvas-area"} onContextMenu={onCanvasContextMenu}>
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
+            {viewPrefs.ruler && !showing && <Rulers engine={engineRef.current} slideSize={slideSize} />}
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
             {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}
             {showMode === "slides" && <SlideShow state={showState} command={showCommand} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}
@@ -1010,7 +1106,7 @@ export function App() {
           )}
         </section>
       </main>
-      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} run={run} />
+      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} run={run} />
     </div>
   );
 }

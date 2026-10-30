@@ -13,6 +13,7 @@ mod table;
 mod table_writer;
 mod template;
 mod transition;
+mod view;
 mod writer;
 
 pub use template::template_package;
@@ -188,6 +189,11 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
             .unwrap_or_default()
     };
 
+    if let Some(part) = parser.pkg.rel_of_type(&pres_part, "viewProps")
+        && let Ok(xml) = parser.pkg.read_string(&part)
+    {
+        parser.pres.view = view::parse(&xml);
+    }
     parser.pres.package = Some(Arc::new(bytes.to_vec()));
     for part in slide_parts {
         let slide = parser.slide(&part)?;

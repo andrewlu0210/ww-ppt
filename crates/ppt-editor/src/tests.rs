@@ -1236,3 +1236,63 @@ fn theme_variants_and_slide_size_restyle_the_deck() {
     assert!(e.undo(&mut eng));
     assert_eq!(e.pres.slide_width, w);
 }
+
+#[test]
+fn guides_are_dragged_snapped_to_and_dropped_off_the_slide() {
+    let mut eng = engine();
+    let (mut e, id) = editor();
+    assert!(e.add_guide(&mut eng, true));
+    let center = e.pres.slide_width / 2;
+    assert_eq!(e.pres.view.guides, vec![ppt_model::DrawGuide { vertical: true, pos: center }]);
+    assert!(e.pres.view.show_guides);
+    // Grabbed away from shapes and moved to 3in; the label shows the distance from the center.
+    let y = 5.0 * IN as f64;
+    assert!(e.pointer_down(&mut eng, &ev(center as f64 + 10_000.0, y), &TOL));
+    e.pointer_move(&mut eng, &ev(3.0 * IN as f64, y), &TOL);
+    let label = e.guide_label().unwrap();
+    assert_eq!(label, format!("{:.2}", (center as f64 - 3.0 * IN as f64) / 360_000.0));
+    e.pointer_up(&mut eng, &ev(3.0 * IN as f64, y));
+    assert_eq!(e.pres.view.guides[0].pos, 3 * IN);
+    // A shape dragged near the guide snaps its left edge to it.
+    e.selection = vec![id];
+    e.pointer_down(&mut eng, &ev(1.5 * IN as f64, 1.5 * IN as f64), &TOL);
+    e.pointer_move(&mut eng, &ev(3.5 * IN as f64 + 10_000.0, 1.5 * IN as f64), &TOL);
+    e.pointer_up(&mut eng, &ev(3.5 * IN as f64 + 10_000.0, 1.5 * IN as f64));
+    assert_eq!(xfrm(&e, id).x, 3 * IN);
+    // Dropped off the slide, the guide goes away; undo brings it back.
+    e.selection.clear();
+    e.pointer_down(&mut eng, &ev(3.0 * IN as f64, y), &TOL);
+    e.pointer_move(&mut eng, &ev(-IN as f64, y), &TOL);
+    e.pointer_up(&mut eng, &ev(-IN as f64, y));
+    assert!(e.pres.view.guides.is_empty());
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.pres.view.guides.len(), 1);
+}
+
+#[test]
+fn snap_to_grid_moves_edges_onto_grid_lines() {
+    let mut eng = engine();
+    let (mut e, id) = editor();
+    assert!(e.set_snap_to_grid(&mut eng, true));
+    assert!(e.set_grid_spacing(&mut eng, 360_000));
+    let w = e.pres.slide_width as f64;
+    // Far from every smart guide: the left edge lands on a grid line through the center.
+    e.selection = vec![id];
+    e.pointer_down(&mut eng, &ev(1.5 * IN as f64, 1.5 * IN as f64), &TOL);
+    e.pointer_move(&mut eng, &ev(2.5 * IN as f64 + 123_456.0, 2.5 * IN as f64 + 77_777.0), &TOL);
+    e.pointer_up(&mut eng, &ev(2.5 * IN as f64 + 123_456.0, 2.5 * IN as f64 + 77_777.0));
+    let x = xfrm(&e, id);
+    let off = (x.x as f64 - w / 2.0).rem_euclid(360_000.0);
+    assert!(off < 1.0 || off > 359_999.0, "{x:?}");
+}
+
+#[test]
+fn new_guides_step_off_existing_ones() {
+    let mut eng = engine();
+    let (mut e, _) = editor();
+    assert!(e.add_guide(&mut eng, false));
+    assert!(e.add_guide(&mut eng, false));
+    let g = &e.pres.view.guides;
+    assert_eq!(g.len(), 2);
+    assert!((g[1].pos - g[0].pos - 360_000).abs() < 1_600, "{g:?}");
+}

@@ -8,6 +8,26 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  normalView: (
+    <Svg>
+      <rect x="3" y="4.5" width="18" height="15" rx="1" />
+      <path d="M8 4.5v15M4.5 7.5h2M4.5 10.5h2M4.5 13.5h2" />
+    </Svg>
+  ),
+  sorterView: (
+    <Svg>
+      <rect x="3" y="4.5" width="7.5" height="6" rx="0.5" />
+      <rect x="13.5" y="4.5" width="7.5" height="6" rx="0.5" />
+      <rect x="3" y="13.5" width="7.5" height="6" rx="0.5" />
+      <rect x="13.5" y="13.5" width="7.5" height="6" rx="0.5" />
+    </Svg>
+  ),
+  grid: (
+    <Svg>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="1" />
+      <path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17" />
+    </Svg>
+  ),
   slideSize: (
     <Svg>
       <rect x="3" y="6" width="18" height="12" rx="1" />

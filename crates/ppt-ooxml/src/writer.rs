@@ -1555,6 +1555,12 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
     for (part, xml) in notes.replaced {
         replaced.insert(part, xml.into_bytes());
     }
+    // Guides and grid settings.
+    if let Some(part) = pres_rels.iter().find(|r| r.kind.ends_with("/viewProps")).map(|r| r.target.clone())
+        && let Some(xml) = read_part(&mut zip, &part).and_then(|x| crate::view::patch(&x, &pres.view))
+    {
+        replaced.insert(part, xml.into_bytes());
+    }
     new_parts.extend(notes.new_parts.into_iter().map(|(part, xml, _)| (part, xml.into_bytes())));
     new_parts.extend(media.new_files);
 

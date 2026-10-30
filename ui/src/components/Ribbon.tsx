@@ -98,9 +98,11 @@ interface Props {
   fontSchemes: FontSchemeInfo[];
   slideSize: [number, number];
   loadBackground: () => BackgroundInfo | null;
+  viewMode: "normal" | "sorter";
+  rulerOn: boolean;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -516,7 +518,26 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         )}
         {tab === "檢視" && (
           <>
+            <Group label="簡報檢視">
+              <Button large icon={icons.normalView} label="標準" active={viewMode === "normal"} onClick={() => run({ kind: "viewMode", mode: "normal" })} />
+              <Button large icon={icons.sorterView} label="投影片瀏覽" active={viewMode === "sorter"} onClick={() => run({ kind: "viewMode", mode: "sorter" })} />
+            </Group>
             <Group label="顯示">
+              <div className="rb-checks">
+                <label className="rb-check">
+                  <input type="checkbox" checked={rulerOn} onChange={() => run({ kind: "toggleRuler" })} />
+                  尺規
+                </label>
+                <label className="rb-check">
+                  <input type="checkbox" checked={!!status.showGrid} onChange={(e) => run({ kind: "showGrid", on: e.target.checked })} />
+                  格線
+                </label>
+                <label className="rb-check">
+                  <input type="checkbox" checked={!!status.showGuides} onChange={(e) => run({ kind: "showGuides", on: e.target.checked })} />
+                  輔助線
+                </label>
+              </div>
+              <GridMenu status={status} run={run} />
               <Button icon={icons.notes} label="備忘稿" active={notesOpen} onClick={() => run({ kind: "toggleNotes" })} />
             </Group>
             <Group label="縮放">
@@ -528,5 +549,65 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         )}
       </div>
     </div>
+  );
+}
+
+/** Grid spacings offered, in centimeters. */
+const GRID_SPACINGS = [0.1, 0.2, 0.25, 0.5, 1, 2];
+const EMU_PER_CM = 360_000;
+
+/** 格線及輔助線: spacing, snapping and new guides. */
+function GridMenu({ status, run }: { status: Status; run: (c: Command) => void }) {
+  const spacing = (status.gridSpacing ?? 72_000) / EMU_PER_CM;
+  return (
+    <Popover
+      button={(open, toggle) => (
+        <button className={open ? "rb-btn active" : "rb-btn"} title="格線及輔助線" onMouseDown={keepFocus} onClick={toggle}>
+          {icons.grid}
+          <span>格線設定 ▾</span>
+        </button>
+      )}
+    >
+      {(close) => (
+        <div className="hf-dialog grid-menu" role="dialog" aria-label="格線及輔助線">
+          <div className="hf-title">貼齊</div>
+          <label className="hf-row">
+            <input type="checkbox" checked={!!status.snapToGrid} onChange={(e) => run({ kind: "snapToGrid", on: e.target.checked })} />
+            物件貼齊格線
+          </label>
+          <div className="hf-title sep">格線設定</div>
+          <label className="hf-row">
+            間距
+            <select value={GRID_SPACINGS.find((g) => Math.abs(g - spacing) < 0.005) ?? ""} onChange={(e) => run({ kind: "gridSpacing", emu: Number(e.target.value) * EMU_PER_CM })}>
+              {!GRID_SPACINGS.some((g) => Math.abs(g - spacing) < 0.005) && <option value="">{spacing.toFixed(2)} 公分</option>}
+              {GRID_SPACINGS.map((g) => (
+                <option key={g} value={g}>
+                  {g} 公分
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="hf-row">
+            <input type="checkbox" checked={!!status.showGrid} onChange={(e) => run({ kind: "showGrid", on: e.target.checked })} />
+            在螢幕上顯示格線
+          </label>
+          <div className="hf-title sep">輔助線設定</div>
+          <label className="hf-row">
+            <input type="checkbox" checked={!!status.showGuides} onChange={(e) => run({ kind: "showGuides", on: e.target.checked })} />
+            在螢幕上顯示繪圖輔助線
+          </label>
+          <div className="hf-buttons">
+            <button onClick={() => run({ kind: "addGuide", vertical: true })}>新增垂直輔助線</button>
+            <button onClick={() => run({ kind: "addGuide", vertical: false })}>新增水平輔助線</button>
+          </div>
+          <div className="hf-note">拖曳輔助線可移動，拖出投影片即可刪除。</div>
+          <div className="hf-buttons">
+            <button className="primary" onClick={close}>
+              完成
+            </button>
+          </div>
+        </div>
+      )}
+    </Popover>
   );
 }

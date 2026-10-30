@@ -171,6 +171,7 @@ button {
 
 /* Workspace */
 .workspace {
+  position: relative;
   display: grid;
   grid-template-columns: 200px 1fr;
   min-height: 0;
@@ -216,7 +217,8 @@ button {
 
 .slide-thumb {
   width: 100%;
-  aspect-ratio: 16 / 9;
+  /* The canvas's own size gives the slide's aspect ratio (4:3, 16:9, ...). */
+  height: auto;
   display: block;
   background: #fff;
 }
@@ -1677,4 +1679,153 @@ button {
   border-radius: 5px;
   background: #fff;
   align-self: flex-start;
+}
+
+/* Rulers along the canvas. */
+.canvas-area.with-ruler .canvas-host {
+  top: 18px;
+  left: 18px;
+}
+
+.ruler {
+  position: absolute;
+  display: block;
+  background: #e9e9e9;
+}
+
+.ruler-h {
+  top: 0;
+  left: 18px;
+  right: 0;
+  width: calc(100% - 18px);
+  height: 18px;
+  border-bottom: 1px solid #d0d0d0;
+}
+
+.ruler-v {
+  top: 18px;
+  left: 0;
+  bottom: 0;
+  width: 18px;
+  height: calc(100% - 18px);
+  border-right: 1px solid #d0d0d0;
+}
+
+.ruler-corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  background: #e2e2e2;
+}
+
+.guide-label {
+  position: absolute;
+  padding: 1px 6px;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid #9ab;
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Slide sorter: covers the slide pane and the editor. */
+.slide-sorter {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 28px 22px;
+  background: var(--bg, #f3f3f3);
+  outline: none;
+}
+
+.sorter-item {
+  position: relative;
+  width: var(--sorter-size, 200px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+
+.sorter-card {
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--border);
+  line-height: 0;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+}
+
+.sorter-thumb {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.sorter-item.current .sorter-card {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sorter-no {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sorter-item.drop-before::before,
+.sorter-item.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 18px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.sorter-item.drop-before::before {
+  left: -13px;
+}
+
+.sorter-item.drop-after::after {
+  right: -13px;
+}
+
+/* Checkbox column in the ribbon (檢視 > 顯示). */
+.rb-checks {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
+.rb-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hf-title.sep {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.hf-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.grid-menu {
+  width: 270px;
 }

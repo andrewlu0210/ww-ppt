@@ -385,6 +385,14 @@ pub fn set_slide_size(pres: &Presentation, width: Emu, height: Emu, fit: Fit) ->
         if part == pres_part {
             return resize_presentation(xml, (width, height), &r);
         }
+        if part.ends_with("/viewProps.xml") {
+            let mut view = crate::view::parse(xml);
+            for g in &mut view.guides {
+                let d = if g.vertical { r.d.0 } else { r.d.1 };
+                g.pos = (g.pos as f64 * r.s + d).round() as Emu;
+            }
+            return crate::view::patch(xml, &view);
+        }
         let drawn = ["ppt/slides/slide", "ppt/slideLayouts/slideLayout", "ppt/slideMasters/slideMaster"].iter().any(|p| is_part(part, p));
         if drawn { resize_part(xml, &r) } else { None }
     })

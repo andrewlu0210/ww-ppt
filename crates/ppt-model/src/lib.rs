@@ -841,6 +841,29 @@ pub struct Layout {
     pub part: String,
 }
 
+/// A drawing guide (檢視 > 參考線): a line shapes snap to, not part of the slides.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawGuide {
+    pub vertical: bool,
+    /// x of vertical guides, y of horizontal ones.
+    pub pos: Emu,
+}
+
+/// Editing aids saved with the deck (`ppt/viewProps.xml`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewSettings {
+    pub guides: Vec<DrawGuide>,
+    pub show_guides: bool,
+    pub snap_to_grid: bool,
+    pub grid_spacing: Emu,
+}
+
+impl Default for ViewSettings {
+    fn default() -> Self {
+        Self { guides: Vec::new(), show_guides: false, snap_to_grid: false, grid_spacing: 72_000 }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Presentation {
     pub slide_width: Emu,
@@ -861,6 +884,7 @@ pub struct Presentation {
     pub table_styles: Vec<Arc<table::TableStyle>>,
     /// The theme's hyperlink color, for links added in the editor.
     pub link_color: Option<Color>,
+    pub view: ViewSettings,
     next_id: u32,
 }
 
@@ -878,6 +902,7 @@ impl Default for Presentation {
             table_style: None,
             table_styles: Vec::new(),
             link_color: None,
+            view: ViewSettings::default(),
             next_id: 1,
         }
     }
