@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo } from "@tauri-apps/api/event";
 import { availableMonitors } from "@tauri-apps/api/window";
 import type { App } from "../wasm/ppt_wasm";
-import { inTauri, writeFile } from "./backend";
+import { exportVideo, inTauri, onVideoEvents, writeFile } from "./backend";
 import type { Command } from "./commands";
 
 interface Hooks {
@@ -241,6 +241,21 @@ async function step(cmd: string, h: Hooks) {
       if (!ta) throw new Error(`no text pane row ${args[0]}`);
       ta.focus();
       document.execCommand("insertText", false, args.slice(1).join(" "));
+      break;
+    }
+    // Video export through the backend, as the dialog does: `video out.mp4 1280 2`.
+    case "video": {
+      const result = new Promise<string>((resolve) => {
+        const off = onVideoEvents(
+          () => {},
+          (r) => {
+            void off.then((f) => f());
+            resolve(JSON.stringify(r));
+          },
+        );
+      });
+      await exportVideo(args[0], engine.savePptx(), { width: num(1) || 1280, fps: 30, seconds: num(2) || 2, timings: true });
+      await log(`video ${await result}`);
       break;
     }
     case "notesget": {

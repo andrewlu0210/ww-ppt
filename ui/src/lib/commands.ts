@@ -5,6 +5,7 @@ export type Command =
   | { kind: "save" }
   | { kind: "saveAs" }
   | { kind: "exportPdf" }
+  | { kind: "exportVideo" }
   | { kind: "undo" }
   | { kind: "redo" }
   | { kind: "cut" }

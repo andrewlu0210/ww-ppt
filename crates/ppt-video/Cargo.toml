@@ -1,0 +1,20 @@
+[package]
+name = "ppt-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Exports a presentation as an H.264 video"
+
+[dependencies]
+ppt-model.workspace = true
+ppt-ooxml.workspace = true
+ppt-offscreen.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSValue", "NSError", "NSObject"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-video", "objc2-core-media", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings"] }
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferPool", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFString", "CFNumber"] }

@@ -41,6 +41,7 @@ import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 import type { AltTextInfo } from "./components/AltTextDialog";
 import { SelectionPane } from "./components/SelectionPane";
 import { DiagramPane } from "./components/DiagramPane";
+import { VideoDialog } from "./components/VideoDialog";
 import { CheckerPane, type A11yIssue } from "./components/CheckerPane";
 import { A11yMirror } from "./components/A11yMirror";
 import { announce } from "./lib/announce";
@@ -195,6 +196,7 @@ export function App() {
   const [notesPrefs, setNotesPrefs] = useState(loadNotesPrefs);
   const [viewPrefs, setViewPrefs] = useState(loadViewPrefs);
   // SmartArt text pane: open, the row being edited (shared with the ribbon), and focus requests.
+  const [videoOpen, setVideoOpen] = useState(false);
   const [diagramPane, setDiagramPane] = useState(false);
   const [diagramRow, setDiagramRow] = useState(0);
   const diagramRowRef = useRef(0);
@@ -795,6 +797,10 @@ export function App() {
         setViewPrefs((p) => ({ ...p, ruler: !p.ruler }));
         return;
       }
+      if (c.kind === "exportVideo") {
+        setVideoOpen(true);
+        return;
+      }
       if (c.kind === "textPane") {
         setDiagramPane((open) => c.open ?? !open);
         return;
@@ -1149,6 +1155,7 @@ export function App() {
       save: { kind: "save" },
       save_as: { kind: "saveAs" },
       export_pdf: { kind: "exportPdf" },
+      export_video: { kind: "exportVideo" },
       undo: { kind: "undo" },
       redo: { kind: "redo" },
       new_slide: { kind: "newSlide" },
@@ -1400,6 +1407,7 @@ export function App() {
           </div>
         )}
       </main>
+      {videoOpen && <VideoDialog engine={engineRef.current} name={doc.name} onClose={() => setVideoOpen(false)} />}
       <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} />
     </div>
   );

@@ -3,6 +3,7 @@
 
 mod automation;
 mod spell;
+mod video;
 
 use ppt_fonts::{FontService, ResolvedFont};
 use tauri::ipc::Response;
@@ -36,7 +37,7 @@ fn write_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
 }
 
 /// Header values are ASCII; the frontend percent-encodes paths.
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -111,6 +112,7 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
         .item(&item("save_as", "另存新檔…", Some("CmdOrCtrl+Shift+S"))?)
         .separator()
         .item(&item("export_pdf", "匯出為 PDF…", Some("CmdOrCtrl+Shift+E"))?)
+        .item(&item("export_video", "匯出為視訊…", None)?)
         .separator()
         .item(&PredefinedMenuItem::close_window(app, Some("關閉視窗"))?)
         .build()?;
@@ -170,6 +172,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(FontService::new())
         .manage(ShowDeck::default())
+        .manage(video::VideoExport::default())
         .setup(|app| {
             let menu = build_menu(app)?;
             app.set_menu(menu)?;
@@ -191,6 +194,8 @@ pub fn run() {
             startup_files,
             set_show_deck,
             get_show_deck,
+            video::export_video,
+            video::cancel_video_export,
             spell::spell_check,
             spell::spell_guesses,
             spell::spell_ignore,

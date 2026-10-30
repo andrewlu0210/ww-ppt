@@ -595,6 +595,9 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 使用簡報者檢視
               </label>
             </Group>
+            <Group label="匯出">
+              <Button large icon={icons.exportVideo} label="匯出為視訊" disabled={status.slideCount === 0} onClick={() => run({ kind: "exportVideo" })} />
+            </Group>
           </>
         )}
         {tab === "校閱" && (

@@ -42,6 +42,13 @@ export const icons: Record<string, ReactNode> = {
       <path d="M12 14v7M8.5 17.5L12 21l3.5-3.5" />
     </Svg>
   ),
+  exportVideo: (
+    <Svg>
+      <rect x="2.5" y="5.5" width="13" height="13" rx="1.5" />
+      <path d="M15.5 10l6-3.5v11l-6-3.5" />
+      <path d="M7.5 9.5l4 2.5-4 2.5z" />
+    </Svg>
+  ),
   textPane: (
     <Svg>
       <rect x="2.5" y="4" width="8" height="16" rx="1" />

@@ -1,0 +1,15 @@
+[package]
+name = "ppt-offscreen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Headless slide rendering on a native GPU device"
+
+[dependencies]
+ppt-model.workspace = true
+ppt-text.workspace = true
+ppt-render.workspace = true
+ppt-pdf.workspace = true
+ppt-fonts.workspace = true
+image.workspace = true
+pollster = "0.4"

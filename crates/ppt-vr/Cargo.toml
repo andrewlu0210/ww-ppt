@@ -12,6 +12,7 @@ ppt-text.workspace = true
 ppt-render.workspace = true
 ppt-pdf.workspace = true
 ppt-fonts.workspace = true
+ppt-offscreen.workspace = true
 ppt-geometry.workspace = true
 vello.workspace = true
 image.workspace = true
