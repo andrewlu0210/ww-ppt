@@ -8,6 +8,7 @@ mod access;
 mod anim;
 mod check;
 mod design;
+mod diagram;
 mod draw;
 mod find;
 mod footer;
@@ -34,6 +35,7 @@ use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
 pub use a11y::{A11yItem, A11yParagraph, A11yRole, describe, slide_title};
 pub use access::PaneItem;
 pub use check::{Issue, IssueKind, Severity, contrast};
+pub use diagram::DiagramInfo;
 pub use draw::ARROW_LINE;
 pub use find::{FindMatch, FindOptions, FindPlace, find_in};
 pub use footer::{DateText, HeaderFooter};
@@ -270,6 +272,12 @@ pub struct Editor {
     pub draw_tool: Option<String>,
     /// The tool of the shape being drawn.
     draw_shape_tool: Option<String>,
+    /// The SmartArt row whose typing is folded into the last undo step.
+    diagram_undo: Option<(ShapeId, usize)>,
+    /// Bumped when a SmartArt is double-clicked: the host opens its text pane
+    /// at `diagram_focus`.
+    pub diagram_requests: u32,
+    pub diagram_focus: Option<usize>,
 }
 
 /// A snap target: (position, extent start, extent end).
@@ -306,6 +314,9 @@ impl Editor {
             crop: None,
             draw_tool: None,
             draw_shape_tool: None,
+            diagram_undo: None,
+            diagram_requests: 0,
+            diagram_focus: None,
         }
     }
 
@@ -410,6 +421,7 @@ impl Editor {
 
     fn push_undo(&mut self, snap: Snapshot) {
         self.notes_undo = None;
+        self.diagram_undo = None;
         self.undo.push(snap);
         if self.undo.len() > UNDO_LIMIT {
             self.undo.remove(0);
@@ -420,6 +432,7 @@ impl Editor {
 
     pub fn undo(&mut self, engine: &mut TextEngine) -> bool {
         self.notes_undo = None;
+        self.diagram_undo = None;
         // Inside a text box, undo typing first.
         if let Some(edit) = &mut self.text
             && edit.rich.can_undo()
@@ -438,6 +451,7 @@ impl Editor {
 
     pub fn redo(&mut self, engine: &mut TextEngine) -> bool {
         self.notes_undo = None;
+        self.diagram_undo = None;
         if let Some(edit) = &mut self.text
             && edit.rich.redo(engine)
         {
@@ -655,6 +669,12 @@ impl Editor {
                     self.selection = self.click_target(id);
                 }
                 let shape = self.pres.shape(self.slide, id).expect("hit shape exists");
+                if ev.clicks >= 2 && matches!(shape.kind, ShapeKind::Diagram { data: Some(_), .. }) {
+                    // SmartArt text is edited in the text pane, at the node clicked.
+                    self.diagram_focus = self.diagram_row_at(id, ev.x, ev.y);
+                    self.diagram_requests += 1;
+                    return true;
+                }
                 if ev.clicks >= 2 && can_hold_text(shape) {
                     self.begin_text_edit(engine, id, false);
                     if let Some((x, y)) = self.to_text_space(ev.x, ev.y)

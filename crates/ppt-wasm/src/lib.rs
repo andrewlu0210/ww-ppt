@@ -1936,6 +1936,59 @@ impl App {
         self.editor.set_notes(text)
     }
 
+    // --- SmartArt text pane -------------------------------------------------------
+
+    /// The selected SmartArt's nodes, `{ rows: [{ depth, text }], restructure, nest }`,
+    /// or null when no editable SmartArt is selected.
+    #[wasm_bindgen(js_name = diagramInfo)]
+    pub fn diagram_info(&self) -> JsValue {
+        let Some(info) = self.editor.diagram_info() else { return JsValue::NULL };
+        let rows: Array = info
+            .rows
+            .into_iter()
+            .map(|r| {
+                let o = Object::new();
+                let _ = Reflect::set(&o, &"depth".into(), &(r.depth as u32).into());
+                let _ = Reflect::set(&o, &"text".into(), &r.text.into());
+                JsValue::from(o)
+            })
+            .collect();
+        let o = Object::new();
+        let _ = Reflect::set(&o, &"rows".into(), &rows.into());
+        let _ = Reflect::set(&o, &"restructure".into(), &info.restructure.into());
+        let _ = Reflect::set(&o, &"nest".into(), &info.nest.into());
+        o.into()
+    }
+
+    /// Replaces a SmartArt row's text (paragraphs separated by `\n`).
+    #[wasm_bindgen(js_name = diagramSetText)]
+    pub fn diagram_set_text(&mut self, row: usize, text: &str) -> bool {
+        let changed = self.editor.diagram_set_text(&mut self.engine, row, text);
+        self.touch(changed)
+    }
+
+    /// Structure commands on SmartArt row `row`: `addAfter`, `addBefore`,
+    /// `addChild`, `delete`, `promote`, `demote`, `moveUp`, `moveDown`.
+    /// Returns the row to focus next, or -1 when nothing changed.
+    #[wasm_bindgen(js_name = diagramCommand)]
+    pub fn diagram_command(&mut self, command: &str, row: usize) -> i32 {
+        use ppt_model::diagram::Insert;
+        let (e, eng) = (&mut self.editor, &mut self.engine);
+        let next = match command {
+            "addAfter" => e.diagram_insert(eng, row, Insert::After),
+            "addBefore" => e.diagram_insert(eng, row, Insert::Before),
+            "addChild" => e.diagram_insert(eng, row, Insert::Child),
+            "delete" => e.diagram_delete(eng, row),
+            "promote" => e.diagram_shift(eng, row, false).then_some(row),
+            "demote" => e.diagram_shift(eng, row, true).then_some(row),
+            "moveUp" => e.diagram_move(eng, row, true),
+            "moveDown" => e.diagram_move(eng, row, false),
+            _ => None,
+        };
+        self.touch(next.is_some());
+        next.map_or(-1, |r| r as i32)
+    }
+
     // --- Slide show -----------------------------------------------------------------
 
     /// Starts a slide show from the first slide or from the current one. Returns false for an empty deck.
@@ -2389,6 +2442,9 @@ impl App {
         set("hasSelection", (!e.selection.is_empty()).into());
         set("editingText", e.is_editing_text().into());
         set("inTable", e.in_table().into());
+        set("smartArt", e.diagram_info().is_some().into());
+        set("diagramRequests", e.diagram_requests.into());
+        set("diagramFocus", e.diagram_focus.map_or(-1, |r| r as i32).into());
         set("canMerge", e.can_merge_cells().into());
         if let Some(t) = e.current_table() {
             set("tableStyle", t.style.as_ref().map(|s| s.id.clone()).unwrap_or_default().into());

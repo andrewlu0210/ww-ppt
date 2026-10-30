@@ -1883,7 +1883,8 @@ input:focus-visible,
 }
 
 .selection-pane,
-.checker-pane {
+.checker-pane,
+.diagram-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2162,4 +2163,54 @@ input:focus-visible,
   background: transparent;
   color: inherit;
   padding: 0 4px;
+}
+
+/* SmartArt text pane (文字窗格): one field per node, indented by level. */
+.diagram-rows {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 6px 6px 0;
+}
+
+.diagram-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.diagram-bullet {
+  width: 10px;
+  padding-top: 5px;
+  font-size: 8px;
+  color: #5a6b85;
+  text-align: center;
+}
+
+.diagram-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+}
+
+.diagram-row.current .diagram-input,
+.diagram-input:focus {
+  border-color: #b8c7e0;
+  background: #fff;
+  outline: none;
+}
+
+.pane-note {
+  padding: 6px 10px 8px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
 }

@@ -40,6 +40,7 @@ import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 import type { AltTextInfo } from "./components/AltTextDialog";
 import { SelectionPane } from "./components/SelectionPane";
+import { DiagramPane } from "./components/DiagramPane";
 import { CheckerPane, type A11yIssue } from "./components/CheckerPane";
 import { A11yMirror } from "./components/A11yMirror";
 import { announce } from "./lib/announce";
@@ -193,6 +194,22 @@ export function App() {
   }, [usePresenter]);
   const [notesPrefs, setNotesPrefs] = useState(loadNotesPrefs);
   const [viewPrefs, setViewPrefs] = useState(loadViewPrefs);
+  // SmartArt text pane: open, the row being edited (shared with the ribbon), and focus requests.
+  const [diagramPane, setDiagramPane] = useState(false);
+  const [diagramRow, setDiagramRow] = useState(0);
+  const diagramRowRef = useRef(0);
+  diagramRowRef.current = diagramRow;
+  const [diagramFocus, setDiagramFocus] = useState(0);
+  // A double-click on a SmartArt opens its text pane at the node clicked.
+  useEffect(() => {
+    if (!status.diagramRequests) return;
+    setDiagramRow(Math.max(0, status.diagramFocus ?? 0));
+    setDiagramPane(true);
+    setDiagramFocus((n) => n + 1);
+  }, [status.diagramRequests, status.diagramFocus]);
+  // Another selection starts at the first node.
+  useEffect(() => setDiagramRow(0), [status.selectionName, status.slideIndex]);
+  const diagramShown = diagramPane && !!status.smartArt;
   const [viewMode, setViewMode] = useState<"normal" | "sorter">("normal");
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
@@ -775,6 +792,22 @@ export function App() {
         setViewPrefs((p) => ({ ...p, ruler: !p.ruler }));
         return;
       }
+      if (c.kind === "textPane") {
+        setDiagramPane((open) => c.open ?? !open);
+        return;
+      }
+      if (c.kind === "smartArt") {
+        const engine = engineRef.current;
+        if (!engine) return;
+        const next = engine.diagramCommand(c.command, diagramRowRef.current);
+        if (next >= 0) {
+          setDiagramRow(next);
+          setDiagramPane(true);
+          setDiagramFocus((n) => n + 1);
+          refresh();
+        }
+        return;
+      }
       if (c.kind === "selectionPane") {
         setViewPrefs((p) => ({ ...p, pane: c.open ?? !p.pane }));
         return;
@@ -1247,9 +1280,10 @@ export function App() {
         rulerOn={viewPrefs.ruler}
         paneOpen={viewPrefs.pane}
         checkerOpen={viewPrefs.checker}
+        textPaneOpen={diagramShown}
         loadAltText={() => (engineRef.current?.altText() as AltTextInfo | null | undefined) ?? null}
       />
-      <main className={["workspace", viewMode === "sorter" && !showing && "sorting", (viewPrefs.pane || viewPrefs.checker) && !showing && "with-pane"].filter(Boolean).join(" ")}>
+      <main className={["workspace", viewMode === "sorter" && !showing && "sorting", (viewPrefs.pane || viewPrefs.checker || diagramShown) && !showing && "with-pane"].filter(Boolean).join(" ")}>
         {viewMode === "sorter" && !showing && (
           <SlideSorter
             count={status.slideCount}
@@ -1333,8 +1367,22 @@ export function App() {
             />
           )}
         </section>
-        {(viewPrefs.pane || viewPrefs.checker) && !showing && (
+        {(viewPrefs.pane || viewPrefs.checker || diagramShown) && !showing && (
           <div className="side-panels">
+            {diagramShown && (
+              <DiagramPane
+                engine={engineRef.current}
+                version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}`}
+                row={diagramRow}
+                onRow={setDiagramRow}
+                focusRequest={diagramFocus}
+                onChange={refresh}
+                onClose={() => {
+                  setDiagramPane(false);
+                  focusCanvas();
+                }}
+              />
+            )}
             {viewPrefs.checker && <CheckerPane engine={engineRef.current} issues={a11yIssues} run={run} onChange={refresh} onClose={() => setViewPrefs((p) => ({ ...p, checker: false }))} />}
             {viewPrefs.pane && (
               <SelectionPane

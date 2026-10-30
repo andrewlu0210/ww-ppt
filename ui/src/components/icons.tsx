@@ -8,6 +8,48 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  addShapeAfter: (
+    <Svg>
+      <rect x="2.5" y="8" width="9" height="8" rx="1" />
+      <rect x="14" y="8" width="7.5" height="8" rx="1" strokeDasharray="2 1.5" />
+      <path d="M17.75 10.5v3M16.25 12h3" />
+    </Svg>
+  ),
+  addShapeBefore: (
+    <Svg>
+      <rect x="2.5" y="8" width="7.5" height="8" rx="1" strokeDasharray="2 1.5" />
+      <rect x="12.5" y="8" width="9" height="8" rx="1" />
+      <path d="M6.25 10.5v3M4.75 12h3" />
+    </Svg>
+  ),
+  addChild: (
+    <Svg>
+      <rect x="3" y="3" width="10" height="7" rx="1" />
+      <path d="M8 10v6.5h4" />
+      <rect x="12" y="13" width="9" height="7" rx="1" strokeDasharray="2 1.5" />
+      <path d="M16.5 15v3M15 16.5h3" />
+    </Svg>
+  ),
+  moveUp: (
+    <Svg>
+      <rect x="4" y="13" width="16" height="7" rx="1" />
+      <path d="M12 10V3M8.5 6.5L12 3l3.5 3.5" />
+    </Svg>
+  ),
+  moveDown: (
+    <Svg>
+      <rect x="4" y="4" width="16" height="7" rx="1" />
+      <path d="M12 14v7M8.5 17.5L12 21l3.5-3.5" />
+    </Svg>
+  ),
+  textPane: (
+    <Svg>
+      <rect x="2.5" y="4" width="8" height="16" rx="1" />
+      <path d="M4.5 8h4M4.5 11.5h4M6 15h2.5" />
+      <rect x="13" y="6" width="8.5" height="5" rx="1" />
+      <rect x="13" y="13" width="8.5" height="5" rx="1" />
+    </Svg>
+  ),
   checkAccess: (
     <Svg>
       <circle cx="12" cy="4.5" r="1.8" />

@@ -13,6 +13,7 @@ pub use transition::{Transition, TransitionKind};
 pub mod anim;
 pub mod bullet;
 pub mod chart;
+pub mod diagram;
 pub mod media;
 pub mod table;
 pub mod transition;
@@ -643,9 +644,10 @@ pub enum ShapeKind {
     Table(Box<Table>),
     /// A chart, drawn from the values cached in its part; saved unchanged.
     Chart(Box<chart::Chart>),
-    /// SmartArt, drawn from the pre-rendered drawing PowerPoint stores with it
-    /// and saved verbatim. `shapes` are relative to a `w` × `h` frame at the origin.
-    Diagram { shapes: Arc<Vec<Shape>>, w: Emu, h: Emu },
+    /// SmartArt, drawn from the pre-rendered drawing PowerPoint stores with it.
+    /// `shapes` are relative to a `w` × `h` frame at the origin. `data` is the
+    /// editable node tree, when the data model could be read.
+    Diagram { shapes: Arc<Vec<Shape>>, w: Emu, h: Emu, data: Option<Arc<diagram::Diagram>> },
     /// Content the editor cannot edit yet (charts, SmartArt, ...).
     /// Kept verbatim on save; drawn as a labelled frame.
     Opaque { label: String },

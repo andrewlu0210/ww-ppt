@@ -7,6 +7,11 @@ export interface Status {
   editingText: boolean;
   /** A table or one of its cells is the target (shows the table layout tab). */
   inTable: boolean;
+  /** An editable SmartArt is selected (shows the SmartArt design tab). */
+  smartArt?: boolean;
+  /** Bumped when a SmartArt is double-clicked: open its text pane at `diagramFocus`. */
+  diagramRequests?: number;
+  diagramFocus?: number;
   canGroup?: boolean;
   canMerge?: boolean;
   tableStyle?: string;

@@ -6,6 +6,7 @@
 mod anim;
 mod chart;
 pub mod design;
+mod diagram;
 mod notes;
 mod package;
 mod style;
@@ -64,6 +65,15 @@ struct PhInfo {
     xfrm: Option<Xfrm>,
     body: BodyProps,
     lst: ListStyle,
+}
+
+/// What [`Parser::diagram_drawing`] reads for a SmartArt frame.
+struct DiagramParts {
+    shapes: Vec<Shape>,
+    data_xml: String,
+    drawing_xml: String,
+    /// The slide's relationship to the drawing: (id, type, target).
+    drawing_rel: (String, String, String),
 }
 
 struct Master {
@@ -534,13 +544,19 @@ impl Parser<'_> {
                     }
                     if uri.ends_with("/diagram")
                         && let Some(s) = &mut shape
-                        && let Some(shapes) = self.diagram_drawing(n, cx)
+                        && let Some(found) = self.diagram_drawing(n, cx)
                     {
-                        s.kind = ShapeKind::Diagram { shapes: Arc::new(shapes), w: s.xfrm.w, h: s.xfrm.h };
-                        // Keep the parsed snapshot in step so an untouched diagram saves verbatim.
+                        let (w, h) = (s.xfrm.w, s.xfrm.h);
+                        let data = diagram::read(&found.data_xml, &found.drawing_xml, found.shapes.clone(), w, h).map(Arc::new);
+                        s.kind = ShapeKind::Diagram { shapes: Arc::new(found.shapes), w, h, data };
+                        // Keep the parsed snapshot in step so an untouched diagram saves verbatim,
+                        // and carry the drawing (a slide relationship no attribute names) with copies.
                         if let Some(src) = &s.source {
                             let mut src = (**src).clone();
                             src.parsed.kind = s.kind.clone();
+                            if !src.rels.iter().any(|(id, ..)| *id == found.drawing_rel.0) {
+                                src.rels.push(found.drawing_rel);
+                            }
                             s.source = Some(Arc::new(src));
                         }
                     }
@@ -560,8 +576,9 @@ impl Parser<'_> {
         chart::chart(&xml, &cx.master.ctx, &cx.master.ctx.theme.minor)
     }
 
-    /// Shapes of a SmartArt's stored drawing (`dsp:drawing`), relative to its frame.
-    fn diagram_drawing(&mut self, frame: Node, cx: &ShapeCx) -> Option<Vec<Shape>> {
+    /// A SmartArt's data model and stored drawing (`dsp:drawing`), with the
+    /// drawing's shapes relative to the frame.
+    fn diagram_drawing(&mut self, frame: Node, cx: &ShapeCx) -> Option<DiagramParts> {
         let src = cx.source?;
         let data_id = path(frame, &["graphic", "graphicData", "relIds"])?.attribute((REL_NS, "dm"))?;
         let data_part = cx.rels.get(data_id)?.target.clone();
@@ -572,10 +589,15 @@ impl Parser<'_> {
             .descendants()
             .find(|n| n.tag_name().name() == "dataModelExt")
             .and_then(|n| n.attribute("relId").map(str::to_string));
-        let drawing_part = match drawing_id.and_then(|id| cx.rels.get(&id)) {
-            Some(rel) => rel.target.clone(),
-            None => self.pkg.rel_of_type(&src.part, "diagramDrawing")?,
+        let (rel_id, drawing_part) = match drawing_id.as_ref().and_then(|id| Some((id.clone(), cx.rels.get(id)?.target.clone()))) {
+            Some(found) => found,
+            None => {
+                let part = self.pkg.rel_of_type(&src.part, "diagramDrawing")?;
+                let id = cx.rels.iter().find(|(_, r)| r.target == part).map(|(id, _)| id.clone())?;
+                (id, part)
+            }
         };
+        let kind = cx.rels.get(&rel_id).map(|r| r.kind.clone()).unwrap_or_default();
         let xml = self.pkg.read_string(&drawing_part).ok()?;
         let doc = parse_xml(&xml).ok()?;
         let tree = path(doc.root_element(), &["spTree"])?;
@@ -583,7 +605,7 @@ impl Parser<'_> {
         let inner = ShapeCx { master: cx.master, ph_chain: Vec::new(), rels: &rels, source: None };
         let mut shapes = Vec::new();
         self.sp_tree(tree, &inner, GroupTf::IDENTITY, false, &mut shapes);
-        Some(shapes)
+        Some(DiagramParts { shapes, data_xml, drawing_xml: xml.to_string(), drawing_rel: (rel_id, kind, drawing_part) })
     }
 
     /// A `p:graphicFrame` holding a table.

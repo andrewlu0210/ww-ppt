@@ -123,7 +123,7 @@ pub(crate) fn open_tag(src: &str, n: Node) -> String {
 
 // --- Generated XML fragments ----------------------------------------------
 
-fn xfrm_xml(tag: &str, x: &Xfrm) -> String {
+pub(crate) fn xfrm_xml(tag: &str, x: &Xfrm) -> String {
     let mut attrs = String::new();
     if x.rot != 0.0 {
         attrs.push_str(&format!(r#" rot="{}""#, (x.rot * 60_000.0).round() as i64));
@@ -432,6 +432,8 @@ struct MediaOut {
     /// Content types of the original parts (`Override` entries), and the ones for copies.
     content_types: HashMap<String, String>,
     new_overrides: Vec<(String, String)>,
+    /// New content for parts (original or copied), e.g. an edited SmartArt's data.
+    rewritten: HashMap<String, Vec<u8>>,
 }
 
 impl MediaOut {
@@ -704,6 +706,8 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
     let Ok(doc) = Document::parse(&wrapped) else { return src.xml().to_string() };
     let Some(el) = doc.root_element().first_element_child() else { return src.xml().to_string() };
     let mut edits = Vec::new();
+    // Owned parts as referenced now: (type, original target, target written).
+    let mut claimed: Vec<(String, String, String)> = Vec::new();
     let c_nv_pr = el.descendants().find(|n| n.tag_name().name() == "cNvPr");
     // Applied in pass 2, after the id is settled.
     let names_changed = shape.name != src.parsed.name || shape.access != src.parsed.access;
@@ -735,6 +739,9 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
                 continue;
             }
             let new_target = if owned { out.media.claim(out.pres, &target, &out.part) } else { target.clone() };
+            if owned {
+                claimed.push((kind.clone(), target.clone(), new_target.clone()));
+            }
             if same_part && new_target == target {
                 continue;
             }
@@ -816,11 +823,36 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
             {
                 edits.push((tbl.range(), patch_table(&wrapped, tbl, old, new, &mut |l| link_rel(out, l))));
             }
+            if let ShapeKind::Diagram { shapes, w, h, data: Some(data) } = &shape.kind {
+                write_diagram(shape, src, data, shapes, (*w, *h), &claimed, out);
+            }
         }
         _ => {}
     }
     let result = apply_edits(&wrapped, edits);
     result[offset..result.len() - "</w>".len()].to_string()
+}
+
+/// Rewrites a SmartArt's data model and drawing parts when its nodes changed or
+/// it moved to parts or relationships of its own (a copy on another slide).
+fn write_diagram(shape: &Shape, src: &ShapeSource, data: &ppt_model::diagram::Diagram, shapes: &[Shape], (w, h): (i64, i64), claimed: &[(String, String, String)], out: &mut SlideOut) {
+    let edited = shape.kind != src.parsed.kind;
+    // The drawing goes with the shape although no attribute names it.
+    let drawing = src.rels.iter().find(|(_, kind, _)| kind.ends_with("/diagramDrawing")).map(|(id, kind, target)| {
+        let new_target = out.media.claim(out.pres, target, &out.part);
+        let new_id = out.rel_for(kind, &new_target, false);
+        (id.clone(), new_id, new_target)
+    });
+    let Some((_, _, data_part)) = claimed.iter().find(|(kind, ..)| kind.ends_with("/diagramData")) else { return };
+    let moved = drawing.as_ref().is_some_and(|(old, new, _)| old != new) || claimed.iter().any(|(_, old, new)| old != new);
+    if edited || moved {
+        let xml = crate::diagram::data_xml(data, drawing.as_ref().map(|d| d.1.as_str()));
+        out.media.rewritten.insert(data_part.clone(), xml.into_bytes());
+    }
+    if edited && let Some((_, _, part)) = &drawing {
+        let (sx, sy) = (shape.xfrm.w as f64 / w.max(1) as f64, shape.xfrm.h as f64 / h.max(1) as f64);
+        out.media.rewritten.insert(part.clone(), crate::diagram::drawing_xml(data, shapes, sx, sy).into_bytes());
+    }
 }
 
 fn close_tag_start(src: &str, n: Node) -> usize {
@@ -1630,6 +1662,13 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
     }
     new_parts.extend(notes.new_parts.into_iter().map(|(part, xml, _)| (part, xml.into_bytes())));
     new_parts.extend(media.new_files);
+    for (part, bytes) in media.rewritten {
+        if all_names.contains(&part) {
+            replaced.insert(part, bytes);
+        } else if let Some(file) = new_parts.iter_mut().find(|(name, _)| *name == part) {
+            file.1 = bytes;
+        }
+    }
 
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);

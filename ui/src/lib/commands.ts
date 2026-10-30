@@ -89,6 +89,8 @@ export type Command =
   | { kind: "viewMode"; mode: "normal" | "sorter" }
   | { kind: "toggleRuler" }
   | { kind: "selectionPane"; open?: boolean }
+  | { kind: "textPane"; open?: boolean }
+  | { kind: "smartArt"; command: "addAfter" | "addBefore" | "addChild" | "delete" | "promote" | "demote" | "moveUp" | "moveDown" }
   | { kind: "checker"; open?: boolean }
   | { kind: "altText"; text: string; decorative: boolean }
   | { kind: "showGrid"; on: boolean }

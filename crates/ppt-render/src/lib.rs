@@ -393,7 +393,7 @@ pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
     }
     let with_text = opts.skip_text != Some(shape.id);
 
-    if let ShapeKind::Diagram { shapes, w: dw, h: dh } = &shape.kind {
+    if let ShapeKind::Diagram { shapes, w: dw, h: dh, .. } = &shape.kind {
         // The stored drawing, moved and stretched with the frame.
         let place = view * Affine::translate((xf.x as f64, xf.y as f64)) * Affine::scale_non_uniform(w / (*dw).max(1) as f64, h / (*dh).max(1) as f64);
         for child in shapes.iter() {

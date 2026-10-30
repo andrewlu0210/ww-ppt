@@ -38,7 +38,9 @@ const TABS = ["常用", "插入", "設計", "圖形格式", "轉場", "動畫", 
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
 const TABLE_TABS = ["表格設計", "版面配置"] as const;
 const PICTURE_TAB = "圖片格式" as const;
-type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number] | typeof PICTURE_TAB;
+/** Shown while a SmartArt is selected. */
+const SMARTART_TAB = "SmartArt 設計" as const;
+type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number] | typeof PICTURE_TAB | typeof SMARTART_TAB;
 const isTableTab = (t: Tab) => (TABLE_TABS as readonly string[]).includes(t);
 
 /** Numbering schemes offered in the gallery, with a sample. */
@@ -105,15 +107,17 @@ interface Props {
   rulerOn: boolean;
   paneOpen: boolean;
   checkerOpen: boolean;
+  /** The SmartArt text pane is showing. */
+  textPaneOpen: boolean;
   /** The selected object's alternative text, read when the dialog opens. */
   loadAltText: () => AltTextInfo | null;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, loadAltText }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
-  const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) ? "常用" : chosen;
+  const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
-  const tabs: Tab[] = [...TABS, ...(status.inTable ? TABLE_TABS : []), ...(status.crop ? [PICTURE_TAB] : [])];
+  const tabs: Tab[] = [...TABS, ...(status.inTable ? TABLE_TABS : []), ...(status.crop ? [PICTURE_TAB] : []), ...(status.smartArt ? [SMARTART_TAB] : [])];
   useEffect(() => {
     if (linkRequest > 0) setTab("插入");
   }, [linkRequest]);
@@ -190,7 +194,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
     <div className="ribbon" onKeyDown={onKeyDown}>
       <div className="rb-tabs" role="tablist">
         {tabs.map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", (isTableTab(t) || t === PICTURE_TAB) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
+          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", (isTableTab(t) || t === PICTURE_TAB || t === SMARTART_TAB) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
             {t}
           </button>
         ))}
@@ -556,6 +560,28 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
           </>
         )}
         {tab === "動畫" && <AnimationTab status={status} run={run} presets={animPresets} />}
+        {tab === SMARTART_TAB && (
+          <>
+            <Group label="建立圖形">
+              <Button large icon={icons.addShapeAfter} label="在後面新增圖案" onClick={() => run({ kind: "smartArt", command: "addAfter" })} />
+              <div className="rb-col">
+                <Button icon={icons.addShapeBefore} label="在前面新增圖案" onClick={() => run({ kind: "smartArt", command: "addBefore" })} />
+                <Button icon={icons.addChild} label="新增下層圖案" onClick={() => run({ kind: "smartArt", command: "addChild" })} />
+                <Button icon={icons.textPane} label="文字窗格" active={textPaneOpen} onClick={() => run({ kind: "textPane" })} />
+              </div>
+              <div className="rb-col">
+                <Button icon={icons.outdent} label="升階" onClick={() => run({ kind: "smartArt", command: "promote" })} />
+                <Button icon={icons.indent} label="降階" onClick={() => run({ kind: "smartArt", command: "demote" })} />
+                <Button icon={icons.delete} label="刪除圖案" onClick={() => run({ kind: "smartArt", command: "delete" })} />
+              </div>
+              <div className="rb-col">
+                <Button icon={icons.moveUp} label="上移" onClick={() => run({ kind: "smartArt", command: "moveUp" })} />
+                <Button icon={icons.moveDown} label="下移" onClick={() => run({ kind: "smartArt", command: "moveDown" })} />
+              </div>
+            </Group>
+            {accessGroup}
+          </>
+        )}
         {tab === "投影片放映" && (
           <>
             <Group label="開始投影片放映">

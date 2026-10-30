@@ -1410,3 +1410,61 @@ fn alt_text_hidden_and_decorative_marks_are_saved() {
     let xml = zip_part(&ppt_ooxml::save_pptx(&e.pres).unwrap(), "ppt/slides/slide1.xml");
     assert!(!xml.contains("descr=") && !xml.contains("decorative"), "{xml}");
 }
+
+/// The test7 sample with the slide of its first vList2 SmartArt showing and that SmartArt selected.
+fn smartart_editor(eng: &mut TextEngine, layout: &str) -> (Editor, ShapeId) {
+    let deck = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/vr/test7.pptx")).unwrap();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&deck).unwrap());
+    let (slide, id) = e
+        .pres
+        .slides
+        .iter()
+        .enumerate()
+        .find_map(|(i, s)| s.shapes.iter().find(|sh| matches!(&sh.kind, ShapeKind::Diagram { data: Some(d), .. } if d.template.0.layout.ends_with(layout))).map(|sh| (i, sh.id)))
+        .unwrap();
+    e.set_slide(eng, slide);
+    e.selection = vec![id];
+    (e, id)
+}
+
+#[test]
+fn smartart_text_pane_edits_with_undo() {
+    let mut eng = engine();
+    let (mut e, id) = smartart_editor(&mut eng, "/vList2");
+    let info = e.diagram_info().unwrap();
+    assert!(info.restructure && !info.nest);
+    let first = info.rows[0].text.clone();
+    // Typing into one row is one undo step.
+    assert!(e.diagram_set_text(&mut eng, 0, "A"));
+    assert!(e.diagram_set_text(&mut eng, 0, "AB"));
+    assert_eq!(e.diagram_info().unwrap().rows[0].text, "AB");
+    let n = info.rows.len();
+    assert_eq!(e.diagram_insert(&mut eng, 0, ppt_model::diagram::Insert::After), Some(1));
+    assert_eq!(e.diagram_info().unwrap().rows.len(), n + 1);
+    let ShapeKind::Diagram { shapes, .. } = &e.pres.shape(e.slide, id).unwrap().kind else { panic!() };
+    assert_eq!(shapes.len(), info.rows.len() + 1);
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.diagram_info().unwrap().rows.len(), n);
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.diagram_info().unwrap().rows[0].text, first);
+    // Levels are fixed in this layout.
+    assert!(!e.diagram_shift(&mut eng, 1, true));
+}
+
+#[test]
+fn double_clicking_a_smartart_asks_for_its_text_pane() {
+    let mut eng = engine();
+    let (mut e, id) = smartart_editor(&mut eng, "/vList2");
+    let shape = e.pres.shape(e.slide, id).unwrap();
+    let ShapeKind::Diagram { shapes, w, h, .. } = &shape.kind else { panic!() };
+    // The middle of the third node's box, in slide coordinates.
+    let third = &shapes[2].xfrm;
+    let (sx, sy) = (shape.xfrm.w as f64 / *w as f64, shape.xfrm.h as f64 / *h as f64);
+    let x = shape.xfrm.x as f64 + (third.x + third.w / 2) as f64 * sx;
+    let y = shape.xfrm.y as f64 + (third.y + third.h / 2) as f64 * sy;
+    e.selection.clear();
+    click(&mut e, &mut eng, x, y, 2);
+    assert_eq!(e.diagram_requests, 1);
+    assert_eq!(e.diagram_focus, Some(2));
+    assert_eq!(e.selection, vec![id]);
+}

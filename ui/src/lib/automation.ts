@@ -235,6 +235,14 @@ async function step(cmd: string, h: Hooks) {
       document.execCommand("insertText", false, rest);
       break;
     }
+    // SmartArt text pane: type into row N as the user would, e.g. `rowtype 2 新的文字`.
+    case "rowtype": {
+      const ta = document.querySelectorAll<HTMLTextAreaElement>(".diagram-input")[num(0)];
+      if (!ta) throw new Error(`no text pane row ${args[0]}`);
+      ta.focus();
+      document.execCommand("insertText", false, args.slice(1).join(" "));
+      break;
+    }
     case "notesget": {
       const ta = document.querySelector<HTMLTextAreaElement>(".notes-input");
       const s = engine.status() as { slideIndex: number };
