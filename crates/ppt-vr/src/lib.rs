@@ -99,6 +99,19 @@ impl SlideRenderer {
         self.render_scene(&scene, width, height)
     }
 
+    /// Renders a slide with an animation frame applied.
+    pub fn render_animated(&mut self, pres: &Presentation, slide: &Slide, frame: &ppt_model::anim::Frame, width: u32) -> Result<RgbaImage, String> {
+        let height = ((width as f64) * pres.slide_height as f64 / pres.slide_width as f64).round().max(1.0) as u32;
+        let scale = width as f64 / pres.slide_width as f64;
+        let mut scene = Scene::new();
+        {
+            let opts = DrawOptions { editing: false, emu_per_px: 1.0 / scale, ..Default::default() };
+            let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+            ppt_render::draw_slide_animated(&mut scene, &mut cx, pres, slide, Affine::scale(scale), &opts, frame);
+        }
+        self.render_scene(&scene, width, height)
+    }
+
     /// Renders a frame of the transition from `from` (black when `None`) to `to` at progress `t`.
     pub fn render_transition(&mut self, pres: &Presentation, from: Option<&Slide>, to: &Slide, kind: &ppt_model::TransitionKind, t: f64, width: u32) -> Result<RgbaImage, String> {
         let height = ((width as f64) * pres.slide_height as f64 / pres.slide_width as f64).round().max(1.0) as u32;

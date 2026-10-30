@@ -342,7 +342,8 @@ export function App() {
 
   // Slides set to advance by themselves (after their transition has played).
   useEffect(() => {
-    if (!showState || showState.slide < 0 || showState.blank || showState.afterMs < 0) return;
+    // Advancing by time waits until the slide's animation clicks have played.
+    if (!showState || showState.slide < 0 || showState.blank || showState.afterMs < 0 || showState.step < showState.steps) return;
     const delay = showState.afterMs + (showState.transition ? showState.transitionMs : 0);
     const id = window.setTimeout(() => showCommand({ name: "next" }), delay);
     return () => window.clearTimeout(id);
@@ -544,6 +545,9 @@ export function App() {
           break;
         case "previewTransition":
           engine.previewTransition();
+          break;
+        case "previewAnimations":
+          engine.previewAnimations();
           break;
       }
       if (structural) scheduleThumbs(true);

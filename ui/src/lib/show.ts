@@ -16,6 +16,11 @@ export interface ShowState {
   afterMs: number;
   /** Mouse clicks advance (keys always do). */
   onClick: boolean;
+  /** Animation clicks played on the slide, and how many it has. */
+  step: number;
+  steps: number;
+  /** The current click plays from its start (false: shown finished, after going back). */
+  stepAnimate: boolean;
 }
 
 /** A navigation command for `App.showCommand` (plus "end"). */

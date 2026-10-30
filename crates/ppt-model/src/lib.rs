@@ -11,6 +11,7 @@ pub use bullet::{Bullet, BulletKind};
 pub use table::Table;
 pub use transition::{Transition, TransitionKind};
 
+pub mod anim;
 pub mod bullet;
 pub mod chart;
 pub mod table;
@@ -723,6 +724,8 @@ pub struct Slide {
     /// Speaker notes as plain text, one line per paragraph.
     pub notes: String,
     pub transition: Option<Transition>,
+    /// Animations, played from the original XML (which is saved as is).
+    pub timing: Option<Arc<anim::Timing>>,
     pub source: Option<Arc<SlideSource>>,
 }
 
@@ -833,6 +836,7 @@ impl Presentation {
             hidden: false,
             notes: String::new(),
             transition: None,
+            timing: None,
             source: None,
         }
     }

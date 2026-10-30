@@ -182,6 +182,7 @@ export function PresenterView({ engine, state, command, timer, onToggleView }: P
             </button>
             <span className="pv-count">
               {state.slide >= 0 ? `投影片 ${state.slide + 1} / ${state.count}` : "結束畫面"}
+              {state.slide >= 0 && state.steps > 0 && <span className="pv-steps">動畫 {state.step} / {state.steps}</span>}
             </span>
             <button onMouseDown={keep} onClick={() => command({ name: "next" })} aria-label="下一張">
               ▶

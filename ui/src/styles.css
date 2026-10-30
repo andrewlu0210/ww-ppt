@@ -945,6 +945,12 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.pv-steps {
+  display: block;
+  font-size: 12px;
+  color: #aaa;
+}
+
 .pv-right {
   display: flex;
   flex-direction: column;
@@ -1061,4 +1067,74 @@ button {
   font-size: 9px;
   color: var(--muted);
   margin-top: 2px;
+}
+
+/* Animations tab */
+.anim-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 70px;
+  min-width: 520px;
+  overflow-y: auto;
+  font-size: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 0;
+}
+
+.anim-row {
+  display: grid;
+  grid-template-columns: 22px 64px 90px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.anim-click {
+  color: var(--muted);
+  text-align: right;
+}
+
+.anim-class {
+  font-size: 11px;
+  border-radius: 3px;
+  padding: 0 4px;
+  text-align: center;
+}
+
+.anim-class.entr {
+  background: #e3f2df;
+  color: #2f6b22;
+}
+
+.anim-class.exit {
+  background: #fbe3e1;
+  color: #9b2d22;
+}
+
+.anim-class.emph {
+  background: #fff3cd;
+  color: #7a5a00;
+}
+
+.anim-class.path {
+  background: #e2ecfa;
+  color: #234f8d;
+}
+
+.anim-shape {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.anim-meta,
+.anim-empty {
+  color: var(--muted);
+}
+
+.anim-empty {
+  padding: 4px 8px;
 }

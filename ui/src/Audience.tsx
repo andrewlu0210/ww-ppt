@@ -51,7 +51,7 @@ export function Audience() {
       app.loadPptx(deck);
       app.startShow(false);
       const unlisten = await listen<ShowState>("show-sync", (e) => {
-        app.showSet(e.payload.slide, e.payload.blank, e.payload.transition);
+        app.showSet(e.payload.slide, e.payload.blank, e.payload.transition, e.payload.step, e.payload.stepAnimate);
         setState(e.payload);
         // Dev automation only (a no-op otherwise).
         void invoke("automation_log", { line: `audience ${JSON.stringify(e.payload)}` });

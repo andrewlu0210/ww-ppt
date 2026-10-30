@@ -16,7 +16,9 @@ use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Cap, Circle, Line, ParamCurve, PathEl, PathSeg, Point, Rect, Shape as _, Stroke, Vec2};
 use vello::peniko::{Blob, Color as PColor, ColorStop, Fill, Gradient as PGradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat, StyleRef};
 
+mod anim;
 mod chart;
+pub use anim::{draw_slide_animated, reveal_mask};
 mod transition;
 pub use transition::draw_transition;
 

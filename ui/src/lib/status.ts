@@ -41,6 +41,22 @@ export interface Status {
   transition?: TransitionInfo;
   /** Per slide: whether it has a (visible) transition. */
   transitionSlides?: boolean[];
+  /** The current slide's animations in playing order. */
+  animations?: AnimationInfo[];
+}
+
+export interface AnimationInfo {
+  /** Clicks before it starts (0: with the slide). */
+  click: number;
+  /** "clickEffect" | "withEffect" | "afterEffect" */
+  trigger: string;
+  /** "entr" | "exit" | "emph" | "path" */
+  class: string;
+  presetId: number | null;
+  /** Names of the animated shapes. */
+  shapes: string[];
+  startMs: number;
+  durMs: number;
 }
 
 export interface TransitionInfo {

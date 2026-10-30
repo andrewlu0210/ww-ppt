@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use ppt_editor::show::{Blank, Screen, SlideShow};
+use ppt_model::anim::{Player, SlideStage};
 use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
 use ppt_model::{Align, Color, EMU_PER_PT, Presentation};
@@ -19,12 +20,14 @@ use ppt_render::vello::wgpu::{self, CurrentSurfaceTexture, SurfaceTarget};
 use ppt_render::vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
 use ppt_render::{
     DrawOptions, ImageCache, RenderCtx, SelectionOverlay, TextOverlay, draw_body_layout, draw_guides, draw_marquee, draw_selection,
-    draw_slide, draw_text_overlay, image_size,
+    draw_slide, draw_slide_animated, draw_text_overlay, image_size,
 };
 use ppt_text::TextEngine;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+/// Time far past any animation (ms): shows effects finished.
+const ANIM_END: f64 = 1e12;
 /// Gap around the slide when fitted to the canvas, in CSS pixels.
 const FIT_MARGIN: f64 = 24.0;
 const HANDLE_RADIUS: f64 = 7.0;
@@ -62,6 +65,14 @@ pub struct App {
     show_viewport: Option<Rect>,
     /// A transition being played (in the show, or as a preview in the editor).
     anim: Option<Anim>,
+    /// When the current animation click began (ms; in the future while a transition plays first).
+    step_start_ms: f64,
+    /// Whether the current click plays from its start; false shows it finished (after going back).
+    step_animate: bool,
+    /// An animation is playing: keep drawing frames.
+    step_running: bool,
+    /// When the editor's animation preview started (ms), while it plays.
+    preview_start_ms: Option<f64>,
 }
 
 /// A running transition: both slides pre-encoded in slide space.
@@ -122,6 +133,10 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         show: None,
         show_viewport: None,
         anim: None,
+        step_start_ms: 0.0,
+        step_animate: false,
+        step_running: false,
+        preview_start_ms: None,
     })
 }
 
@@ -173,13 +188,32 @@ impl App {
     }
 
     /// A slide encoded in slide space, for transitions.
-    fn slide_scene(&mut self, index: usize, s: f64) -> Option<Scene> {
+    /// A slide encoded in slide space, for transitions: before its animations
+    /// (the incoming slide) or with all of them played (`finished`, the outgoing one).
+    fn slide_scene(&mut self, index: usize, s: f64, finished: bool) -> Option<Scene> {
         let slide = self.editor.pres.slides.get(index)?;
         let mut scene = Scene::new();
         let opts = DrawOptions { editing: false, emu_per_px: 1.0 / s, ..Default::default() };
+        let frame = slide.timing.as_deref().map(|t| {
+            let player = Player::new(t);
+            let stage = SlideStage { pres: &self.editor.pres, slide };
+            if finished { player.frame(&stage, player.clicks(), ANIM_END) } else { player.frame(&stage, 0, 0.0) }
+        });
         let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
-        draw_slide(&mut scene, &mut cx, &self.editor.pres, slide, Affine::IDENTITY, &opts);
+        match &frame {
+            Some(f) => draw_slide_animated(&mut scene, &mut cx, &self.editor.pres, slide, Affine::IDENTITY, &opts, f),
+            None => draw_slide(&mut scene, &mut cx, &self.editor.pres, slide, Affine::IDENTITY, &opts),
+        }
         Some(scene)
+    }
+
+    /// Starts the current slide's animation click `step` now (or after the slide's
+    /// transition when it just began), or shows it finished.
+    fn begin_step(&mut self, animate: bool, after_transition: bool) {
+        let delay = if after_transition { self.anim.as_ref().map_or(0.0, |a| a.duration_ms) } else { 0.0 };
+        self.step_start_ms = js_sys::Date::now() + delay;
+        self.step_animate = animate;
+        self.dirty = true;
     }
 
     /// Starts slide `to`'s transition from slide `from` (black for `None`), if it has one.
@@ -187,8 +221,8 @@ impl App {
         self.anim = None;
         let Some(t) = self.editor.pres.slides.get(to).and_then(|s| s.transition.clone()).filter(|t| t.animates()) else { return };
         let s = self.scale();
-        let from = from.and_then(|i| self.slide_scene(i, s));
-        let Some(to) = self.slide_scene(to, s) else { return };
+        let from = from.and_then(|i| self.slide_scene(i, s, true));
+        let Some(to) = self.slide_scene(to, s, false) else { return };
         self.anim = Some(Anim { from, to, kind: t.kind, start_ms: js_sys::Date::now(), duration_ms: t.duration_ms as f64 });
         self.dirty = true;
     }
@@ -227,12 +261,22 @@ impl App {
         if blank.is_none() && self.draw_anim(view) {
             return;
         }
+        self.step_running = false;
         if let (None, Screen::Slide(i)) = (blank, show.screen())
             && let Some(slide) = self.editor.pres.slides.get(i)
         {
             let opts = DrawOptions { editing: false, emu_per_px: 1.0 / s, ..Default::default() };
+            let frame = slide.timing.as_deref().map(|t| {
+                let player = Player::new(t);
+                let t = if self.step_animate { (js_sys::Date::now() - self.step_start_ms).max(0.0) } else { ANIM_END };
+                self.step_running = self.step_animate && (player.running(show.step(), t) || js_sys::Date::now() < self.step_start_ms);
+                player.frame(&SlideStage { pres: &self.editor.pres, slide }, show.step(), t)
+            });
             let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
-            draw_slide(&mut self.scene, &mut cx, &self.editor.pres, slide, view, &opts);
+            match &frame {
+                Some(f) => draw_slide_animated(&mut self.scene, &mut cx, &self.editor.pres, slide, view, &opts, f),
+                None => draw_slide(&mut self.scene, &mut cx, &self.editor.pres, slide, view, &opts),
+            }
         }
     }
 
@@ -249,6 +293,27 @@ impl App {
         // A transition preview replaces the editing view while it plays.
         if self.draw_anim(view) {
             return;
+        }
+        // So does an animation preview.
+        if let Some(start) = self.preview_start_ms {
+            let pres = &self.editor.pres;
+            let frame = pres.slides.get(self.editor.slide).and_then(|slide| {
+                let player = Player::new(slide.timing.as_deref()?);
+                player.preview_frame(&SlideStage { pres, slide }, js_sys::Date::now() - start).map(|f| (slide, f))
+            });
+            match frame {
+                Some((slide, f)) => {
+                    let opts = DrawOptions { editing: false, emu_per_px: 1.0 / s, ..Default::default() };
+                    let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+                    draw_slide_animated(&mut self.scene, &mut cx, pres, slide, view, &opts, &f);
+                    self.step_running = true;
+                    return;
+                }
+                None => {
+                    self.preview_start_ms = None;
+                    self.step_running = false;
+                }
+            }
         }
         {
             let pres = &self.editor.pres;
@@ -893,6 +958,8 @@ impl App {
         if let Some(Screen::Slide(i)) = self.show.as_ref().map(|s| s.screen()) {
             self.start_transition(None, i);
         }
+        // Effects that start with the slide play after its transition.
+        self.begin_step(true, true);
         self.show.is_some()
     }
 
@@ -901,6 +968,7 @@ impl App {
     pub fn end_show(&mut self) {
         self.show_viewport = None;
         self.anim = None;
+        self.step_running = false;
         let last = self.editor.pres.slides.len().saturating_sub(1);
         match self.show.take().map(|s| s.screen()) {
             Some(Screen::Slide(i)) => self.editor.set_slide(&mut self.engine, i),
@@ -914,14 +982,16 @@ impl App {
     /// "first", "last", "black", "white", or "goto" with a 0-based `index`.
     #[wasm_bindgen(js_name = showCommand)]
     pub fn show_command(&mut self, command: &str, index: usize) -> bool {
-        // A click during a transition only finishes it.
+        // A click during a transition only finishes it (effects that start with the slide begin now).
         if command == "next" && self.anim.take().is_some() {
+            self.step_start_ms = self.step_start_ms.min(js_sys::Date::now());
             self.dirty = true;
             return true;
         }
         self.anim = None;
         let Some(show) = self.show.as_mut() else { return false };
         let before = show.screen();
+        let before_step = show.step();
         let mut running = true;
         match command {
             "next" => running = show.advance(),
@@ -933,23 +1003,29 @@ impl App {
             "white" => show.toggle_blank(Blank::White),
             _ => {}
         }
+        let (after, after_step) = (show.screen(), show.step());
         // Moving forward plays the incoming slide's transition.
-        if let (Screen::Slide(from), Screen::Slide(to)) = (before, show.screen())
+        if let (Screen::Slide(from), Screen::Slide(to)) = (before, after)
             && command == "next"
             && to != from
         {
             self.start_transition(Some(from), to);
+        }
+        if after != before || after_step != before_step {
+            // Going back shows the click finished; anything else plays it.
+            self.begin_step(command != "prev", after != before);
         }
         self.dirty = true;
         running
     }
 
     /// Sets the show state exactly (`slide` -1 is the end screen), to mirror the presenter's window.
+    /// With `animate`, a change of slide plays the new slide's transition (as the presenter's window does);
+    /// with `animate_step`, animation click `step` plays from its start.
     #[wasm_bindgen(js_name = showSet)]
-    /// With `animate`, a change of slide plays the new slide's transition (as the presenter's window does).
-    pub fn show_set(&mut self, slide: i32, blank: &str, animate: bool) {
+    pub fn show_set(&mut self, slide: i32, blank: &str, animate: bool, step: usize, animate_step: bool) {
         let Some(show) = self.show.as_mut() else { return };
-        let before = show.screen();
+        let (before, before_step) = (show.screen(), show.step());
         let screen = if slide < 0 { Screen::End } else { Screen::Slide(slide as usize) };
         let blank = match blank {
             "black" => Some(Blank::Black),
@@ -957,10 +1033,15 @@ impl App {
             _ => None,
         };
         show.set(screen, blank);
+        show.set_step(step);
+        let step = show.step();
         match (before, screen) {
             (from, Screen::Slide(to)) if animate && from != screen => self.start_transition(if let Screen::Slide(f) = from { Some(f) } else { None }, to),
             (from, _) if from != screen => self.anim = None,
             _ => {}
+        }
+        if before != screen || before_step != step {
+            self.begin_step(animate_step, before != screen);
         }
         self.dirty = true;
     }
@@ -980,11 +1061,45 @@ impl App {
         self.touch(changed)
     }
 
+    /// Plays all of the current slide's animations in the editor, click after click.
+    #[wasm_bindgen(js_name = previewAnimations)]
+    pub fn preview_animations(&mut self) {
+        self.editor.end_text_edit(&mut self.engine);
+        self.anim = None;
+        self.preview_start_ms = Some(js_sys::Date::now());
+        self.dirty = true;
+    }
+
+    /// The current slide's animations in playing order:
+    /// `[{ click, trigger, class, presetId, shapes, startMs, durMs }]` (`shapes` are names).
+    pub fn animations(&self) -> Array {
+        let e = &self.editor;
+        let Some(slide) = e.pres.slides.get(e.slide) else { return Array::new() };
+        let Some(timing) = slide.timing.as_deref() else { return Array::new() };
+        Player::new(timing)
+            .effects()
+            .into_iter()
+            .map(|fx| {
+                let o = Object::new();
+                let names: Array = fx.shapes.iter().filter_map(|id| slide.shapes.iter().find(|s| s.id == *id)).map(|s| JsValue::from(s.name.as_str())).collect();
+                let _ = Reflect::set(&o, &"click".into(), &(fx.click as u32).into());
+                let _ = Reflect::set(&o, &"trigger".into(), &fx.trigger.into());
+                let _ = Reflect::set(&o, &"class".into(), &fx.class.into());
+                let _ = Reflect::set(&o, &"presetId".into(), &fx.preset_id.map_or(JsValue::NULL, JsValue::from));
+                let _ = Reflect::set(&o, &"shapes".into(), &names.into());
+                let _ = Reflect::set(&o, &"startMs".into(), &fx.start_ms.into());
+                let _ = Reflect::set(&o, &"durMs".into(), &fx.dur_ms.into());
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
     /// Plays the current slide's transition in the editor (from the previous slide).
     #[wasm_bindgen(js_name = previewTransition)]
     pub fn preview_transition(&mut self) {
         let i = self.editor.slide;
         self.editor.end_text_edit(&mut self.engine);
+        self.preview_start_ms = None;
         self.start_transition(i.checked_sub(1), i);
     }
 
@@ -1020,6 +1135,9 @@ impl App {
             Screen::End => None,
         };
         let _ = Reflect::set(&o, &"transition".into(), &self.anim.is_some().into());
+        let _ = Reflect::set(&o, &"step".into(), &(show.step() as u32).into());
+        let _ = Reflect::set(&o, &"steps".into(), &(show.steps() as u32).into());
+        let _ = Reflect::set(&o, &"stepAnimate".into(), &self.step_animate.into());
         let _ = Reflect::set(&o, &"transitionMs".into(), &current.as_ref().filter(|t| t.animates()).map_or(0, |t| t.duration_ms).into());
         let _ = Reflect::set(&o, &"afterMs".into(), &current.as_ref().and_then(|t| t.after_ms).map_or(-1.0, |ms| ms as f64).into());
         let _ = Reflect::set(&o, &"onClick".into(), &current.as_ref().is_none_or(|t| t.on_click).into());
@@ -1034,6 +1152,7 @@ impl App {
 
     #[wasm_bindgen(js_name = setSlide)]
     pub fn set_slide(&mut self, index: usize) {
+        self.preview_start_ms = None;
         self.editor.set_slide(&mut self.engine, index);
         self.dirty = true;
     }
@@ -1206,6 +1325,7 @@ impl App {
         }
         let marks: Array = e.pres.slides.iter().map(|s| JsValue::from(s.transition.as_ref().is_some_and(|t| t.animates()))).collect();
         set("transitionSlides", marks.into());
+        set("animations", self.animations().into());
         set("zoom", self.zoom.into());
         set("frameMs", self.last_frame_ms.into());
         set("revision", (e.revision() as f64).into());
@@ -1271,8 +1391,8 @@ impl App {
         gpu.surface.blitter.copy(&dev.device, &mut encoder, &gpu.surface.target_view, &view);
         dev.queue.submit([encoder.finish()]);
         dev.queue.present(texture);
-        // Keep drawing frames while a transition plays.
-        self.dirty = self.anim.is_some();
+        // Keep drawing frames while a transition or an animation plays.
+        self.dirty = self.anim.is_some() || self.step_running;
         self.last_frame_ms = js_sys::Date::now() - start;
         Ok(true)
     }

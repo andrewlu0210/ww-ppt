@@ -6,11 +6,12 @@ import { TablePicker } from "./TablePicker";
 import { Popover } from "./Popover";
 import { TableDesignTab, TableLayoutTab } from "./TableTabs";
 import { TransitionTab } from "./TransitionTab";
+import { AnimationTab } from "./AnimationTab";
 import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { Status } from "../lib/status";
 
-const TABS = ["常用", "插入", "圖形格式", "轉場", "投影片放映", "檢視"] as const;
+const TABS = ["常用", "插入", "圖形格式", "轉場", "動畫", "投影片放映", "檢視"] as const;
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
 const TABLE_TABS = ["表格設計", "版面配置"] as const;
 type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number];
@@ -350,6 +351,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "表格設計" && <TableDesignTab status={status} styles={tableStyles} run={run} />}
         {tab === "版面配置" && <TableLayoutTab status={status} run={run} />}
         {tab === "轉場" && <TransitionTab status={status} run={run} />}
+        {tab === "動畫" && <AnimationTab status={status} run={run} />}
         {tab === "投影片放映" && (
           <>
             <Group label="開始投影片放映">

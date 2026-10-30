@@ -1,5 +1,6 @@
-//! Slide show navigation: which slide is on screen, hidden slides, the end
-//! screen and blanking. Rendering and input mapping belong to the host.
+//! Slide show navigation: which slide is on screen, how many of its
+//! animation clicks have played, hidden slides, the end screen and blanking.
+//! Rendering, timing and input mapping belong to the host.
 
 use ppt_model::Presentation;
 
@@ -21,7 +22,11 @@ pub enum Screen {
 pub struct SlideShow {
     /// Hidden flags per slide, captured when the show starts.
     hidden: Vec<bool>,
+    /// Animation clicks per slide.
+    clicks: Vec<usize>,
     screen: Screen,
+    /// Clicks played on the current slide.
+    step: usize,
     blank: Option<Blank>,
 }
 
@@ -33,7 +38,8 @@ impl SlideShow {
         if hidden.is_empty() {
             return None;
         }
-        Some(Self { screen: Screen::Slide(start.min(hidden.len() - 1)), hidden, blank: None })
+        let clicks = pres.slides.iter().map(|s| s.timing.as_deref().map_or(0, |t| ppt_model::anim::Player::new(t).clicks())).collect();
+        Some(Self { screen: Screen::Slide(start.min(hidden.len() - 1)), hidden, clicks, step: 0, blank: None })
     }
 
     /// Starts at the first slide that is not hidden.
@@ -57,6 +63,24 @@ impl SlideShow {
         self.hidden.len()
     }
 
+    /// Animation clicks played on the current slide.
+    pub fn step(&self) -> usize {
+        self.step
+    }
+
+    /// Animation clicks the current slide has.
+    pub fn steps(&self) -> usize {
+        match self.screen {
+            Screen::Slide(i) => self.clicks.get(i).copied().unwrap_or(0),
+            Screen::End => 0,
+        }
+    }
+
+    fn show_slide(&mut self, screen: Screen, step: usize) {
+        self.screen = screen;
+        self.step = step;
+    }
+
     fn visible_after(&self, i: usize) -> Option<usize> {
         (i + 1..self.hidden.len()).find(|&j| !self.hidden[j])
     }
@@ -65,23 +89,34 @@ impl SlideShow {
         (0..i).rev().find(|&j| !self.hidden[j])
     }
 
-    /// Advances. Returns false when already on the end screen (the host ends the show).
+    /// Plays the next animation click, or advances to the next slide when the
+    /// current one has played them all. Returns false when already on the end
+    /// screen (the host ends the show).
     pub fn advance(&mut self) -> bool {
         if self.blank.take().is_some() {
             return true;
         }
+        if self.step < self.steps() {
+            self.step += 1;
+            return true;
+        }
         match self.screen {
             Screen::Slide(i) => {
-                self.screen = self.visible_after(i).map_or(Screen::End, Screen::Slide);
+                self.show_slide(self.visible_after(i).map_or(Screen::End, Screen::Slide), 0);
                 true
             }
             Screen::End => false,
         }
     }
 
-    /// Goes back one visible slide; stays on the first one.
+    /// Undoes the last animation click, or goes back to the previous visible
+    /// slide with all its animations played; stays on the first slide.
     pub fn back(&mut self) {
         if self.blank.take().is_some() {
+            return;
+        }
+        if self.step > 0 {
+            self.step -= 1;
             return;
         }
         let from = match self.screen {
@@ -89,7 +124,7 @@ impl SlideShow {
             Screen::End => self.hidden.len(),
         };
         if let Some(j) = self.visible_before(from) {
-            self.screen = Screen::Slide(j);
+            self.show_slide(Screen::Slide(j), self.clicks[j]);
         }
     }
 
@@ -97,21 +132,21 @@ impl SlideShow {
     pub fn goto(&mut self, index: usize) {
         if index < self.hidden.len() {
             self.blank = None;
-            self.screen = Screen::Slide(index);
+            self.show_slide(Screen::Slide(index), 0);
         }
     }
 
     pub fn first(&mut self) {
         self.blank = None;
         if let Some(i) = (0..self.hidden.len()).find(|&j| !self.hidden[j]) {
-            self.screen = Screen::Slide(i);
+            self.show_slide(Screen::Slide(i), 0);
         }
     }
 
     pub fn last(&mut self) {
         self.blank = None;
         if let Some(i) = self.visible_before(self.hidden.len()) {
-            self.screen = Screen::Slide(i);
+            self.show_slide(Screen::Slide(i), 0);
         }
     }
 
@@ -132,6 +167,12 @@ impl SlideShow {
         }
         self.screen = screen;
         self.blank = blank;
+        self.step = self.step.min(self.steps());
+    }
+
+    /// Sets the clicks played on the current slide, e.g. to mirror another window.
+    pub fn set_step(&mut self, step: usize) {
+        self.step = step.min(self.steps());
     }
 
     /// Blanks the screen with `kind`, or shows the slide again if it is already blanked that way.
@@ -220,6 +261,34 @@ mod tests {
         s.toggle_blank(Blank::Black);
         s.toggle_blank(Blank::Black);
         assert_eq!(s.blank(), None);
+    }
+
+    #[test]
+    fn animation_clicks_come_before_the_next_slide() {
+        use ppt_model::anim::{Behavior, NodeKind, Target, TimeNode, Timing, Value};
+        let appear = |id| TimeNode {
+            kind: NodeKind::Behavior(Target { shapes: vec![ppt_model::ShapeId(id)], paragraphs: None }, Behavior::Set { attr: "style.visibility".into(), to: Value::Str("visible".into()) }),
+            dur_ms: Some(1.0),
+            ..Default::default()
+        };
+        let click = |id| TimeNode { click: true, children: vec![TimeNode { children: vec![appear(id)], ..Default::default() }], ..Default::default() };
+        let main = TimeNode { kind: NodeKind::Seq, node_type: "mainSeq".into(), children: vec![click(1), click(2)], ..Default::default() };
+        let mut pres = deck(&[false, false]);
+        pres.slides[0].timing = Some(std::sync::Arc::new(Timing { root: TimeNode { children: vec![main], ..Default::default() } }));
+        let mut s = SlideShow::new(&pres, 0).unwrap();
+        assert_eq!((s.step(), s.steps()), (0, 2));
+        s.advance();
+        s.advance();
+        assert_eq!((s.screen(), s.step()), (Screen::Slide(0), 2));
+        s.advance();
+        assert_eq!((s.screen(), s.step()), (Screen::Slide(1), 0));
+        // Back to the previous slide shows it with everything played; then clicks are undone.
+        s.back();
+        assert_eq!((s.screen(), s.step()), (Screen::Slide(0), 2));
+        s.back();
+        assert_eq!(s.step(), 1);
+        s.goto(0);
+        assert_eq!(s.step(), 0);
     }
 
     #[test]

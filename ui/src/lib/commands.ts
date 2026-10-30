@@ -48,6 +48,7 @@ export type Command =
   | { kind: "usePresenter"; on: boolean }
   | { kind: "setTransition"; id: string; option: string; durationMs: number; onClick: boolean; afterMs: number; all: boolean }
   | { kind: "previewTransition" }
+  | { kind: "previewAnimations" }
   | { kind: "toggleNotes" };
 
 /** A gallery table style with the colors its preview needs (`App::tableStyles()`). */

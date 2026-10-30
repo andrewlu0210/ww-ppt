@@ -3,6 +3,7 @@
 //! Resolves the OOXML inheritance chain (slide → layout → master → theme) into
 //! the flat [`ppt_model`] representation. Export arrives in M1.
 
+mod anim;
 mod chart;
 mod notes;
 mod package;
@@ -24,7 +25,7 @@ use std::sync::Arc;
 use package::{Package, REL_NS, Rel};
 use ppt_model::{
     Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
-    PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
+    PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeId, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
 use ppt_model::table::TableStyle;
 use roxmltree::{Document, Node};
@@ -353,6 +354,7 @@ impl Parser<'_> {
             let mut shapes = Vec::new();
             self.sp_tree(tree, &cx, GroupTf::IDENTITY, true, &mut shapes);
             slide.shapes = shapes;
+            slide.timing = anim::parse(root, &spid_map(tree, &slide.shapes), &master.ctx).map(Arc::new);
         }
         for shape in slide.background_shapes.iter_mut() {
             shape.id = self.pres.alloc_id();
@@ -1120,6 +1122,33 @@ fn para_defaults(s: &LevelStyle, finalize: &dyn Fn(&LevelStyle) -> RunStyle) -> 
         space_after: s.space_after.map(|v| v.to_points(style.size_pt)).unwrap_or(0.0),
         style,
     }
+}
+
+
+/// Animation targets: each `cNvPr` id in the shape tree → the shapes it stands for
+/// (a group's id covers all its members).
+fn spid_map(tree: Node, shapes: &[Shape]) -> anim::SpidMap {
+    let by_start: HashMap<usize, ShapeId> = shapes.iter().filter_map(|s| s.source.as_ref().map(|src| (src.range.start, s.id))).collect();
+    let mut map = anim::SpidMap::new();
+    for n in tree.descendants().filter(|n| matches!(n.tag_name().name(), "sp" | "cxnSp" | "pic" | "graphicFrame" | "grpSp")) {
+        let Some(id) = n
+            .children()
+            .find(|c| c.is_element() && c.tag_name().name().starts_with("nv"))
+            .and_then(|nv| child(nv, "cNvPr"))
+            .and_then(|c| c.attribute("id")?.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let members: Vec<ShapeId> = if n.tag_name().name() == "grpSp" {
+            n.descendants().filter_map(|d| by_start.get(&d.range().start)).copied().collect()
+        } else {
+            by_start.get(&n.range().start).into_iter().copied().collect()
+        };
+        if !members.is_empty() {
+            map.insert(id, members);
+        }
+    }
+    map
 }
 
 #[cfg(test)]
