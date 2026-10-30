@@ -227,6 +227,66 @@ impl TextBody {
         self.unflatten(flat);
     }
 
+    /// Moves to new inherited formatting (another layout's placeholder): every
+    /// property still equal to what `old` provided takes `new`'s value.
+    pub fn rebase(&mut self, old: &TextBody, new: &TextBody) {
+        if self.anchor == old.anchor {
+            self.anchor = new.anchor;
+        }
+        if self.insets == old.insets {
+            self.insets = new.insets;
+        }
+        for p in &mut self.paragraphs {
+            let (Some(o), Some(n)) = (old.defaults_for(p.level), new.defaults_for(p.level)) else { continue };
+            for r in &mut p.runs {
+                r.style.rebase(&o.style, &n.style);
+            }
+            p.end_style.rebase(&o.style, &n.style);
+            macro_rules! take {
+                ($($f:ident),*) => { $( if p.$f == o.$f { p.$f = n.$f.clone(); } )* };
+            }
+            take!(align, bullet, line_spacing, mar_l, indent, space_before, space_after);
+        }
+        self.defaults = new.defaults.clone();
+    }
+
+    /// All formatting back to what the paragraphs inherit (links are kept).
+    pub fn reset_formatting(&mut self) {
+        let len = self.len();
+        self.clear_formatting(0..len);
+        let defaults = self.defaults.clone();
+        for p in &mut self.paragraphs {
+            let Some(d) = defaults.as_ref().and_then(|d| d.get(p.level as usize).or(d.first())) else { continue };
+            p.align = d.align;
+            p.bullet = d.bullet.clone();
+            p.line_spacing = d.line_spacing;
+            p.mar_l = d.mar_l;
+            p.indent = d.indent;
+            p.space_before = d.space_before;
+            p.space_after = d.space_after;
+        }
+    }
+
+    /// Character formatting in `range` back to what each paragraph's level
+    /// inherits (links are kept). Without known defaults nothing changes.
+    pub fn clear_formatting(&mut self, range: Range<usize>) {
+        let ranges = self.paragraph_ranges();
+        let levels: Vec<Option<RunStyle>> = self.paragraphs.iter().map(|p| self.defaults_for(p.level).map(|d| d.style.clone())).collect();
+        for (seg, base) in ranges.iter().zip(levels) {
+            let Some(base) = base else { continue };
+            let (s, e) = (range.start.max(seg.start), range.end.min(seg.end));
+            let touches = s < e || (seg.is_empty() && range.start <= seg.start && seg.start <= range.end);
+            if touches {
+                // Include the paragraph mark when the range reaches the paragraph's end.
+                let end = if range.end >= seg.end { seg.end } else { e };
+                self.apply_style(s..end, |st| {
+                    let link = st.link.take();
+                    *st = RunStyle { link, ..base.clone() };
+                });
+            }
+        }
+    }
+
     /// Applies `f` to every paragraph touched by `range` (at least the one containing `range.start`).
     pub fn apply_paragraphs(&mut self, range: Range<usize>, f: impl Fn(&mut Paragraph)) {
         let ranges = self.paragraph_ranges();

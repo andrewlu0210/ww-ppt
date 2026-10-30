@@ -8,6 +8,72 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  layout: (
+    <Svg>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1" />
+      <path d="M3.5 9h17M10 9v10.5" />
+    </Svg>
+  ),
+  resetSlide: (
+    <Svg>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1" strokeOpacity="0.45" />
+      <path d="M9 10.5a4 4 0 1 1 0 4" />
+      <path d="M9 8v2.8h2.8" />
+    </Svg>
+  ),
+  find: (
+    <Svg>
+      <circle cx="10.5" cy="10.5" r="5.5" />
+      <path d="M14.5 14.5l5 5" />
+    </Svg>
+  ),
+  replace: (
+    <Svg>
+      <path d="M4 7h11l-3-3M20 17H9l3 3" />
+    </Svg>
+  ),
+  selectAll: (
+    <Svg>
+      <rect x="4" y="4" width="16" height="16" rx="1" strokeDasharray="2.5 2" />
+      <path d="M8.5 12.5l2.5 2.5 4.5-5.5" />
+    </Svg>
+  ),
+  clearFormat: (
+    <Svg>
+      <path d="M5 6.5h11M10.5 6.5L8 18" />
+      <path d="M14 14l5 5M19 14l-5 5" stroke="#d93025" />
+    </Svg>
+  ),
+  charSpacing: (
+    <Svg>
+      <path d="M5 13l3-8 3 8M6 10.5h4M13 5l3 8 3-8" />
+      <path d="M4 18h16M6 16l-2 2 2 2M18 16l2 2-2 2" />
+    </Svg>
+  ),
+  lineSpacing: (
+    <Svg>
+      <path d="M11 6.5h9M11 12h9M11 17.5h9" />
+      <path d="M6 4v16M4 6l2-2 2 2M4 18l2 2 2-2" />
+    </Svg>
+  ),
+  anchorTop: (
+    <Svg>
+      <rect x="4" y="3.5" width="16" height="17" rx="1" strokeOpacity="0.45" />
+      <path d="M7.5 7.5h9M7.5 10.5h9" />
+    </Svg>
+  ),
+  anchorMiddle: (
+    <Svg>
+      <rect x="4" y="3.5" width="16" height="17" rx="1" strokeOpacity="0.45" />
+      <path d="M7.5 10.5h9M7.5 13.5h9" />
+    </Svg>
+  ),
+  anchorBottom: (
+    <Svg>
+      <rect x="4" y="3.5" width="16" height="17" rx="1" strokeOpacity="0.45" />
+      <path d="M7.5 13.5h9M7.5 16.5h9" />
+    </Svg>
+  ),
   spelling: (
     <Svg>
       <path d="M4 14l3.5-9 3.5 9M5.3 11h4.4" />

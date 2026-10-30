@@ -2924,7 +2924,9 @@ dependencies = [
  "parley",
  "ppt-geometry",
  "ppt-model",
+ "ppt-ooxml",
  "ppt-text",
+ "zip",
 ]
 
 [[package]]

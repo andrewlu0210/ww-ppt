@@ -448,6 +448,15 @@ pub fn draw_layout(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str, t
                 text,
                 ranges: &ranges,
             });
+            if let Some(strike) = &style.strikethrough {
+                let metrics = run.font_metrics();
+                let offset = strike.offset.unwrap_or(metrics.strikethrough_offset) as f64;
+                let size = strike.size.unwrap_or(metrics.strikethrough_size).max(0.5) as f64;
+                let x0 = glyph_run.offset() as f64;
+                let y = glyph_run.baseline() as f64 - offset;
+                let rect = Rect::new(x0, y, x0 + glyph_run.advance() as f64, y + size);
+                scene.fill(Fill::NonZero, tf, brush, None, &rect);
+            }
             if let Some(underline) = &style.underline {
                 let metrics = run.font_metrics();
                 let offset = underline.offset.unwrap_or(metrics.underline_offset) as f64;

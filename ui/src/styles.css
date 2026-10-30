@@ -1352,3 +1352,43 @@ button {
   margin: 4px 2px;
   background: var(--border);
 }
+
+/* Small dropdown menus in the ribbon (character spacing, line spacing, text anchor). */
+.menu-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 110px;
+  padding: 4px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: default;
+}
+
+.menu-item:hover {
+  background: #f2f4f7;
+}
+
+.menu-item.active {
+  background: #dce8fb;
+}
+
+.menu-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.layout-item.active {
+  outline: 2px solid #4a7fd6;
+}

@@ -248,6 +248,15 @@ fn rpr_xml(tag: &str, s: &RunStyle, base: &RunStyle, text: &str, links: &mut Lin
     if s.underline != base.underline {
         attrs.push_str(if s.underline { r#" u="sng""# } else { r#" u="none""# });
     }
+    if s.strike != base.strike {
+        attrs.push_str(if s.strike { r#" strike="sngStrike""# } else { r#" strike="noStrike""# });
+    }
+    if (s.spacing_pt - base.spacing_pt).abs() > 0.001 {
+        attrs.push_str(&format!(r#" spc="{}""#, (s.spacing_pt * 100.0).round() as i64));
+    }
+    if (s.baseline - base.baseline).abs() > 0.0001 {
+        attrs.push_str(&format!(r#" baseline="{}""#, (s.baseline * 100_000.0).round() as i64));
+    }
     attrs.push_str(r#" dirty="0""#);
     let mut kids = String::new();
     if s.color != base.color {
@@ -359,12 +368,33 @@ fn link_rel(out: &mut SlideOut, l: &Link) -> String {
     out.rel_for(&l.kind, &l.target, l.external)
 }
 
-fn body_pr_xml(body: &TextBody) -> String {
-    let anchor = match body.anchor {
+fn anchor_code(a: Anchor) -> &'static str {
+    match a {
         Anchor::Top => "t",
         Anchor::Middle => "ctr",
         Anchor::Bottom => "b",
-    };
+    }
+}
+
+/// Element `n` (in `src`) with attribute `name` set to `value`.
+fn with_attr(src: &str, n: Node, name: &str, value: &str) -> String {
+    let start = n.range().start;
+    let mut xml = src[n.range()].to_string();
+    match n.attributes().find(|a| a.name() == name && a.namespace().is_none()) {
+        Some(a) => {
+            let r = a.range_value();
+            xml.replace_range(r.start - start..r.end - start, &esc(value));
+        }
+        None => {
+            let at = open_tag(src, n).len();
+            xml.insert_str(at, &format!(r#" {name}="{}""#, esc(value)));
+        }
+    }
+    xml
+}
+
+fn body_pr_xml(body: &TextBody) -> String {
+    let anchor = anchor_code(body.anchor);
     let [l, t, r, b] = body.insets;
     let wrap = if body.wrap { "square" } else { "none" };
     let fit = if body.auto_grow { "<a:spAutoFit/>" } else { "<a:noAutofit/>" };
@@ -531,7 +561,14 @@ impl SlideOut<'_> {
 
 fn shape_unchanged(shape: &Shape, src: &ShapeSource) -> bool {
     let p = &src.parsed;
-    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind && shape.group == p.group
+    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind && shape.group == p.group && shape.placeholder == p.placeholder
+}
+
+/// `p:ph` for a placeholder (`obj` is the default type and is left out).
+fn ph_xml(ph: &ppt_model::Placeholder) -> String {
+    let ty = if ph.kind == "obj" || ph.kind.is_empty() { String::new() } else { format!(r#" type="{}""#, esc(&ph.kind)) };
+    let idx = if ph.idx != 0 { format!(r#" idx="{}""#, ph.idx) } else { String::new() };
+    format!("<p:ph{ty}{idx}/>")
 }
 
 /// Parses a shape's XML out of context by wrapping it with its namespace declarations.
@@ -564,6 +601,12 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
         if id != want {
             edits.push((attr.range_value(), id.to_string()));
         }
+    }
+    // Another layout's placeholder took this one over.
+    if shape.placeholder != src.parsed.placeholder
+        && let (Some(ph), Some(new)) = (el.descendants().find(|n| n.tag_name().name() == "ph"), &shape.placeholder)
+    {
+        edits.push((ph.range(), ph_xml(new)));
     }
     for n in el.descendants().filter(|n| n.is_element()) {
         for a in n.attributes().filter(|a| a.namespace() == Some(REL_NS)) {
@@ -617,8 +660,13 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
                 match (child(el, "txBody"), &shape.text) {
                     (Some(tx), Some(body)) => {
                         let mut kept = String::new();
+                        let anchor_changed = p.text.as_ref().is_none_or(|t| t.anchor != body.anchor);
                         for c in tx.children().filter(|c| c.is_element() && c.tag_name().name() != "p") {
-                            kept.push_str(&wrapped[c.range()]);
+                            if c.tag_name().name() == "bodyPr" && anchor_changed {
+                                kept.push_str(&with_attr(&wrapped, c, "anchor", anchor_code(body.anchor)));
+                            } else {
+                                kept.push_str(&wrapped[c.range()]);
+                            }
                         }
                         let new = format!("{}>{kept}{}</p:txBody>", open_tag(&wrapped, tx), paragraphs_xml(body, &mut |l| link_rel(out, l)));
                         edits.push((tx.range(), new));
@@ -972,6 +1020,7 @@ fn edited_timing(slide: &Slide, namespaces: &[(String, String)], out: &SlideOut)
 fn slide_unchanged(slide: &Slide, src: &SlideSource) -> bool {
     slide.transition == src.transition
         && slide.timing == src.timing
+        && slide.layout == src.layout
         && slide.shapes.len() == src.shape_ids.len()
         && slide.shapes.iter().zip(&src.shape_ids).all(|(s, id)| s.id == *id)
         && slide.shapes.iter().all(|s| s.source.as_ref().is_some_and(|ss| ss.part == src.part && shape_unchanged(s, ss)))
@@ -1158,6 +1207,13 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
                     }
                 }
                 None => rels_changed = add_notes(&mut zip, &mut pres_rels, &mut taken_parts, &mut notes, slide, &src.part, &mut rels),
+            }
+            // Another layout was applied: point the slide at it.
+            if slide.layout != src.layout
+                && let Some(part) = slide.layout.and_then(|i| pres.layouts.get(i)).map(|l| l.part.clone()).filter(|p| !p.is_empty())
+                && let Some(rel) = rels.iter_mut().find(|r| r.kind.ends_with("/slideLayout"))
+            {
+                rel.target = part;
             }
             let content = if slide_unchanged(slide, src) {
                 // Only the relationships change when a notes slide was added.

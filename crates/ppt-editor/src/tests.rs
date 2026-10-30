@@ -982,3 +982,69 @@ fn find_and_replace_across_slides_and_notes() {
     assert_eq!(e.pres.slides[1].notes, "talk about REVENUE");
     assert!(e.find_next("nothing", o, false, None).is_none());
 }
+
+#[test]
+fn layouts_apply_and_reset_and_save() {
+    let mut eng = engine();
+    let pres = ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap();
+    let mut e = Editor::new(pres);
+    // The template's first slide is a title slide (title + subtitle).
+    let name = |e: &Editor, i: usize| e.pres.layouts[i].name.clone();
+    let content = (0..e.pres.layouts.len()).find(|&i| name(&e, i).contains("內容") || name(&e, i).contains("Content")).unwrap();
+    let title_layout = e.pres.slides[0].layout.unwrap();
+    let title = e.pres.slides[0].shapes.iter().position(|s| s.placeholder.as_ref().is_some_and(|p| p.kind.contains("itle") && p.kind != "subTitle")).unwrap();
+    let id = e.pres.slides[0].shapes[title].id;
+    {
+        let body = e.pres.slides[0].shapes[title].text.as_mut().unwrap();
+        body.set_plain_text("標題");
+    }
+    let before_xfrm = e.pres.shape(0, id).unwrap().xfrm;
+    assert!(e.apply_layout(&mut eng, content, false));
+    let shape = e.pres.shape(0, id).expect("the title carries over");
+    assert_eq!(shape.text.as_ref().unwrap().plain_text(), "標題");
+    let layout_title = e.pres.layouts[content].placeholders.iter().find(|s| s.placeholder.as_ref().is_some_and(|p| p.kind == "title")).unwrap().clone();
+    assert_eq!(shape.xfrm, layout_title.xfrm);
+    assert_ne!(shape.xfrm, before_xfrm);
+    // Formatting the old layout gave it follows the new one.
+    let size = |s: &Shape| s.text.as_ref().unwrap().styles_in(0..3)[0].size_pt;
+    assert_eq!(size(shape), layout_title.text.as_ref().unwrap().defaults_for(0).unwrap().style.size_pt);
+    assert_eq!(e.pres.slides[0].layout, Some(content));
+    // The new layout's body placeholder was added; the empty subtitle went away.
+    assert!(e.pres.slides[0].shapes.iter().all(|s| s.placeholder.as_ref().is_none_or(|p| p.kind != "subTitle")));
+
+    // Overridden formatting survives a layout change but not a reset.
+    e.pres.slides[0].shapes.iter_mut().find(|s| s.id == id).unwrap().text.as_mut().unwrap().apply_style(0..3, |s| s.bold = true);
+    e.pres.slides[0].shapes.iter_mut().find(|s| s.id == id).unwrap().xfrm.x += 100_000;
+    assert!(e.reset_slide(&mut eng));
+    let shape = e.pres.shape(0, id).unwrap();
+    assert!(!shape.text.as_ref().unwrap().styles_in(0..3)[0].bold);
+    assert_eq!(shape.xfrm, layout_title.xfrm);
+
+    // Saved, the slide points at the new layout; undo goes back.
+    let re = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&e.pres).unwrap()).unwrap();
+    assert_eq!(re.slides[0].layout, Some(content));
+    assert_eq!(re.slides[0].shapes.iter().find(|s| s.text.as_ref().is_some_and(|t| t.plain_text() == "標題")).map(|s| s.xfrm), Some(layout_title.xfrm));
+    assert!(e.undo(&mut eng) && e.undo(&mut eng));
+    assert_eq!(e.pres.slides[0].layout, Some(title_layout));
+}
+
+#[test]
+fn a_placeholder_taken_over_by_another_type_saves_as_it() {
+    let mut eng = engine();
+    let deck = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&deck).unwrap());
+    e.set_slide(&mut eng, 1);
+    let title_slide = (0..e.pres.layouts.len()).find(|&i| e.pres.layouts[i].placeholders.iter().any(|s| s.placeholder.as_ref().is_some_and(|p| p.kind == "ctrTitle"))).unwrap();
+    assert!(e.apply_layout(&mut eng, title_slide, false));
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    let xml = zip_part(&saved, "ppt/slides/slide2.xml");
+    assert!(xml.contains(r#"<p:ph type="subTitle" idx="1"/>"#) && xml.contains(r#"<p:ph type="ctrTitle"/>"#), "{xml}");
+}
+
+fn zip_part(bytes: &[u8], name: &str) -> String {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut s = String::new();
+    z.by_name(name).unwrap().read_to_string(&mut s).unwrap();
+    s
+}

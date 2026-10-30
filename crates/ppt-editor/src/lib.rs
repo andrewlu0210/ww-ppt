@@ -6,6 +6,7 @@
 mod anim;
 mod find;
 mod group;
+mod layout;
 mod richedit;
 mod spell;
 pub mod show;
@@ -129,7 +130,14 @@ pub enum Toggle {
     Bold,
     Italic,
     Underline,
+    Strike,
+    Superscript,
+    Subscript,
 }
+
+/// Baseline shifts PowerPoint uses for superscript and subscript.
+const SUPERSCRIPT: f32 = 0.3;
+const SUBSCRIPT: f32 = -0.25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZOrder {
@@ -148,6 +156,7 @@ pub struct TextFormat {
     /// Numbering scheme when the paragraph is numbered (`arabicPeriod`, ...).
     pub numbering: Option<String>,
     pub level: u8,
+    pub line_spacing: f32,
 }
 
 #[derive(Clone)]
@@ -1041,12 +1050,70 @@ impl Editor {
             Toggle::Bold => current.bold,
             Toggle::Italic => current.italic,
             Toggle::Underline => current.underline,
+            Toggle::Strike => current.strike,
+            Toggle::Superscript => current.baseline > 0.0,
+            Toggle::Subscript => current.baseline < 0.0,
         };
         self.apply_text_style(engine, |s| match which {
             Toggle::Bold => s.bold = on,
             Toggle::Italic => s.italic = on,
             Toggle::Underline => s.underline = on,
+            Toggle::Strike => s.strike = on,
+            Toggle::Superscript => s.baseline = if on { SUPERSCRIPT } else { 0.0 },
+            Toggle::Subscript => s.baseline = if on { SUBSCRIPT } else { 0.0 },
         })
+    }
+
+    /// Resets character formatting to what the text inherits: the selected
+    /// text, or all text of the selected shapes.
+    pub fn clear_formatting(&mut self, engine: &mut TextEngine) -> bool {
+        if self.cell_range.is_some() {
+            return false;
+        }
+        if let Some(edit) = &mut self.text {
+            edit.rich.edit_body(engine, |body, range| body.clear_formatting(range));
+            self.fit_edited_shape(engine);
+            return true;
+        }
+        if !self.selected_shapes().iter().any(|s| s.text_bodies().next().is_some()) {
+            return false;
+        }
+        self.modify_selected(|shape| {
+            for body in shape.text_bodies_mut() {
+                let len = body.len();
+                body.clear_formatting(0..len);
+            }
+        })
+    }
+
+    /// Where text sits vertically in the edited shape, or in the selected shapes.
+    pub fn set_text_anchor(&mut self, anchor: Anchor) -> bool {
+        if let Some(edit) = &mut self.text {
+            if edit.cell.is_some() || edit.rich.body.anchor == anchor {
+                return false;
+            }
+            edit.rich.body.anchor = anchor;
+            self.changed();
+            return true;
+        }
+        let ids: Vec<ShapeId> = self.selected_shapes().iter().filter(|s| s.text.as_ref().is_some_and(|t| t.anchor != anchor)).map(|s| s.id).collect();
+        if ids.is_empty() {
+            return false;
+        }
+        self.modify_selected(|shape| {
+            if let Some(body) = &mut shape.text {
+                body.anchor = anchor;
+            }
+        })
+    }
+
+    /// The vertical text position of the edited shape, or of the single selected shape.
+    pub fn text_anchor(&self) -> Option<Anchor> {
+        match &self.text {
+            Some(edit) if edit.cell.is_none() => Some(edit.rich.body.anchor),
+            Some(_) => None,
+            None => self.selected_shape().and_then(|s| s.text.as_ref()).map(|t| t.anchor),
+        }
     }
 
     /// Applies a paragraph format to the selected paragraphs, or to all paragraphs of the selected shapes.
@@ -1130,6 +1197,7 @@ impl Editor {
                 bullet: p.bullet.as_ref().is_some_and(|b| !b.is_numbered()),
                 numbering: numbering_of(p),
                 level: p.level,
+                line_spacing: p.line_spacing,
             });
         }
         let body = match self.range_text_body() {
@@ -1143,6 +1211,7 @@ impl Editor {
             bullet: p.bullet.as_ref().is_some_and(|b| !b.is_numbered()),
             numbering: numbering_of(p),
             level: p.level,
+            line_spacing: p.line_spacing,
         })
     }
 

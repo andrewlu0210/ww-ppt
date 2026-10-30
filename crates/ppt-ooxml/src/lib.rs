@@ -215,6 +215,9 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
     parser.pres.layouts = order.iter().map(|&i| old[i].clone()).collect();
     for slide in parser.pres.slides.iter_mut() {
         slide.layout = slide.layout.and_then(|old_i| order.iter().position(|&i| i == old_i));
+        if let Some(src) = &mut slide.source {
+            Arc::make_mut(src).layout = slide.layout;
+        }
     }
     if let Some(master) = masters.first() {
         parser.pres.minor_font = master.ctx.theme.minor.clone();
@@ -371,6 +374,7 @@ impl Parser<'_> {
             shape_ids: slide.shapes.iter().map(|s| s.id).collect(),
             transition: slide.transition.clone(),
             timing: slide.timing.clone(),
+            layout: slide.layout,
         }));
         Ok(slide)
     }
@@ -595,7 +599,7 @@ impl Parser<'_> {
             namespaces: src.namespaces.clone(),
             rels,
             container: None,
-            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill.clone(), line: shape.line, text: shape.text.clone(), kind: shape.kind.clone(), group: shape.group },
+            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill.clone(), line: shape.line, text: shape.text.clone(), kind: shape.kind.clone(), group: shape.group, placeholder: shape.placeholder.clone() },
         }))
     }
 
@@ -1104,6 +1108,9 @@ fn run_style(s: &LevelStyle, theme: &Theme) -> RunStyle {
         bold: s.bold.unwrap_or(false),
         italic: s.italic.unwrap_or(false),
         underline: s.underline.unwrap_or(false),
+        strike: s.strike.unwrap_or(false),
+        baseline: s.baseline.unwrap_or(0.0),
+        spacing_pt: s.spacing.unwrap_or(0.0),
         color: s.color.unwrap_or(Color::BLACK),
         latin_font: theme.resolve_typeface(s.latin.as_deref().unwrap_or("+mn-lt")),
         ea_font: theme.resolve_typeface(s.ea.as_deref().unwrap_or("+mn-ea")),

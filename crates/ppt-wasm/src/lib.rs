@@ -902,9 +902,53 @@ impl App {
         let t = match which {
             "bold" => Toggle::Bold,
             "italic" => Toggle::Italic,
+            "strike" => Toggle::Strike,
+            "superscript" => Toggle::Superscript,
+            "subscript" => Toggle::Subscript,
             _ => Toggle::Underline,
         };
         let changed = self.editor.toggle_style(&mut self.engine, t);
+        self.touch(changed)
+    }
+
+    /// Extra space between characters, in points (0 is normal).
+    #[wasm_bindgen(js_name = setCharSpacing)]
+    pub fn set_char_spacing(&mut self, pt: f32) -> bool {
+        let pt = pt.clamp(-20.0, 100.0);
+        let changed = self.editor.apply_text_style(&mut self.engine, |s| s.spacing_pt = pt);
+        self.touch(changed)
+    }
+
+    /// Character formatting back to what the text inherits.
+    #[wasm_bindgen(js_name = clearFormatting)]
+    pub fn clear_formatting(&mut self) -> bool {
+        let changed = self.editor.clear_formatting(&mut self.engine);
+        self.touch(changed)
+    }
+
+    /// Vertical position of the text in its shape: "top", "middle" or "bottom".
+    #[wasm_bindgen(js_name = setTextAnchor)]
+    pub fn set_text_anchor(&mut self, anchor: &str) -> bool {
+        let a = match anchor {
+            "middle" => ppt_model::Anchor::Middle,
+            "bottom" => ppt_model::Anchor::Bottom,
+            _ => ppt_model::Anchor::Top,
+        };
+        let changed = self.editor.set_text_anchor(a);
+        self.touch(changed)
+    }
+
+    /// Applies layout `index` to the current slide.
+    #[wasm_bindgen(js_name = applyLayout)]
+    pub fn apply_layout(&mut self, index: usize) -> bool {
+        let changed = self.editor.apply_layout(&mut self.engine, index, false);
+        self.touch(changed)
+    }
+
+    /// Resets the current slide's placeholders to its layout.
+    #[wasm_bindgen(js_name = resetSlide)]
+    pub fn reset_slide(&mut self) -> bool {
+        let changed = self.editor.reset_slide(&mut self.engine);
         self.touch(changed)
     }
 
@@ -1665,6 +1709,15 @@ impl App {
         }
         let marks: Array = e.pres.slides.iter().map(|s| JsValue::from(s.transition.as_ref().is_some_and(|t| t.animates()))).collect();
         set("transitionSlides", marks.into());
+        if let Some(a) = e.text_anchor() {
+            let a = match a {
+                ppt_model::Anchor::Top => "top",
+                ppt_model::Anchor::Middle => "middle",
+                ppt_model::Anchor::Bottom => "bottom",
+            };
+            set("textAnchor", a.into());
+        }
+        set("slideLayout", e.pres.slides.get(e.slide).and_then(|s| s.layout).map_or(-1, |l| l as i32).into());
         set("animations", self.animations().into());
         set("canAnimate", e.can_animate().into());
         set("zoom", self.zoom.into());
@@ -1680,6 +1733,10 @@ impl App {
             set("bold", f.style.bold.into());
             set("italic", f.style.italic.into());
             set("underline", f.style.underline.into());
+            set("strike", f.style.strike.into());
+            set("baseline", f.style.baseline.into());
+            set("charSpacing", f.style.spacing_pt.into());
+            set("lineSpacing", f.line_spacing.into());
             set("textColor", hex(f.style.color).into());
             set("link", f.style.link.as_ref().filter(|l| l.external).map(|l| l.target.clone()).unwrap_or_default().into());
             let align = match f.align {

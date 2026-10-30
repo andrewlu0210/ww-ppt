@@ -344,6 +344,12 @@ pub struct RunStyle {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    pub strike: bool,
+    /// Baseline shift as a fraction of the font size: positive raises
+    /// (superscript, `0.3`), negative lowers (subscript, `-0.25`).
+    pub baseline: f32,
+    /// Extra space between characters, in points (`spc`).
+    pub spacing_pt: f32,
     pub color: Color,
     /// Resolved latin typeface (theme references like `+mn-lt` are already expanded).
     pub latin_font: String,
@@ -377,6 +383,16 @@ impl Link {
     }
 }
 
+impl RunStyle {
+    /// Moves every property still equal to `old` (an inherited default) to `new`'s value.
+    pub fn rebase(&mut self, old: &RunStyle, new: &RunStyle) {
+        macro_rules! take {
+            ($($f:ident),*) => { $( if self.$f == old.$f { self.$f = new.$f.clone(); } )* };
+        }
+        take!(size_pt, bold, italic, underline, strike, baseline, spacing_pt, color, latin_font, ea_font);
+    }
+}
+
 impl Default for RunStyle {
     fn default() -> Self {
         Self {
@@ -384,6 +400,9 @@ impl Default for RunStyle {
             bold: false,
             italic: false,
             underline: false,
+            strike: false,
+            baseline: 0.0,
+            spacing_pt: 0.0,
             color: Color::BLACK,
             latin_font: "Calibri".to_string(),
             ea_font: String::new(),
@@ -656,6 +675,7 @@ pub struct ParsedShape {
     pub text: Option<TextBody>,
     pub kind: ShapeKind,
     pub group: Option<ShapeId>,
+    pub placeholder: Option<Placeholder>,
 }
 
 impl ShapeSource {
@@ -730,7 +750,7 @@ pub struct Slide {
 }
 
 /// The original part of a slide.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SlideSource {
     pub part: String,
     pub doc: Arc<str>,
@@ -741,6 +761,8 @@ pub struct SlideSource {
     pub transition: Option<Transition>,
     /// The animations as loaded, to tell whether they were edited.
     pub timing: Option<Arc<anim::Timing>>,
+    /// The layout as loaded, to tell whether another one was applied.
+    pub layout: Option<usize>,
 }
 
 /// A slide layout: what a new slide based on it starts with.

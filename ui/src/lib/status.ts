@@ -26,6 +26,17 @@ export interface Status {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  strike?: boolean;
+  /** Baseline shift as a fraction of the size: > 0 superscript, < 0 subscript. */
+  baseline?: number;
+  /** Extra space between characters, in points. */
+  charSpacing?: number;
+  /** Line spacing of the current paragraph, as a multiple of single. */
+  lineSpacing?: number;
+  /** Vertical text position in the edited or selected shape. */
+  textAnchor?: "top" | "middle" | "bottom";
+  /** The current slide's layout index, -1 when unknown. */
+  slideLayout?: number;
   textColor?: string;
   /** URL of the link at the caret / on the selected text, "" when none. */
   link?: string;

@@ -248,6 +248,9 @@ pub struct LevelStyle {
     pub bold: Option<bool>,
     pub italic: Option<bool>,
     pub underline: Option<bool>,
+    pub strike: Option<bool>,
+    pub baseline: Option<f32>,
+    pub spacing: Option<f32>,
     pub color: Option<Color>,
     pub latin: Option<String>,
     pub ea: Option<String>,
@@ -295,7 +298,7 @@ impl LevelStyle {
         macro_rules! take {
             ($($f:ident),*) => { $( if self.$f.is_none() { self.$f = fallback.$f.clone(); } )* };
         }
-        take!(size, bold, italic, underline, color, latin, ea, align, line_spacing, bu_kind, bu_font, bu_color, bu_size, mar_l, indent, space_before, space_after);
+        take!(size, bold, italic, underline, strike, baseline, spacing, color, latin, ea, align, line_spacing, bu_kind, bu_font, bu_color, bu_size, mar_l, indent, space_before, space_after);
         self
     }
 
@@ -312,6 +315,9 @@ impl LevelStyle {
             bold: attr_bool(n, "b"),
             italic: attr_bool(n, "i"),
             underline: n.attribute("u").map(|u| u != "none"),
+            strike: n.attribute("strike").map(|s| s != "noStrike"),
+            baseline: attr_f64(n, "baseline").map(|v| (v / 100_000.0) as f32),
+            spacing: attr_f64(n, "spc").map(|v| (v / 100.0) as f32),
             // Gradient text is approximated by its first stop for now.
             color: child(n, "solidFill")
                 .and_then(|f| ctx.color_in(f, None))

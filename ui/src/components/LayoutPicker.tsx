@@ -7,11 +7,13 @@ interface Props {
   thumbs: (ImageData | undefined)[];
   onOpen: () => void;
   onPick: (layout: number) => void;
+  /** Highlighted layout (the current slide's). */
+  current?: number;
   button: (open: boolean, toggle: () => void) => ReactNode;
 }
 
 /** Gallery of the deck's layouts, like PowerPoint's "New Slide" menu. */
-export function LayoutPicker({ names, thumbs, onOpen, onPick, button }: Props) {
+export function LayoutPicker({ names, thumbs, onOpen, onPick, button, current }: Props) {
   return (
     <Popover
       button={(open, toggle) =>
@@ -26,7 +28,7 @@ export function LayoutPicker({ names, thumbs, onOpen, onPick, button }: Props) {
           {names.map((name, i) => (
             <button
               key={i}
-              className="layout-item"
+              className={i === current ? "layout-item active" : "layout-item"}
               onClick={() => {
                 onPick(i);
                 close();

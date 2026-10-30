@@ -11,7 +11,7 @@ use std::sync::Arc;
 use parley::fontique::{Blob, Collection, CollectionOptions, SourceCache};
 use parley::{
     Alignment, AlignmentOptions, BreakReason, FontContext, FontFamily, FontFamilyName, FontStyle, FontWeight, Layout,
-    LayoutContext, LineHeight, StyleProperty, YieldData,
+    LayoutContext, LineHeight, StyleProperty, VerticalAlign, YieldData,
 };
 use ppt_model::{Align, Bullet as BulletDef, BulletKind, Color, EMU_PER_PT, Emu, Paragraph, RunStyle, Table, TextBody};
 
@@ -19,6 +19,9 @@ pub use parley;
 
 /// Single line spacing in PowerPoint is about 1.2× the font size for typical fonts.
 pub const SINGLE_LINE_HEIGHT: f32 = 1.2;
+
+/// Size of superscript and subscript text relative to the run's size.
+const SCRIPT_SCALE: f32 = 2.0 / 3.0;
 
 /// Font size of the layout's default style when every character has its own style.
 const STRUT_SIZE: f32 = 1.0;
@@ -87,9 +90,15 @@ impl TextEngine {
 
     /// Style properties shared by view-mode layout and the text editor.
     pub fn run_properties(&self, style: &RunStyle, font_scale: f32) -> Vec<StyleProperty<'static, Color>> {
+        let size = style.size_pt * font_scale;
+        // Superscripts and subscripts are drawn smaller, shifted by a fraction of the full size.
+        let shifted = style.baseline.abs() > 1e-4;
         vec![
             StyleProperty::FontFamily(self.font_stack(style)),
-            StyleProperty::FontSize(style.size_pt * font_scale),
+            StyleProperty::FontSize(if shifted { size * SCRIPT_SCALE } else { size }),
+            StyleProperty::VerticalAlign(VerticalAlign::length(style.baseline * size)),
+            StyleProperty::Strikethrough(style.strike),
+            StyleProperty::LetterSpacing(style.spacing_pt * font_scale),
             StyleProperty::FontWeight(if style.bold { FontWeight::BOLD } else { FontWeight::NORMAL }),
             StyleProperty::FontStyle(if style.italic { FontStyle::Italic } else { FontStyle::Normal }),
             // Linked text shows in the theme's hyperlink color, underlined, like PowerPoint.
@@ -522,4 +531,34 @@ mod tests {
         assert_eq!(l.bullets.len(), 5, "every numbered paragraph gets its number");
     }
 
+
+    /// Glyph (x, y, font size) of every glyph, in order.
+    fn glyphs(b: &BodyLayout) -> Vec<(f32, f32, f32)> {
+        let mut out = Vec::new();
+        for line in b.layout.lines() {
+            for item in line.items() {
+                if let parley::PositionedLayoutItem::GlyphRun(run) = item {
+                    let size = run.run().font_size();
+                    out.extend(run.positioned_glyphs().map(|g| (g.x, g.y, size)));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn scripts_shift_and_shrink_and_spacing_widens() {
+        let mut e = engine();
+        let mut b = body("x2x2", 30.0);
+        b.apply_style(1..2, |s| s.baseline = 0.3);
+        b.apply_style(3..4, |s| s.baseline = -0.25);
+        let g = glyphs(&e.layout_body(&b, 500.0));
+        assert!(g[1].1 < g[0].1 - 5.0 && g[3].1 > g[0].1 + 5.0, "{g:?}");
+        assert!((g[1].2 - 20.0).abs() < 0.01, "scripts are smaller: {g:?}");
+        let plain = glyphs(&e.layout_body(&body("abc", 30.0), 500.0));
+        let mut spaced = body("abc", 30.0);
+        spaced.apply_style(0..3, |s| s.spacing_pt = 5.0);
+        let wide = glyphs(&e.layout_body(&spaced, 500.0));
+        assert!((wide[2].0 - plain[2].0 - 10.0).abs() < 0.5, "{plain:?} {wide:?}");
+    }
 }

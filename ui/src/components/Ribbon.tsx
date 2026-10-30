@@ -11,6 +11,21 @@ import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { AnimationPreset, Status } from "../lib/status";
 
+/** Character spacing presets (points), as PowerPoint names them. */
+const CHAR_SPACINGS: [number, string][] = [
+  [-3, "非常緊"],
+  [-1.5, "緊"],
+  [0, "標準"],
+  [3, "鬆"],
+  [6, "非常鬆"],
+];
+const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
+const ANCHORS = [
+  ["top", "anchorTop", "上"],
+  ["middle", "anchorMiddle", "中"],
+  ["bottom", "anchorBottom", "下"],
+] as const;
+
 const TABS = ["常用", "插入", "圖形格式", "轉場", "動畫", "投影片放映", "校閱", "檢視"] as const;
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
 const TABLE_TABS = ["表格設計", "版面配置"] as const;
@@ -130,7 +145,20 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 <Button icon={icons.copy} label="複製" disabled={!status.hasSelection} onClick={() => run({ kind: "copy" })} />
               </div>
             </Group>
-            <Group label="投影片">{newSlide(true)}</Group>
+            <Group label="投影片">
+              {newSlide(true)}
+              <div className="rb-col">
+                <LayoutPicker
+                  names={layoutNames}
+                  thumbs={layoutThumbs}
+                  current={status.slideLayout}
+                  onOpen={loadLayoutThumbs}
+                  onPick={(layout) => run({ kind: "applyLayout", layout })}
+                  button={(open, toggle) => <Button icon={icons.layout} label="版面配置 ▾" active={open} onClick={toggle} />}
+                />
+                <Button icon={icons.resetSlide} label="重設" disabled={(status.slideLayout ?? -1) < 0} onClick={() => run({ kind: "resetSlide" })} />
+              </div>
+            </Group>
             <Group label="字型">
               <div className="rb-col">
                 <div className="rb-row">
@@ -198,6 +226,31 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                   <Button iconOnly icon={<b className="glyph">B</b>} label="粗體 (⌘B)" active={status.bold} disabled={!text} onClick={() => run({ kind: "toggle", which: "bold" })} />
                   <Button iconOnly icon={<i className="glyph serif">I</i>} label="斜體 (⌘I)" active={status.italic} disabled={!text} onClick={() => run({ kind: "toggle", which: "italic" })} />
                   <Button iconOnly icon={<u className="glyph">U</u>} label="底線 (⌘U)" active={status.underline} disabled={!text} onClick={() => run({ kind: "toggle", which: "underline" })} />
+                  <Button iconOnly icon={<s className="glyph">S</s>} label="刪除線" active={status.strike} disabled={!text} onClick={() => run({ kind: "toggle", which: "strike" })} />
+                  <Button iconOnly icon={<span className="glyph">x²</span>} label="上標" active={(status.baseline ?? 0) > 0} disabled={!text} onClick={() => run({ kind: "toggle", which: "superscript" })} />
+                  <Button iconOnly icon={<span className="glyph">x₂</span>} label="下標" active={(status.baseline ?? 0) < 0} disabled={!text} onClick={() => run({ kind: "toggle", which: "subscript" })} />
+                  <Popover
+                    button={(open, toggle) => <Button iconOnly icon={icons.charSpacing} label="字元間距" active={open} disabled={!text} onClick={toggle} />}
+                  >
+                    {(close) => (
+                      <div className="menu-panel">
+                        {CHAR_SPACINGS.map(([pt, label]) => (
+                          <button
+                            key={pt}
+                            className={Math.abs((status.charSpacing ?? 0) - pt) < 0.01 ? "menu-item active" : "menu-item"}
+                            onMouseDown={keepFocus}
+                            onClick={() => {
+                              run({ kind: "charSpacing", pt });
+                              close();
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Popover>
+                  <Button iconOnly icon={icons.clearFormat} label="清除所有格式設定" disabled={!text} onClick={() => run({ kind: "clearFormatting" })} />
                   <ColorPicker icon={icons.fontColor} label="字型色彩" value={status.textColor} disabled={!text} onPick={(color) => color && run({ kind: "textColor", color })} />
                 </div>
               </div>
@@ -248,6 +301,49 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                   ).map(([a, icon, label]) => (
                     <Button key={a} iconOnly icon={icon} label={label} active={status.align === a} disabled={!text} onClick={() => run({ kind: "align", align: a })} />
                   ))}
+                  <Popover button={(open, toggle) => <Button iconOnly icon={icons.lineSpacing} label="行距" active={open} disabled={!text} onClick={toggle} />}>
+                    {(close) => (
+                      <div className="menu-panel">
+                        {LINE_SPACINGS.map((m) => (
+                          <button
+                            key={m}
+                            className={Math.abs((status.lineSpacing ?? 0) - m) < 0.01 ? "menu-item active" : "menu-item"}
+                            onMouseDown={keepFocus}
+                            onClick={() => {
+                              run({ kind: "lineSpacing", multiple: m });
+                              close();
+                            }}
+                          >
+                            {m.toFixed(1)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Popover>
+                  <Popover
+                    button={(open, toggle) => (
+                      <Button iconOnly icon={status.textAnchor === "middle" ? icons.anchorMiddle : status.textAnchor === "bottom" ? icons.anchorBottom : icons.anchorTop} label="對齊文字" active={open} disabled={!status.textAnchor} onClick={toggle} />
+                    )}
+                  >
+                    {(close) => (
+                      <div className="menu-panel">
+                        {ANCHORS.map(([a, icon, label]) => (
+                          <button
+                            key={a}
+                            className={status.textAnchor === a ? "menu-item active" : "menu-item"}
+                            onMouseDown={keepFocus}
+                            onClick={() => {
+                              run({ kind: "textAnchor", anchor: a });
+                              close();
+                            }}
+                          >
+                            <span className="menu-icon">{icons[icon]}</span>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Popover>
                 </div>
               </div>
             </Group>
@@ -261,6 +357,11 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               <div className="rb-col">
                 <Button icon={icons.undo} label="復原" disabled={!status.canUndo} onClick={() => run({ kind: "undo" })} />
                 <Button icon={icons.redo} label="取消復原" disabled={!status.canRedo} onClick={() => run({ kind: "redo" })} />
+              </div>
+              <div className="rb-col">
+                <Button icon={icons.find} label="尋找 (⌘F)" onClick={() => run({ kind: "find", replace: false })} />
+                <Button icon={icons.replace} label="取代 (⌥⌘F)" onClick={() => run({ kind: "find", replace: true })} />
+                <Button icon={icons.selectAll} label="全選 (⌘A)" onClick={() => run({ kind: "selectAll" })} />
               </div>
             </Group>
           </>

@@ -30,7 +30,15 @@ export type Command =
   | { kind: "duplicateSlide"; index?: number }
   | { kind: "deleteSlide"; index?: number }
   | { kind: "moveSlide"; from: number; to: number }
-  | { kind: "toggle"; which: "bold" | "italic" | "underline" }
+  | { kind: "toggle"; which: "bold" | "italic" | "underline" | "strike" | "superscript" | "subscript" }
+  | { kind: "charSpacing"; pt: number }
+  | { kind: "clearFormatting" }
+  | { kind: "lineSpacing"; multiple: number }
+  | { kind: "textAnchor"; anchor: "top" | "middle" | "bottom" }
+  | { kind: "applyLayout"; layout: number }
+  | { kind: "resetSlide" }
+  | { kind: "find"; replace: boolean }
+  | { kind: "selectAll" }
   | { kind: "fontSize"; size: number }
   | { kind: "fontStep"; up: boolean }
   | { kind: "fontFamily"; family: string }

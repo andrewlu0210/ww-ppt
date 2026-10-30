@@ -632,3 +632,26 @@ fn animations_are_written_kept_and_edited() {
     let xml3 = slide_xml(&save_pptx(&pres).unwrap(), 1);
     assert!(!xml3.contains("<p:timing"), "{xml3}");
 }
+
+#[test]
+fn strike_scripts_spacing_and_anchor_round_trip() {
+    let mut pres = sample();
+    let i = pres.slides[0].shapes.iter().position(|s| s.text.as_ref().is_some_and(|t| t.len() > 4)).unwrap();
+    {
+        let body = pres.slides[0].shapes[i].text.as_mut().unwrap();
+        body.apply_style(0..1, |s| s.strike = true);
+        body.apply_style(1..2, |s| s.baseline = 0.3);
+        body.apply_style(2..3, |s| s.baseline = -0.25);
+        body.apply_style(3..4, |s| s.spacing_pt = 2.5);
+        body.anchor = ppt_model::Anchor::Bottom;
+    }
+    let saved = save_pptx(&pres).unwrap();
+    let xml = slide_xml(&saved, 1);
+    assert!(xml.contains(r#"strike="sngStrike""#) && xml.contains(r#"baseline="30000""#) && xml.contains(r#"baseline="-25000""#) && xml.contains(r#"spc="250""#), "{xml}");
+    let re = parse_pptx(&saved).unwrap();
+    let body = re.slides[0].shapes[i].text.as_ref().unwrap();
+    let at = |pos: usize| body.styles_in(pos..pos + 1)[0].clone();
+    assert!(at(0).strike && !at(1).strike);
+    assert_eq!((at(1).baseline, at(2).baseline, at(3).spacing_pt, at(4).baseline), (0.3, -0.25, 2.5, 0.0));
+    assert_eq!(body.anchor, ppt_model::Anchor::Bottom);
+}

@@ -387,6 +387,15 @@ impl RichEdit {
         self.relayout(engine, a, fo);
     }
 
+    /// Changes the body with access to the selected range, as one undo step.
+    pub fn edit_body(&mut self, engine: &mut TextEngine, f: impl FnOnce(&mut TextBody, Range<usize>)) {
+        self.record(Op::Other);
+        let range = self.range();
+        f(&mut self.body, range);
+        let (a, fo) = self.indices();
+        self.relayout(engine, a, fo);
+    }
+
     pub fn apply_paragraphs(&mut self, engine: &mut TextEngine, f: impl Fn(&mut Paragraph)) {
         self.record(Op::Other);
         self.body.apply_paragraphs(self.range(), f);

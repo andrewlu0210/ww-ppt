@@ -484,6 +484,10 @@ export function App() {
         setUsePresenter(c.on);
         return;
       }
+      if (c.kind === "find") {
+        findRef.current?.open(c.replace);
+        return;
+      }
       if (c.kind === "spellCheck") {
         setSpellOn(c.on);
         return;
@@ -614,6 +618,27 @@ export function App() {
           break;
         case "toggle":
           engine.toggle(c.which);
+          break;
+        case "charSpacing":
+          engine.setCharSpacing(c.pt);
+          break;
+        case "clearFormatting":
+          engine.clearFormatting();
+          break;
+        case "lineSpacing":
+          engine.setLineSpacing(c.multiple);
+          break;
+        case "textAnchor":
+          engine.setTextAnchor(c.anchor);
+          break;
+        case "applyLayout":
+          engine.applyLayout(c.layout);
+          break;
+        case "resetSlide":
+          engine.resetSlide();
+          break;
+        case "selectAll":
+          engine.keyDown("a", false, false, true, false);
           break;
         case "fontSize":
           engine.setFontSize(c.size);
