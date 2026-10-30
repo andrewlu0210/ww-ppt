@@ -39,6 +39,8 @@ pub struct Theme {
     /// `a:fillStyleLst` entries (XML, `a:` namespace declared on a wrapper),
     /// referenced by `a:fillRef@idx` 1..; `phClr` is resolved per use.
     pub fill_styles: Vec<String>,
+    /// `a:bgFillStyleLst` entries, referenced by `a:bgRef@idx` 1001...
+    pub bg_fill_styles: Vec<String>,
 }
 
 impl Theme {
@@ -58,11 +60,14 @@ impl Theme {
                 }
             }
         }
-        if let Some(list) = path(elements, &["themeElements", "fmtScheme", "fillStyleLst"]) {
-            let ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
-            theme.fill_styles =
-                list.children().filter(|c| c.is_element()).map(|c| format!(r#"<w xmlns:a="{ns}">{}</w>"#, &xml[c.range()])).collect();
-        }
+        let ns = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        let styles = |name: &str| -> Vec<String> {
+            path(elements, &["themeElements", "fmtScheme", name])
+                .map(|list| list.children().filter(|c| c.is_element()).map(|c| format!(r#"<w xmlns:a="{ns}">{}</w>"#, &xml[c.range()])).collect())
+                .unwrap_or_default()
+        };
+        theme.fill_styles = styles("fillStyleLst");
+        theme.bg_fill_styles = styles("bgFillStyleLst");
         if let Some(fonts) = path(elements, &["themeElements", "fontScheme"]) {
             let read = |name: &str| {
                 let Some(f) = child(fonts, name) else { return (String::new(), String::new()) };

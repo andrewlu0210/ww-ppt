@@ -34,6 +34,8 @@ import { FindBar, type FindBarHandle } from "./components/FindBar";
 import { SpellMenu, type SpellHit } from "./components/SpellMenu";
 import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
+import type { BackgroundInfo, ColorSchemeInfo, FontSchemeInfo, ThemeInfo } from "./components/DesignTab";
+import { setThemePalette } from "./components/ColorPicker";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
@@ -88,6 +90,10 @@ export function App() {
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
   const [animPresets, setAnimPresets] = useState<AnimationPreset[]>([]);
   const [shapeIcons, setShapeIcons] = useState<Map<string, PresetIcon>>(new Map());
+  const [theme, setTheme] = useState<ThemeInfo | null>(null);
+  const [schemes, setSchemes] = useState<{ colors: ColorSchemeInfo[]; fonts: FontSchemeInfo[] }>({ colors: [], fonts: [] });
+  const [slideSize, setSlideSize] = useState<[number, number]>([12_192_000, 6_858_000]);
+  const deckStyleKey = useRef("");
   const [ribbonTab, setRibbonTab] = useState("");
   const findRef = useRef<FindBarHandle>(null);
   /** Slide show in progress: the slides full screen, or the presenter view. */
@@ -294,6 +300,26 @@ export function App() {
     [refresh, scheduleThumbs],
   );
 
+  /** Re-reads what depends on the deck's theme and size (after loading, a restyle, or undoing one). */
+  const deckStyleChanged = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const info = engine.themeInfo() as ThemeInfo | null;
+    const size = Array.from(engine.slideSize()) as [number, number];
+    const key = JSON.stringify([info, size]);
+    const changed = deckStyleKey.current !== key;
+    deckStyleKey.current = key;
+    setTheme(info);
+    setSlideSize(size);
+    if (info) setThemePalette(info.colors);
+    setSchemes((s) => (s.colors.length > 0 ? s : { colors: engine.colorSchemes() as ColorSchemeInfo[], fonts: engine.fontSchemes() as FontSchemeInfo[] }));
+    if (changed) {
+      setLayoutThumbs([]);
+      setTableStyles(engine.tableStyles() as TableStyleInfo[]);
+      await loadFonts(engine.fontFamilies() as string[]);
+    }
+  }, [loadFonts]);
+
   /** Called after a document is loaded or created. */
   const documentReplaced = useCallback(
     async (name: string, path: string | null) => {
@@ -308,9 +334,10 @@ export function App() {
       setThumbs(new Map());
       refresh();
       scheduleThumbs(true);
+      await deckStyleChanged();
       await loadFonts(engine.fontFamilies() as string[]);
     },
-    [loadFonts, refresh, scheduleThumbs],
+    [deckStyleChanged, loadFonts, refresh, scheduleThumbs],
   );
 
   // --- Documents ----------------------------------------------------------------
@@ -525,10 +552,12 @@ export function App() {
         case "undo":
           engine.undo();
           structural = true;
+          await deckStyleChanged();
           break;
         case "redo":
           engine.redo();
           structural = true;
+          await deckStyleChanged();
           break;
         case "cut":
         case "copy":
@@ -678,6 +707,40 @@ export function App() {
         case "insertSymbol":
           engine.insertSymbol(c.text);
           break;
+        case "background":
+          if (c.fill === "solid") engine.setBackgroundSolid(c.color);
+          else engine.setBackgroundGradient(c.start, c.end, c.radial, c.angle);
+          break;
+        case "backgroundPicture": {
+          const path = await pickImage();
+          if (!path) break;
+          const ext = path.split(".").pop() ?? "png";
+          if (!engine.setBackgroundPicture(await readFile(path), ext)) setError("無法讀取這個圖片檔。");
+          break;
+        }
+        case "resetBackground":
+          engine.resetBackground();
+          break;
+        case "hideBackgroundGraphics":
+          engine.setHideBackgroundGraphics(c.on);
+          break;
+        case "backgroundToAll":
+          engine.applyBackgroundToAll();
+          structural = true;
+          break;
+        case "colorScheme":
+        case "fontScheme":
+        case "slideSize":
+          try {
+            if (c.kind === "colorScheme") engine.setColorScheme(c.name);
+            else if (c.kind === "fontScheme") engine.setFontScheme(c.name);
+            else engine.setSlideSize(c.width, c.height, c.fit);
+          } catch (e) {
+            setError(`無法變更設計：${String(e)}`);
+          }
+          structural = true;
+          await deckStyleChanged();
+          break;
         case "fontSize":
           engine.setFontSize(c.size);
           break;
@@ -757,7 +820,7 @@ export function App() {
       refresh();
       focusCanvas();
     },
-    [confirmDiscard, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow],
+    [confirmDiscard, deckStyleChanged, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow],
   );
 
   // Native menu items are forwarded here by the backend.
@@ -879,7 +942,13 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
+        theme={theme}
+        colorSchemes={schemes.colors}
+        fontSchemes={schemes.fonts}
+        slideSize={slideSize}
+        loadBackground={() => (engineRef.current?.background() as BackgroundInfo | undefined) ?? null}
+      />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}

@@ -14,11 +14,7 @@ use crate::{DrawOptions, RenderCtx, draw_shape};
 pub fn draw_slide_animated(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions, frame: &Frame) {
     let opts = &DrawOptions { slide_number: crate::slide_number(pres, slide).or(opts.slide_number), ..*opts };
     let page = Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64);
-    scene.fill(Fill::NonZero, view, crate::color(slide.background.unwrap_or(ppt_model::Color::WHITE)), None, &page);
-    scene.push_clip_layer(Fill::NonZero, view, &page);
-    for shape in &slide.background_shapes {
-        draw_shape(scene, cx, pres, shape, view, &DrawOptions { editing: false, ..*opts });
-    }
+    crate::draw_background(scene, cx, pres, slide, view, opts);
     for shape in &slide.shapes {
         let with_paras = with_paragraph_states(shape, frame);
         let shape = with_paras.as_ref().unwrap_or(shape);

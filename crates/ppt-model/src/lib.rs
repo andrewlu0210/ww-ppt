@@ -764,6 +764,26 @@ impl Shape {
     }
 }
 
+/// How a slide (or layout) background is filled.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Background {
+    Paint(Paint),
+    /// A picture stretched over the slide; `media` is a key into [`Presentation::media`].
+    Picture { media: String },
+}
+
+impl Background {
+    pub const WHITE: Background = Background::Paint(Paint::Solid(Color::WHITE));
+
+    /// A single representative color, for toolbars and places that cannot draw pictures.
+    pub fn color(&self) -> Color {
+        match self {
+            Background::Paint(p) => p.color(),
+            Background::Picture { .. } => Color::WHITE,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Slide {
     /// Index into [`Presentation::layouts`].
@@ -772,7 +792,10 @@ pub struct Slide {
     /// behind the slide content and never selectable.
     pub background_shapes: Vec<Shape>,
     pub shapes: Vec<Shape>,
-    pub background: Option<Color>,
+    /// The slide's own background (`p:bg`); `None` follows the layout.
+    pub background: Option<Background>,
+    /// Layout and master decorations are not shown (`p:sld/@showMasterSp="0"`).
+    pub hide_background_graphics: bool,
     /// Skipped in slide shows (`p:sld/@show="0"`).
     pub hidden: bool,
     /// Speaker notes as plain text, one line per paragraph.
@@ -797,6 +820,9 @@ pub struct SlideSource {
     pub timing: Option<Arc<anim::Timing>>,
     /// The layout as loaded, to tell whether another one was applied.
     pub layout: Option<usize>,
+    /// The background and background graphics setting as loaded.
+    pub background: Option<Background>,
+    pub hide_background_graphics: bool,
 }
 
 /// A slide layout: what a new slide based on it starts with.
@@ -809,7 +835,8 @@ pub struct Layout {
     pub footers: Vec<Shape>,
     /// Layout and master decorations.
     pub background_shapes: Vec<Shape>,
-    pub background: Option<Color>,
+    /// The layout's background, or the master's when it has none.
+    pub background: Option<Background>,
     /// Package part of the layout, e.g. `ppt/slideLayouts/slideLayout2.xml`.
     pub part: String,
 }
@@ -860,7 +887,7 @@ impl Presentation {
     /// A one-slide deck with a title text box, used when the app starts.
     pub fn new_blank() -> Self {
         let mut pres = Presentation::default();
-        let mut slide = Slide { background: Some(Color::WHITE), ..Default::default() };
+        let mut slide = Slide { background: Some(Background::WHITE), ..Default::default() };
         let id = pres.alloc_id();
         let mut title = Shape::new(id, "標題 1", Xfrm::new(838_200, 2_130_425, 10_515_600, 1_470_025));
         let mut body = TextBody { anchor: Anchor::Middle, ..Default::default() };
@@ -877,7 +904,7 @@ impl Presentation {
     /// A new slide based on layout `index`, with fresh shape ids.
     pub fn slide_from_layout(&mut self, index: usize) -> Slide {
         let Some(layout) = self.layouts.get(index).cloned() else {
-            return Slide { background: Some(Color::WHITE), ..Default::default() };
+            return Slide { background: Some(Background::WHITE), ..Default::default() };
         };
         let mut fresh = |shapes: Vec<Shape>| -> Vec<Shape> {
             shapes
@@ -892,7 +919,8 @@ impl Presentation {
             layout: Some(index),
             background_shapes: fresh(layout.background_shapes),
             shapes: fresh(layout.placeholders),
-            background: layout.background,
+            background: None,
+            hide_background_graphics: false,
             hidden: false,
             notes: String::new(),
             transition: None,
@@ -918,6 +946,11 @@ impl Presentation {
             ea_font: self.minor_font.1.clone(),
             ..Default::default()
         }
+    }
+
+    /// What `slide`'s background shows: its own, else its layout's, else white.
+    pub fn slide_background<'a>(&'a self, slide: &'a Slide) -> &'a Background {
+        slide.background.as_ref().or_else(|| slide.layout.and_then(|i| self.layouts.get(i)?.background.as_ref())).unwrap_or(&Background::WHITE)
     }
 
     pub fn shape(&self, slide: usize, id: ShapeId) -> Option<&Shape> {

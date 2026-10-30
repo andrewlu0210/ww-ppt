@@ -1162,3 +1162,77 @@ fn shapes_are_drawn_by_dragging_or_clicking() {
     assert!(e.undo(&mut eng) && e.undo(&mut eng));
     assert_eq!(e.pres.slides[0].shapes.len(), n);
 }
+
+#[test]
+fn backgrounds_are_set_reset_applied_to_all_and_saved() {
+    use ppt_model::Background;
+    let mut eng = engine();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    assert!(e.add_slide(&mut eng, None));
+    e.set_slide(&mut eng, 0);
+    let (_, own) = e.background().unwrap();
+    assert!(!own, "the template's slides follow their layout");
+    let red = Background::Paint(Paint::Solid(Color::rgb(0xC0, 0, 0)));
+    assert!(e.set_background(&mut eng, Some(red.clone())));
+    assert!(!e.set_background(&mut eng, Some(red.clone())), "unchanged");
+    assert!(e.set_hide_background_graphics(&mut eng, true));
+    assert_eq!(e.pres.slide_background(&e.pres.slides[1]), &Background::WHITE);
+    assert!(e.apply_background_to_all(&mut eng));
+    assert!(e.pres.slides.iter().all(|s| s.background.as_ref() == Some(&red) && s.hide_background_graphics));
+
+    // A picture on slide 2; both are written as `p:bg` and read back.
+    e.set_slide(&mut eng, 1);
+    let png = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../src-tauri/icons/32x32.png")).unwrap();
+    assert!(e.set_background_picture(&mut eng, "new/bg.png".into(), std::sync::Arc::new(png)));
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    let xml1 = zip_part(&saved, "ppt/slides/slide1.xml");
+    assert!(xml1.contains(r#"showMasterSp="0""#) && xml1.contains(r#"<p:bg><p:bgPr><a:solidFill><a:srgbClr val="C00000"/>"#), "{xml1}");
+    let re = ppt_ooxml::parse_pptx(&saved).unwrap();
+    assert_eq!(re.slides[0].background, Some(red));
+    assert!(re.slides[0].hide_background_graphics);
+    let Some(Background::Picture { media }) = &re.slides[1].background else { panic!("picture background") };
+    assert!(media.starts_with("ppt/media/") && re.media.contains_key(media));
+
+    // 重設背景: back to the layout's, and the `p:bg` goes away.
+    assert!(e.set_background(&mut eng, None));
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    assert!(!zip_part(&saved, "ppt/slides/slide2.xml").contains("<p:bg>"));
+}
+
+#[test]
+fn theme_variants_and_slide_size_restyle_the_deck() {
+    use ppt_ooxml::design;
+    let mut eng = engine();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    let before = design::theme_info(&e.pres).unwrap();
+    let green = design::COLOR_SCHEMES.iter().find(|c| c.name == "Green").unwrap();
+    let pres = design::set_color_scheme(&e.pres, green).unwrap();
+    e.replace_document(&mut eng, pres);
+    let after = design::theme_info(&e.pres).unwrap();
+    assert_eq!(after.color_scheme, "Green");
+    assert_eq!(after.colors[4], Color::rgb(0x54, 0x9E, 0x39), "accent1");
+    assert_eq!(after.font_scheme, before.font_scheme);
+
+    let arial = design::FONT_SCHEMES.iter().find(|f| f.name == "Arial").unwrap();
+    let pres = design::set_font_scheme(&e.pres, arial).unwrap();
+    e.replace_document(&mut eng, pres);
+    let t = design::theme_info(&e.pres).unwrap();
+    assert_eq!((t.major.as_str(), t.minor.as_str()), ("Arial", "Arial"));
+    assert_eq!(e.pres.minor_font.0, "Arial");
+
+    // Widescreen → 4:3, ensure fit: title placeholders shrink by 3/4 and stay on the slide.
+    let (w, h) = (e.pres.slide_width, e.pres.slide_height);
+    let title = e.pres.layouts[0].placeholders[0].clone();
+    let pres = design::set_slide_size(&e.pres, 9_144_000, 6_858_000, design::Fit::EnsureFit).unwrap();
+    e.replace_document(&mut eng, pres);
+    assert_eq!((e.pres.slide_width, e.pres.slide_height), (9_144_000, 6_858_000));
+    let s = 9_144_000.0 / w as f64;
+    let t2 = &e.pres.layouts[0].placeholders[0];
+    assert!((t2.xfrm.w as f64 - title.xfrm.w as f64 * s).abs() < 2.0, "{:?} vs {:?}", t2.xfrm, title.xfrm);
+    assert!(t2.xfrm.y as f64 >= title.xfrm.y as f64 * s, "centered vertically ({h})");
+    let size = |sh: &Shape| sh.text.as_ref().unwrap().paragraphs[0].end_style.size_pt as f64;
+    assert!((size(t2) - (size(&title) * s * 10.0).round() / 10.0).abs() < 0.11, "{} vs {}", size(t2), size(&title));
+    // One undo step back to the original size.
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.pres.slide_width, w);
+}

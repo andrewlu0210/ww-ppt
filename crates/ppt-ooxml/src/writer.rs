@@ -10,7 +10,7 @@ use std::io::{Cursor, Read, Write};
 use std::ops::Range;
 
 use ppt_model::{
-    Align, Anchor, Bullet, BulletKind, Color, Crop, Dash, EndKind, Geometry, GradientKind, Line, LineEnd, Paint, ParaDefaults, Paragraph, PathCmd, Presentation, RunStyle, Shape, ShapeKind,
+    Align, Anchor, Background, Bullet, BulletKind, Color, Crop, Dash, EndKind, Geometry, GradientKind, Line, LineEnd, Paint, ParaDefaults, Paragraph, PathCmd, Presentation, RunStyle, Shape, ShapeKind,
     ShapeSource, Slide, SlideSource, TextBody, Xfrm, ContainerSource, Link,
 };
 use roxmltree::{Document, Node};
@@ -507,7 +507,15 @@ impl MediaOut {
         }
         let bytes = pres.media.get(key)?;
         let ext = key.rsplit('.').next().filter(|e| e.len() <= 4).unwrap_or("png").to_lowercase();
-        let part = format!("ppt/media/ww-image{}.{ext}", self.parts.len() + 1);
+        // Names left by earlier saves are taken.
+        let mut n = self.parts.len() + 1;
+        let part = loop {
+            let name = format!("ppt/media/ww-image{n}.{ext}");
+            if self.taken.insert(name.clone()) {
+                break name;
+            }
+            n += 1;
+        };
         self.parts.insert(key.to_string(), part.clone());
         self.new_files.push((part.clone(), bytes.to_vec()));
         Some(part)
@@ -1037,8 +1045,10 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
         let transition = slide.transition.as_ref().map(transition_xml).unwrap_or_default();
         let ns: Vec<(String, String)> = [("a", "http://schemas.openxmlformats.org/drawingml/2006/main"), ("p", "http://schemas.openxmlformats.org/presentationml/2006/main")].iter().map(|(p, u)| (p.to_string(), u.to_string())).collect();
         let timing = edited_timing(slide, &ns, out).unwrap_or_default();
+        let bg = slide.background.as_ref().map(|b| background_xml(b, out)).unwrap_or_default();
+        let show = if slide.hide_background_graphics { r#" showMasterSp="0""# } else { "" };
         return format!(
-            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld {NS_DECLS}{extra}><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}{timing}</p:sld>"#
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld {NS_DECLS}{extra}{show}><p:cSld>{bg}<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}{timing}</p:sld>"#
         );
     };
     let doc_text = &t.doc;
@@ -1054,6 +1064,17 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
     let close = close_tag_start(doc_text, tree);
 
     let mut edits = vec![(props_end..close, shapes)];
+    // A copy written to another part rewrites its background, whose picture relationship is not carried over.
+    if slide.background != t.background || (out.part != t.part && slide.background.is_some()) {
+        let xml = slide.background.as_ref().map(|b| background_xml(b, out)).unwrap_or_default();
+        match child(root, "cSld").and_then(|c| child(c, "bg")) {
+            Some(old) => edits.push((old.range(), xml)),
+            None => edits.push((tree.range().start..tree.range().start, xml)),
+        }
+    }
+    if slide.hide_background_graphics != t.hide_background_graphics {
+        edits.push(root_attr_edit(doc_text, root, "showMasterSp", if slide.hide_background_graphics { "0" } else { "1" }));
+    }
     if slide.transition != t.transition {
         edits.push(transition_edit(doc_text, root, slide.transition.as_ref()));
     }
@@ -1084,6 +1105,32 @@ fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) 
     apply_edits(doc_text, edits)
 }
 
+/// `p:bg` with the slide's own fill.
+fn background_xml(bg: &Background, out: &mut SlideOut) -> String {
+    let fill = match bg {
+        Background::Paint(p) => fill_xml(&Some(p.clone())),
+        Background::Picture { media } => match out.media.part_for(out.pres, media) {
+            Some(part) => {
+                let rid = out.rel_for(&format!("{REL_BASE}image"), &part, false);
+                format!(r#"<a:blipFill dpi="0" rotWithShape="1"><a:blip r:embed="{rid}"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"#)
+            }
+            None => fill_xml(&Some(Paint::Solid(Color::WHITE))),
+        },
+    };
+    format!("<p:bg><p:bgPr>{fill}<a:effectLst/></p:bgPr></p:bg>")
+}
+
+/// An edit setting attribute `name` on the start tag of `n` (leaving its content alone).
+fn root_attr_edit(src: &str, n: Node, name: &str, value: &str) -> (std::ops::Range<usize>, String) {
+    let start = n.range().start;
+    let mut tag = open_tag(src, n);
+    match n.attributes().find(|a| a.name() == name && a.namespace().is_none()) {
+        Some(a) => tag.replace_range(a.range_value().start - start..a.range_value().end - start, &esc(value)),
+        None => tag.push_str(&format!(r#" {name}="{}""#, esc(value))),
+    }
+    (start..start + open_tag(src, n).len(), tag)
+}
+
 /// `p:timing` for a slide whose animations were edited (`None`: no animations).
 fn edited_timing(slide: &Slide, namespaces: &[(String, String)], out: &SlideOut) -> Option<String> {
     let timing = slide.timing.as_deref()?;
@@ -1093,7 +1140,9 @@ fn edited_timing(slide: &Slide, namespaces: &[(String, String)], out: &SlideOut)
 }
 
 fn slide_unchanged(slide: &Slide, src: &SlideSource) -> bool {
-    slide.transition == src.transition
+    slide.background == src.background
+        && slide.hide_background_graphics == src.hide_background_graphics
+        && slide.transition == src.transition
         && slide.timing == src.timing
         && slide.layout == src.layout
         && slide.shapes.len() == src.shape_ids.len()

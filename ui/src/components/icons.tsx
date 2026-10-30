@@ -8,6 +8,33 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  slideSize: (
+    <Svg>
+      <rect x="3" y="6" width="18" height="12" rx="1" />
+      <path d="M6 9v-.5h2.5M18 15v.5h-2.5" />
+    </Svg>
+  ),
+  background: (
+    <Svg>
+      <rect x="3.5" y="5" width="17" height="14" rx="1" />
+      <path d="M3.5 15.5l5-4.5 4 3.5 3-2.5 5 4" />
+      <circle cx="15.5" cy="9" r="1.5" />
+    </Svg>
+  ),
+  colors: (
+    <Svg>
+      <path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-.8 1.8-1.6 0-1.2-1-1.5-1-2.6 0-.9.7-1.6 1.7-1.6H17a3.5 3.5 0 0 0 3.5-3.5c0-4.2-3.8-7.7-8.5-7.7z" />
+      <circle cx="7.5" cy="11" r="1" />
+      <circle cx="10" cy="7.5" r="1" />
+      <circle cx="14.5" cy="7.5" r="1" />
+    </Svg>
+  ),
+  fonts: (
+    <Svg>
+      <path d="M3 18l4.5-12L12 18M4.7 13.5h5.6" />
+      <path d="M19.5 18v-5.5a2.5 2.5 0 0 0-4.5-1.5M19.5 15c-.5 2-4.5 3.5-5 1s3-2.5 5-2.5" />
+    </Svg>
+  ),
   shapes: (
     <Svg>
       <rect x="3.5" y="11" width="8.5" height="8.5" rx="0.5" />

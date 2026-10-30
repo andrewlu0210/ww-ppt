@@ -103,7 +103,7 @@ fn parses_slide_size_and_shapes() {
     assert_eq!(pres.slides.len(), 1);
     let slide = &pres.slides[0];
     assert_eq!(slide.shapes.len(), 4);
-    assert_eq!(slide.background, Some(Color::WHITE));
+    assert_eq!(pres.slide_background(slide), &ppt_model::Background::WHITE);
     // The master's non-placeholder logo is inherited; its title placeholder is not.
     assert_eq!(slide.background_shapes.len(), 1);
     assert_eq!(slide.background_shapes[0].fill, Color::from_hex("4472C4").map(ppt_model::Paint::Solid));

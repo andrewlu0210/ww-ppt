@@ -4,6 +4,7 @@
 //! screen coordinates and passes tolerances already scaled to EMU.
 
 mod anim;
+mod design;
 mod draw;
 mod find;
 mod footer;

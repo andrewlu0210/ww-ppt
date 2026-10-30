@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
 import { Popover } from "./Popover";
 
-// Office theme colors with PowerPoint's lighter/darker variations.
-const THEME = ["#FFFFFF", "#000000", "#E7E6E6", "#44546A", "#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"];
+// The deck's theme colors (Office's until a deck says otherwise) with PowerPoint's lighter/darker variations.
+let THEME = ["#FFFFFF", "#000000", "#E7E6E6", "#44546A", "#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"];
+
+/** Uses a theme's colors (dk1 lt1 dk2 lt2 accent1-6 ...) in the palette, in PowerPoint's lt1 dk1 lt2 dk2 order. */
+export function setThemePalette(colors: string[]) {
+  if (colors.length >= 10) THEME = [colors[1], colors[0], colors[3], colors[2], ...colors.slice(4, 10)];
+}
 const STANDARD = ["#C00000", "#FF0000", "#FFC000", "#FFFF00", "#92D050", "#00B050", "#00B0F0", "#0070C0", "#002060", "#7030A0"];
 
 function mix(hex: string, target: number, amount: number): string {
@@ -51,13 +56,13 @@ export function ColorPicker({ icon, label, value, disabled, noneLabel, onPick }:
           <div className="color-panel" onMouseDown={(e) => e.preventDefault()}>
             <div className="color-heading">佈景主題色彩</div>
             <div className="color-grid">
-              {THEME.map((c) => (
-                <button key={c} className="swatch" style={{ background: c }} title={c} onClick={() => pick(c)} />
+              {THEME.map((c, i) => (
+                <button key={i} className="swatch" style={{ background: c }} title={c} onClick={() => pick(c)} />
               ))}
               {VARIANTS.flatMap((v, row) =>
-                THEME.map((c) => {
+                THEME.map((c, i) => {
                   const shade = v(c);
-                  return <button key={`${row}-${c}`} className="swatch" style={{ background: shade }} title={shade} onClick={() => pick(shade)} />;
+                  return <button key={`${row}-${i}`} className="swatch" style={{ background: shade }} title={shade} onClick={() => pick(shade)} />;
                 }),
               )}
             </div>

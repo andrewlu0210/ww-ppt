@@ -13,7 +13,8 @@ use ppt_editor::show::{Blank, Screen, SlideShow};
 use ppt_model::anim::{PRESETS, Player, SlideStage, Trigger, effect_elements};
 use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, FindMatch, FindOptions, FindPlace, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
-use ppt_model::{Align, Color, EMU_PER_PT, Presentation};
+use ppt_model::{Align, Background, Color, EMU_PER_PT, Gradient, GradientKind, Paint, Presentation};
+use ppt_ooxml::design;
 use ppt_render::vello::kurbo::{Affine, Point, Rect, Vec2};
 use ppt_render::vello::peniko::Color as PColor;
 use ppt_render::vello::util::{RenderContext, RenderSurface};
@@ -1275,6 +1276,166 @@ impl App {
         self.touch(changed)
     }
 
+    // --- Design -----------------------------------------------------------------------
+
+    /// The current slide's background: `{ kind: "solid" | "gradient" | "picture", color,
+    /// colors: [start, end], radial, angle, own, hideGraphics }`.
+    pub fn background(&self) -> Object {
+        let o = Object::new();
+        let Some((bg, own)) = self.editor.background() else { return o };
+        let (kind, colors, radial, angle) = match bg {
+            Background::Paint(Paint::Solid(c)) => ("solid", vec![*c, *c], false, 90.0),
+            Background::Paint(Paint::Gradient(g)) => {
+                let first = g.stops.first().map_or(Color::WHITE, |s| s.1);
+                let last = g.stops.last().map_or(Color::WHITE, |s| s.1);
+                match g.kind {
+                    GradientKind::Linear { angle, .. } => ("gradient", vec![first, last], false, angle),
+                    GradientKind::Path { .. } => ("gradient", vec![first, last], true, 0.0),
+                }
+            }
+            Background::Picture { .. } => ("picture", vec![Color::WHITE, Color::WHITE], false, 90.0),
+        };
+        let hide = self.editor.pres.slides.get(self.editor.slide).is_some_and(|s| s.hide_background_graphics);
+        let _ = Reflect::set(&o, &"kind".into(), &kind.into());
+        let _ = Reflect::set(&o, &"color".into(), &hex(bg.color()).into());
+        let _ = Reflect::set(&o, &"colors".into(), &colors.iter().map(|c| JsValue::from(hex(*c))).collect::<Array>());
+        let _ = Reflect::set(&o, &"radial".into(), &radial.into());
+        let _ = Reflect::set(&o, &"angle".into(), &angle.into());
+        let _ = Reflect::set(&o, &"own".into(), &own.into());
+        let _ = Reflect::set(&o, &"hideGraphics".into(), &hide.into());
+        o
+    }
+
+    /// Fills the current slide's background with one color.
+    #[wasm_bindgen(js_name = setBackgroundSolid)]
+    pub fn set_background_solid(&mut self, color: &str) -> bool {
+        let Some(c) = parse_hex(color) else { return false };
+        let changed = self.editor.set_background(&mut self.engine, Some(Background::Paint(Paint::Solid(c))));
+        self.touch(changed)
+    }
+
+    /// A two-color gradient background: linear at `angle` degrees, or radial from the center.
+    #[wasm_bindgen(js_name = setBackgroundGradient)]
+    pub fn set_background_gradient(&mut self, start: &str, end: &str, radial: bool, angle: f64) -> bool {
+        let (Some(a), Some(b)) = (parse_hex(start), parse_hex(end)) else { return false };
+        let kind = if radial { GradientKind::Path { circle: true, focus: [0.5; 4] } } else { GradientKind::Linear { angle, scaled: false } };
+        let g = Gradient { stops: vec![(0.0, a), (1.0, b)], kind, rotate_with_shape: true };
+        let changed = self.editor.set_background(&mut self.engine, Some(Background::Paint(Paint::Gradient(Arc::new(g)))));
+        self.touch(changed)
+    }
+
+    /// A picture background from an image file. Returns false if it cannot be decoded.
+    #[wasm_bindgen(js_name = setBackgroundPicture)]
+    pub fn set_background_picture(&mut self, bytes: Vec<u8>, ext: &str) -> bool {
+        if image_size(&bytes).is_none() {
+            return false;
+        }
+        self.media_counter += 1;
+        let key = format!("new/image{}.{}", self.media_counter, ext.to_lowercase());
+        let changed = self.editor.set_background_picture(&mut self.engine, key, Arc::new(bytes));
+        self.touch(changed)
+    }
+
+    /// The current slide follows its layout's background again (重設背景).
+    #[wasm_bindgen(js_name = resetBackground)]
+    pub fn reset_background(&mut self) -> bool {
+        let changed = self.editor.set_background(&mut self.engine, None);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = setHideBackgroundGraphics)]
+    pub fn set_hide_background_graphics(&mut self, hide: bool) -> bool {
+        let changed = self.editor.set_hide_background_graphics(&mut self.engine, hide);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = applyBackgroundToAll)]
+    pub fn apply_background_to_all(&mut self) -> bool {
+        let changed = self.editor.apply_background_to_all(&mut self.engine);
+        self.touch(changed)
+    }
+
+    /// The deck's theme: `{ colorScheme, colors: [12 hex in dk1 lt1 dk2 lt2 accent1-6 hlink folHlink order], fontScheme, major, minor }`, or null.
+    #[wasm_bindgen(js_name = themeInfo)]
+    pub fn theme_info(&self) -> JsValue {
+        let Some(t) = design::theme_info(&self.editor.pres) else { return JsValue::NULL };
+        let o = Object::new();
+        let _ = Reflect::set(&o, &"colorScheme".into(), &t.color_scheme.into());
+        let _ = Reflect::set(&o, &"colors".into(), &t.colors.iter().map(|c| JsValue::from(hex(*c))).collect::<Array>());
+        let _ = Reflect::set(&o, &"fontScheme".into(), &t.font_scheme.into());
+        let _ = Reflect::set(&o, &"major".into(), &t.major.into());
+        let _ = Reflect::set(&o, &"minor".into(), &t.minor.into());
+        o.into()
+    }
+
+    /// Built-in color variants: `[{ name, label, colors: [10 hex: dk2 lt2 accent1-6 hlink folHlink] }]`.
+    #[wasm_bindgen(js_name = colorSchemes)]
+    pub fn color_schemes(&self) -> Array {
+        design::COLOR_SCHEMES
+            .iter()
+            .map(|cs| {
+                let o = Object::new();
+                let _ = Reflect::set(&o, &"name".into(), &cs.name.into());
+                let _ = Reflect::set(&o, &"label".into(), &cs.label.into());
+                let colors: Array = cs.colors.iter().map(|v| JsValue::from(format!("#{v:06X}"))).collect();
+                let _ = Reflect::set(&o, &"colors".into(), &colors);
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
+    /// Built-in font variants: `[{ name, major, minor }]`.
+    #[wasm_bindgen(js_name = fontSchemes)]
+    pub fn font_schemes(&self) -> Array {
+        design::FONT_SCHEMES
+            .iter()
+            .map(|fs| {
+                let o = Object::new();
+                let _ = Reflect::set(&o, &"name".into(), &fs.name.into());
+                let _ = Reflect::set(&o, &"major".into(), &fs.major.into());
+                let _ = Reflect::set(&o, &"minor".into(), &fs.minor.into());
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
+    fn restyle(&mut self, pres: Result<Presentation, ppt_ooxml::Error>) -> Result<bool, JsValue> {
+        let pres = pres.map_err(js_err)?;
+        self.editor.replace_document(&mut self.engine, pres);
+        // Media keys are renamed by the save the restyle went through.
+        self.images.clear();
+        Ok(self.touch(true))
+    }
+
+    #[wasm_bindgen(js_name = setColorScheme)]
+    pub fn set_color_scheme(&mut self, name: &str) -> Result<bool, JsValue> {
+        let Some(cs) = design::COLOR_SCHEMES.iter().find(|c| c.name == name) else { return Ok(false) };
+        let pres = design::set_color_scheme(&self.editor.pres, cs);
+        self.restyle(pres)
+    }
+
+    #[wasm_bindgen(js_name = setFontScheme)]
+    pub fn set_font_scheme(&mut self, name: &str) -> Result<bool, JsValue> {
+        let Some(fs) = design::FONT_SCHEMES.iter().find(|f| f.name == name) else { return Ok(false) };
+        let pres = design::set_font_scheme(&self.editor.pres, fs);
+        self.restyle(pres)
+    }
+
+    /// Changes the slide size (EMU). `fit`: "maximize" or "fit" (ensure fit).
+    #[wasm_bindgen(js_name = setSlideSize)]
+    pub fn set_slide_size(&mut self, width: f64, height: f64, fit: &str) -> Result<bool, JsValue> {
+        let (w, h) = (width.round() as i64, height.round() as i64);
+        if !(914_400 / 2..=51_206_400).contains(&w) || !(914_400 / 2..=51_206_400).contains(&h) {
+            return Err(JsValue::from_str("投影片大小必須介於 1.27 到 142.24 公分之間"));
+        }
+        if (w, h) == (self.editor.pres.slide_width, self.editor.pres.slide_height) {
+            return Ok(false);
+        }
+        let fit = if fit == "maximize" { design::Fit::Maximize } else { design::Fit::EnsureFit };
+        let pres = design::set_slide_size(&self.editor.pres, w, h, fit);
+        self.restyle(pres)
+    }
+
     /// Inserts `text` at the caret, or as a new text box when no text is being edited.
     #[wasm_bindgen(js_name = insertSymbol)]
     pub fn insert_symbol(&mut self, text: &str) -> bool {
@@ -1763,7 +1924,7 @@ impl App {
             pres.layouts.get(index).map(|l| ppt_model::Slide {
                 background_shapes: l.background_shapes.clone(),
                 shapes: l.placeholders.clone(),
-                background: l.background,
+                background: l.background.clone(),
                 ..Default::default()
             })
         } else {

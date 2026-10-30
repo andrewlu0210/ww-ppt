@@ -10,7 +10,7 @@ use std::sync::Arc;
 use parley::{Layout, PositionedLayoutItem};
 use ppt_geometry::{Shade, TextFrame, outlines, shape_affine, text_affine, text_width_pt};
 use ppt_model::table::CellLook;
-use ppt_model::{Color, Gradient, GradientKind, Paint, Presentation, Shape, ShapeId, ShapeKind, Slide, Table, TextBody, Xfrm};
+use ppt_model::{Background, Color, Gradient, GradientKind, Paint, Presentation, Shape, ShapeId, ShapeKind, Slide, Table, TextBody, Xfrm};
 use ppt_text::{BodyLayout, TextEngine};
 use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Cap, Circle, Line, ParamCurve, PathEl, PathSeg, Point, Rect, Shape as _, Stroke, Vec2};
@@ -265,16 +265,35 @@ pub fn slide_number(pres: &Presentation, slide: &Slide) -> Option<usize> {
 /// Draws the whole slide.
 pub fn draw_slide(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions) {
     let opts = &DrawOptions { slide_number: slide_number(pres, slide).or(opts.slide_number), ..*opts };
-    let page = Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64);
-    scene.fill(Fill::NonZero, view, color(slide.background.unwrap_or(Color::WHITE)), None, &page);
-    scene.push_clip_layer(Fill::NonZero, view, &page);
-    for shape in &slide.background_shapes {
-        draw_shape(scene, cx, pres, shape, view, &DrawOptions { editing: false, ..*opts });
-    }
+    draw_background(scene, cx, pres, slide, view, opts);
     for shape in &slide.shapes {
         draw_shape(scene, cx, pres, shape, view, opts);
     }
     scene.pop_layer();
+}
+
+/// Fills the page with the slide's background and draws the layout's
+/// decorations, leaving a clip layer to the page pushed.
+pub fn draw_background(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions) {
+    let (w, h) = (pres.slide_width as f64, pres.slide_height as f64);
+    let page = Rect::new(0.0, 0.0, w, h);
+    scene.fill(Fill::NonZero, view, color(Color::WHITE), None, &page);
+    scene.push_clip_layer(Fill::NonZero, view, &page);
+    match pres.slide_background(slide) {
+        Background::Paint(paint) => fill_paint(scene, view, paint, w, h, &page),
+        Background::Picture { media } => {
+            if let Some(img) = cx.images.get(pres, media).filter(|i| i.width > 0 && i.height > 0) {
+                let place = Affine::scale_non_uniform(w / img.width as f64, h / img.height as f64);
+                let encoded = pres.media.get(media).map(|b| b.as_slice());
+                scene.draw_image_data(&img.clone(), encoded, view * place);
+            }
+        }
+    }
+    if !slide.hide_background_graphics {
+        for shape in &slide.background_shapes {
+            draw_shape(scene, cx, pres, shape, view, &DrawOptions { editing: false, ..*opts });
+        }
+    }
 }
 
 const FRAME: PColor = PColor::from_rgba8(0xA6, 0xA6, 0xA6, 255);

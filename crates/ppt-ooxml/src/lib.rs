@@ -5,6 +5,7 @@
 
 mod anim;
 mod chart;
+pub mod design;
 mod notes;
 mod package;
 mod style;
@@ -24,7 +25,7 @@ use std::sync::Arc;
 
 use package::{Package, REL_NS, Rel};
 use ppt_model::{
-    Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
+    Background, Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
     PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
 use ppt_model::table::TableStyle;
@@ -70,7 +71,7 @@ struct Master {
     ctx: ColorCtx,
     phs: Vec<PhInfo>,
     shapes: Vec<Shape>,
-    bg: Option<Color>,
+    bg: Option<Background>,
     title: ListStyle,
     body: ListStyle,
     other: ListStyle,
@@ -83,7 +84,6 @@ struct Layout {
     master: Rc<Master>,
     phs: Vec<PhInfo>,
     shapes: Vec<Shape>,
-    bg: Option<Color>,
     show_master_shapes: bool,
 }
 
@@ -245,7 +245,8 @@ impl Parser<'_> {
             .unwrap_or_default();
         let ctx = ColorCtx { theme, clr_map };
         let tx = child(root, "txStyles");
-        let pres_doc = parse_xml(&self.pres_xml)?;
+        let pres_xml = self.pres_xml.clone();
+        let pres_doc = parse_xml(&pres_xml)?;
         let rels = self.pkg.rels(part);
         let layout_parts = child(root, "sldLayoutIdLst")
             .map(|l| {
@@ -259,7 +260,7 @@ impl Parser<'_> {
             layout_parts,
             phs: placeholders(root, &ctx),
             shapes: Vec::new(),
-            bg: background(root, &ctx),
+            bg: self.background(root, &ctx, &rels),
             title: ListStyle::parse(tx.and_then(|t| child(t, "titleStyle")), &ctx),
             body: ListStyle::parse(tx.and_then(|t| child(t, "bodyStyle")), &ctx),
             other: ListStyle::parse(tx.and_then(|t| child(t, "otherStyle")), &ctx),
@@ -317,7 +318,7 @@ impl Parser<'_> {
             }
         }
         let show_master_shapes = attr_bool(root, "showMasterSp").unwrap_or(true);
-        let bg = background(root, &master.ctx);
+        let bg = self.background(root, &master.ctx, &rels);
         let mut background_shapes = if show_master_shapes { master.shapes.clone() } else { Vec::new() };
         background_shapes.extend(shapes.iter().cloned());
         let index = self.pres.layouts.len();
@@ -326,10 +327,10 @@ impl Parser<'_> {
             placeholders: prototypes,
             footers,
             background_shapes,
-            background: bg.or(master.bg).or(Some(Color::WHITE)),
+            background: bg.clone().or_else(|| master.bg.clone()).or(Some(Background::WHITE)),
             part: part.to_string(),
         });
-        let layout = Rc::new(Layout { index, bg, show_master_shapes, master, phs, shapes });
+        let layout = Rc::new(Layout { index, show_master_shapes, master, phs, shapes });
         self.layouts.insert(part.to_string(), layout.clone());
         Ok(layout)
     }
@@ -344,20 +345,20 @@ impl Parser<'_> {
         let rels = self.pkg.rels(part);
         let src = SourceCx::new(part, xml.clone(), root);
 
+        let show_master = attr_bool(root, "showMasterSp").unwrap_or(true);
         let mut slide = Slide {
             layout: Some(layout.index),
-            background: background(root, &master.ctx).or(layout.bg).or(master.bg).or(Some(Color::WHITE)),
+            background: self.background(root, &master.ctx, &rels),
+            hide_background_graphics: !show_master,
             hidden: attr_bool(root, "show") == Some(false),
             transition: transition::parse(root),
             ..Default::default()
         };
-        let show_master = attr_bool(root, "showMasterSp").unwrap_or(true);
-        if show_master && layout.show_master_shapes {
+        // Kept even when hidden, so showing them again needs no layout lookup.
+        if layout.show_master_shapes {
             slide.background_shapes.extend(master.shapes.iter().cloned());
         }
-        if show_master {
-            slide.background_shapes.extend(layout.shapes.iter().cloned());
-        }
+        slide.background_shapes.extend(layout.shapes.iter().cloned());
         if let Some(tree) = path(root, &["cSld", "spTree"]) {
             let cx = ShapeCx { master: &master, ph_chain: vec![&layout.phs, &master.phs], rels: &rels, source: Some(&src) };
             let mut shapes = Vec::new();
@@ -381,8 +382,49 @@ impl Parser<'_> {
             transition: slide.transition.clone(),
             timing: slide.timing.clone(),
             layout: slide.layout,
+            background: slide.background.clone(),
+            hide_background_graphics: slide.hide_background_graphics,
         }));
         Ok(slide)
+    }
+
+    /// The part's own background (`p:cSld/p:bg`).
+    fn background(&mut self, root: Node, ctx: &ColorCtx, rels: &HashMap<String, Rel>) -> Option<Background> {
+        let bg = path(root, &["cSld", "bg"])?;
+        if let Some(pr) = child(bg, "bgPr") {
+            if let Some(blip) = path(pr, &["blipFill", "blip"]) {
+                let media = blip.attribute((REL_NS, "embed")).and_then(|id| rels.get(id)).map(|r| r.target.clone())?;
+                if !self.pres.media.contains_key(&media) {
+                    let bytes = self.pkg.read_bytes(&media).ok()?;
+                    self.pres.media.insert(media.clone(), Arc::new(bytes));
+                }
+                return Some(Background::Picture { media });
+            }
+            return match fill_spec(pr, ctx) {
+                FillSpec::Paint(p) => Some(Background::Paint(p)),
+                _ => None,
+            };
+        }
+        // Theme background styles: 1001 and up index `a:bgFillStyleLst`.
+        let r = child(bg, "bgRef")?;
+        let ph = ctx.color_in(r, None);
+        let idx = attr_i64(r, "idx").unwrap_or(0);
+        let paint = ctx
+            .theme
+            .bg_fill_styles
+            .get((idx - 1001).max(0) as usize)
+            .filter(|_| idx > 1000)
+            .and_then(|xml| {
+                let doc = Document::parse(xml).ok()?;
+                let fill = doc.root_element().first_element_child()?;
+                match fill.tag_name().name() {
+                    "solidFill" => ctx.color_in(fill, ph).map(Paint::Solid),
+                    "gradFill" => gradient(fill, ctx, ph).map(|g| Paint::Gradient(Arc::new(g))),
+                    _ => None,
+                }
+            })
+            .or_else(|| ph.map(Paint::Solid));
+        paint.map(Background::Paint)
     }
 
     /// Collects drawable shapes from `p:spTree` / `p:grpSp`. On layouts and
@@ -763,16 +805,6 @@ fn placeholders(root: Node, ctx: &ColorCtx) -> Vec<PhInfo> {
         .collect()
 }
 
-fn background(root: Node, ctx: &ColorCtx) -> Option<Color> {
-    let bg = path(root, &["cSld", "bg"])?;
-    if let Some(pr) = child(bg, "bgPr") {
-        return match fill_spec(pr, ctx) {
-            FillSpec::Paint(p) => Some(p.color()),
-            _ => None,
-        };
-    }
-    child(bg, "bgRef").and_then(|r| ctx.color_in(r, None))
-}
 
 fn parse_xfrm(x: Node) -> Option<Xfrm> {
     let off = child(x, "off")?;

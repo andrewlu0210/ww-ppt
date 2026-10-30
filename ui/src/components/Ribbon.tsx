@@ -11,6 +11,7 @@ import { PictureFormatTab, RotateMenu, ShadowMenu, SizeGroup } from "./FormatGro
 import { ShapeGallery, type PresetIcon } from "./ShapeGallery";
 import { HeaderFooterDialog, type HeaderFooterInfo } from "./HeaderFooterDialog";
 import { SymbolPicker } from "./SymbolPicker";
+import { DesignTab, type BackgroundInfo, type ColorSchemeInfo, type FontSchemeInfo, type ThemeInfo } from "./DesignTab";
 import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { AnimationPreset, Status } from "../lib/status";
@@ -30,7 +31,7 @@ const ANCHORS = [
   ["bottom", "anchorBottom", "下"],
 ] as const;
 
-const TABS = ["常用", "插入", "圖形格式", "轉場", "動畫", "投影片放映", "校閱", "檢視"] as const;
+const TABS = ["常用", "插入", "設計", "圖形格式", "轉場", "動畫", "投影片放映", "校閱", "檢視"] as const;
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
 const TABLE_TABS = ["表格設計", "版面配置"] as const;
 const PICTURE_TAB = "圖片格式" as const;
@@ -92,9 +93,14 @@ interface Props {
   shapeIcons: Map<string, PresetIcon>;
   /** The current slide's footer items, read when the dialog opens. */
   loadHeaderFooter: () => HeaderFooterInfo | null;
+  theme: ThemeInfo | null;
+  colorSchemes: ColorSchemeInfo[];
+  fontSchemes: FontSchemeInfo[];
+  slideSize: [number, number];
+  loadBackground: () => BackgroundInfo | null;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -482,6 +488,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
             </Group>
           </>
         )}
+        {tab === "設計" && <DesignTab theme={theme} colorSchemes={colorSchemes} fontSchemes={fontSchemes} slideSize={slideSize} loadBackground={loadBackground} run={run} />}
         {tab === "表格設計" && <TableDesignTab status={status} styles={tableStyles} run={run} />}
         {tab === "版面配置" && <TableLayoutTab status={status} run={run} />}
         {tab === "轉場" && <TransitionTab status={status} run={run} />}

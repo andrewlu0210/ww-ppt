@@ -50,6 +50,15 @@ export type Command =
   | { kind: "drawTool"; tool: string }
   | { kind: "headerFooter"; date: "none" | "auto" | "fixed"; dateText: string; slideNumber: boolean; footer: boolean; footerText: string; skipTitle: boolean; all: boolean }
   | { kind: "insertSymbol"; text: string }
+  | { kind: "background"; fill: "solid"; color: string }
+  | { kind: "background"; fill: "gradient"; start: string; end: string; radial: boolean; angle: number }
+  | { kind: "backgroundPicture" }
+  | { kind: "resetBackground" }
+  | { kind: "hideBackgroundGraphics"; on: boolean }
+  | { kind: "backgroundToAll" }
+  | { kind: "colorScheme"; name: string }
+  | { kind: "fontScheme"; name: string }
+  | { kind: "slideSize"; width: number; height: number; fit: "maximize" | "fit" }
   | { kind: "fontSize"; size: number }
   | { kind: "fontStep"; up: boolean }
   | { kind: "fontFamily"; family: string }

@@ -1,6 +1,6 @@
 //! Applying a layout to a slide, and resetting a slide to its layout.
 
-use ppt_model::{Color, Placeholder, Shape, ShapeKind};
+use ppt_model::{Placeholder, Shape, ShapeKind};
 use ppt_text::TextEngine;
 
 use crate::Editor;
@@ -103,10 +103,6 @@ impl Editor {
             keep
         });
         slide.shapes.extend(added);
-        let old_bg = old.as_ref().and_then(|l| l.background).unwrap_or(Color::WHITE);
-        if slide.background.unwrap_or(Color::WHITE) == old_bg {
-            slide.background = new.background;
-        }
         slide.background_shapes = background;
         slide.layout = Some(index);
         self.selection.clear();
