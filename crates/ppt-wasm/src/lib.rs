@@ -2261,6 +2261,20 @@ impl App {
         vec![self.editor.pres.slide_width as f64, self.editor.pres.slide_height as f64]
     }
 
+    /// Prepares slide `index` for display at the current zoom without drawing it:
+    /// its images are decoded at the size the editor shows them, so switching to
+    /// it later is quick. Call when idle.
+    #[wasm_bindgen(js_name = prefetchSlide)]
+    pub fn prefetch_slide(&mut self, index: usize) {
+        let (s, view) = (self.scale(), self.view());
+        let pres = &self.editor.pres;
+        let Some(slide) = pres.slides.get(index) else { return };
+        let mut scene = Scene::new();
+        let opts = DrawOptions { editing: true, emu_per_px: 1.0 / s, ..Default::default() };
+        let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+        draw_slide(&mut scene, &mut cx, pres, slide, view, &opts);
+    }
+
     /// Renders slide `index` (or layout `index` when `layout` is true) at `width` px.
     /// Resolves with `{ width, height, pixels }` (RGBA).
     #[wasm_bindgen(js_name = renderThumbnail)]

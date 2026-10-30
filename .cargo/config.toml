@@ -1,0 +1,4 @@
+# WebAssembly SIMD (WebKit has it since Safari 16.4): faster image decoding,
+# resizing and rendering in the editor.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

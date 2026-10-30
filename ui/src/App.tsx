@@ -242,52 +242,174 @@ export function App() {
   dirtyRef.current = dirty;
 
   // --- Thumbnails -------------------------------------------------------------
-  const thumbState = useRef({ revision: -1, count: -1, pendingAll: false, timer: 0, running: false });
-  const renderThumbs = useCallback(async (indices: number[]) => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    const t0 = performance.now();
-    let slowest = 0;
-    for (const i of indices) {
-      const ts = performance.now();
-      try {
-        const t = (await engine.renderThumbnail(i, THUMB_WIDTH, false)) as { width: number; height: number; pixels: Uint8Array };
-        const image = new ImageData(new Uint8ClampedArray(t.pixels), t.width, t.height);
-        setThumbs((prev) => new Map(prev).set(i, image));
-      } catch {
-        // The slide may have been deleted while rendering.
-      }
-      slowest = Math.max(slowest, performance.now() - ts);
-    }
-    if (indices.length > 1) {
-      mark(`thumbnails: ${indices.length} slides`, performance.now() - t0);
-      mark("thumbnails: slowest one", slowest);
-    }
+  // Slide thumbnails are rendered one at a time from a queue of stale slides,
+  // nearest the user's attention first, in between interaction.
+  const thumbState = useRef({
+    revision: -1,
+    count: -1,
+    timer: 0,
+    /** A refresh of every thumbnail is waiting for the timer. */
+    pendingAll: false,
+    /** Slides whose thumbnail is out of date. */
+    stale: new Set<number>(),
+    running: false,
+    /** While a document opens its fonts load: thumbnails wait for them. */
+    held: false,
+    /** Thumbnails rendered and the slowest, since the queue last ran dry. */
+    done: 0,
+    slowest: 0,
+    started: 0,
+  });
+  /** When the user last pressed a pointer or key: thumbnails stay out of the way for a moment. */
+  const lastInput = useRef(0);
+  const pointerDown = useRef(false);
+  useEffect(() => {
+    const busy = () => (lastInput.current = performance.now());
+    const down = () => {
+      pointerDown.current = true;
+      busy();
+    };
+    const up = () => {
+      pointerDown.current = false;
+      busy();
+    };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("keydown", busy, true);
+    window.addEventListener("wheel", busy, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("keydown", busy, true);
+      window.removeEventListener("wheel", busy, true);
+    };
   }, []);
 
-  /** Re-renders the current slide's thumbnail, or all of them, shortly after edits settle. */
+  /** The next stale slide: the current one, then those on screen in the slide pane or sorter, then outwards. */
+  const nextThumb = useCallback((stale: Set<number>, current: number): number | undefined => {
+    if (stale.has(current)) return current;
+    const list = document.querySelector(".slide-sorter") ?? document.querySelector(".slide-pane");
+    const items = list ? Array.from(list.querySelectorAll<HTMLElement>(".sorter-item, .slide-item")) : [];
+    const view = list?.getBoundingClientRect();
+    if (view) {
+      const shown = items.findIndex((el, i) => {
+        if (!stale.has(i)) return false;
+        const r = el.getBoundingClientRect();
+        return r.bottom > view.top && r.top < view.bottom;
+      });
+      if (shown >= 0) return shown;
+    }
+    let best: number | undefined;
+    for (const i of stale) if (best === undefined || Math.abs(i - current) < Math.abs(best - current)) best = i;
+    return best;
+  }, []);
+
+  const pumpThumbs = useCallback(async () => {
+    const st = thumbState.current;
+    if (st.running) return;
+    st.running = true;
+    try {
+      while (st.stale.size > 0 && !st.held) {
+        // Give way to dragging, typing and scrolling.
+        while (pointerDown.current || performance.now() - lastInput.current < 300) await new Promise((r) => setTimeout(r, 100));
+        const engine = engineRef.current;
+        if (!engine || st.held) break;
+        const s = engine.status() as Status;
+        for (const i of st.stale) if (i >= s.slideCount) st.stale.delete(i);
+        const i = nextThumb(st.stale, s.slideIndex);
+        if (i === undefined) break;
+        st.stale.delete(i);
+        if (st.done === 0) st.started = performance.now();
+        const ts = performance.now();
+        try {
+          const t = (await engine.renderThumbnail(i, THUMB_WIDTH, false)) as { width: number; height: number; pixels: Uint8Array };
+          const image = new ImageData(new Uint8ClampedArray(t.pixels), t.width, t.height);
+          setThumbs((prev) => new Map(prev).set(i, image));
+        } catch {
+          // The slide may have been deleted while rendering.
+        }
+        st.done++;
+        st.slowest = Math.max(st.slowest, performance.now() - ts);
+        // Let input and painting run before the next one.
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    } finally {
+      st.running = false;
+    }
+    if (st.stale.size === 0 && st.done > 1) {
+      mark(`thumbnails: ${st.done} slides`, performance.now() - st.started);
+      mark("thumbnails: slowest one", st.slowest);
+    }
+    if (st.stale.size === 0) {
+      st.done = 0;
+      st.slowest = 0;
+    }
+  }, [nextThumb]);
+
+  // When idle, the slides next to the current one are prepared (their images
+  // decoded at screen size), so moving to them does not stall.
+  const prefetched = useRef({ revision: -1, slides: new Set<number>() });
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || status.slideCount === 0) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const p = prefetched.current;
+      if (p.revision !== status.revision) {
+        p.revision = status.revision;
+        p.slides.clear();
+      }
+      for (const i of [status.slideIndex + 1, status.slideIndex - 1]) {
+        // Wait for quiet: no input and no thumbnails being drawn.
+        while (!cancelled && (pointerDown.current || performance.now() - lastInput.current < 400 || thumbState.current.running)) await new Promise((r) => setTimeout(r, 150));
+        if (cancelled) return;
+        if (i < 0 || i >= status.slideCount || p.slides.has(i)) continue;
+        p.slides.add(i);
+        await timed(`prefetch slide ${i + 1}`, () => engine.prefetchSlide(i));
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [status.slideIndex, status.slideCount, status.revision]);
+
+  /** Marks the current slide's thumbnail (or all of them) stale, shortly after edits settle. */
   const scheduleThumbs = useCallback(
     (all: boolean) => {
       const st = thumbState.current;
       st.pendingAll ||= all;
       window.clearTimeout(st.timer);
-      st.timer = window.setTimeout(async () => {
+      st.timer = window.setTimeout(() => {
         const engine = engineRef.current;
         if (!engine) return;
         const s = engine.status() as Status;
+        // A different slide count shifts every index.
         const everything = st.pendingAll || s.slideCount !== st.count;
         st.pendingAll = false;
+        if (!everything && s.revision === st.revision) return;
         st.count = s.slideCount;
         st.revision = s.revision;
         if (everything) {
           setThumbs((prev) => new Map([...prev].filter(([i]) => i < s.slideCount)));
-          await renderThumbs(Array.from({ length: s.slideCount }, (_, i) => i));
+          for (let i = 0; i < s.slideCount; i++) st.stale.add(i);
         } else {
-          await renderThumbs([s.slideIndex]);
+          st.stale.add(s.slideIndex);
         }
-      }, all ? 30 : 250);
+        void pumpThumbs();
+      }, st.pendingAll ? 30 : 250);
     },
-    [renderThumbs],
+    [pumpThumbs],
+  );
+
+  /** Holds thumbnails back (while a document's fonts load) and lets them go again. */
+  const holdThumbs = useCallback(
+    (held: boolean) => {
+      thumbState.current.held = held;
+      if (!held) void pumpThumbs();
+    },
+    [pumpThumbs],
   );
 
   // Coalesce status reads to one per animation frame.
@@ -393,13 +515,15 @@ export function App() {
       const engine = engineRef.current;
       if (!engine) return;
       setFontsLoading(true);
+      let added = 0;
       try {
-        await ensureFonts(engine, families, refresh);
+        added = await ensureFonts(engine, families, refresh);
       } catch (e) {
         console.error("font loading failed", e);
       } finally {
         setFontsLoading(false);
-        scheduleThumbs(true);
+        // New fonts change how text looks: thumbnails drawn before are out of date.
+        if (added > 0) scheduleThumbs(true);
       }
     },
     [refresh, scheduleThumbs],
@@ -438,11 +562,17 @@ export function App() {
       setLayoutThumbs([]);
       setThumbs(new Map());
       refresh();
+      // Thumbnails drawn before the deck's fonts are in would be redone: wait for them.
+      holdThumbs(true);
       scheduleThumbs(true);
-      await timed("open: theme info", () => deckStyleChanged());
-      await timed("open: fonts", () => loadFonts(engine.fontFamilies() as string[]));
+      try {
+        await timed("open: theme info", () => deckStyleChanged());
+        await timed("open: fonts", () => loadFonts(engine.fontFamilies() as string[]));
+      } finally {
+        holdThumbs(false);
+      }
     },
-    [deckStyleChanged, loadFonts, refresh, scheduleThumbs],
+    [deckStyleChanged, holdThumbs, loadFonts, refresh, scheduleThumbs],
   );
 
   // --- Documents ----------------------------------------------------------------

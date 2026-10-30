@@ -20,8 +20,10 @@ const states = new WeakMap<App, FontState>();
 
 /// Makes sure every family in `families` (or its substitute) is registered.
 /// Calls `onProgress` after each newly registered file so the canvas can repaint.
-export async function ensureFonts(app: App, families: string[], onProgress?: () => void): Promise<void> {
-  if (!inTauri) return;
+/// Returns how many font files were newly registered.
+export async function ensureFonts(app: App, families: string[], onProgress?: () => void): Promise<number> {
+  if (!inTauri) return 0;
+  let added = 0;
   let state = states.get(app);
   if (!state) {
     state = { loadedPaths: new Set(), resolved: new Map() };
@@ -41,9 +43,11 @@ export async function ensureFonts(app: App, families: string[], onProgress?: () 
       const bytes = await readFont(path);
       const read = performance.now() - t;
       app.registerFont(bytes);
+      added++;
       mark(`font ${path.split("/").pop()} (${(bytes.length / 1e6).toFixed(1)} MB): read ${read.toFixed(0)} + register`, performance.now() - t);
       onProgress?.();
     }
     if (font.family.toLowerCase() !== key) app.setFontAlias(requested, font.family);
   }
+  return added;
 }
