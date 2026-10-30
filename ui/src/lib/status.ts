@@ -12,6 +12,8 @@ export interface Status {
   /** Bumped when a SmartArt is double-clicked: open its text pane at `diagramFocus`. */
   diagramRequests?: number;
   diagramFocus?: number;
+  /** UTF-16 range to select in that row (a find match). */
+  diagramRange?: [number, number];
   canGroup?: boolean;
   canMerge?: boolean;
   tableStyle?: string;

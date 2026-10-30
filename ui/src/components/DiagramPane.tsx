@@ -22,6 +22,8 @@ interface Props {
   onRow: (row: number) => void;
   /** Bumped to move keyboard focus to `row` (a double-click on the SmartArt). */
   focusRequest: number;
+  /** Text to select in `row` on a focus request (a find match): focus then stays in the find bar. */
+  focusRange: [number, number] | null;
   onChange: () => void;
   onClose: () => void;
 }
@@ -33,11 +35,11 @@ const BULLETS = ["●", "○", "■", "□", "◆"];
  * Enter adds a node, Tab / Shift+Tab demote and promote, Backspace in an empty
  * field removes it, ⌥⇧↑ / ⌥⇧↓ move it, Shift+Enter starts a new paragraph.
  */
-export function DiagramPane({ engine, version, row, onRow, focusRequest, onChange, onClose }: Props) {
+export function DiagramPane({ engine, version, row, onRow, focusRequest, focusRange, onChange, onClose }: Props) {
   const [info, setInfo] = useState<DiagramInfo | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   // Focus this row once the rows are re-read.
-  const pendingFocus = useRef<{ row: number; caret: "end" | "start" } | null>(null);
+  const pendingFocus = useRef<{ row: number; caret: "end" | "start" | [number, number] } | null>(null);
 
   useEffect(() => {
     setInfo(engine ? (engine.diagramInfo() as DiagramInfo | null) : null);
@@ -45,7 +47,7 @@ export function DiagramPane({ engine, version, row, onRow, focusRequest, onChang
 
   // Before the focusing effect below, so the request applies in this commit.
   useLayoutEffect(() => {
-    if (focusRequest > 0) pendingFocus.current = { row, caret: "end" };
+    if (focusRequest > 0) pendingFocus.current = { row, caret: focusRange ?? "end" };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest]);
 
@@ -55,6 +57,15 @@ export function DiagramPane({ engine, version, row, onRow, focusRequest, onChang
     if (!want || !fields || fields.length === 0) return;
     const field = fields[Math.min(want.row, fields.length - 1)];
     pendingFocus.current = null;
+    if (Array.isArray(want.caret)) {
+      // A find match: select it, but keep typing in the find bar.
+      const back = document.activeElement as HTMLElement | null;
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(want.caret[0], want.caret[1]);
+      field.scrollIntoView({ block: "nearest" });
+      if (back?.closest(".find-bar")) back.focus({ preventScroll: true });
+      return;
+    }
     field.focus();
     const at = want.caret === "end" ? field.value.length : 0;
     field.setSelectionRange(at, at);

@@ -96,6 +96,38 @@ impl Editor {
         Some(DiagramInfo { rows: d.rows(), restructure: d.can_restructure(), nest: d.can_nest() })
     }
 
+    /// Text of row `row` of SmartArt `id` on `slide`.
+    pub(crate) fn node_text(&self, slide: usize, id: ShapeId, row: usize) -> Option<String> {
+        let d = data(&self.pres.shape(slide, id)?.kind)?;
+        d.rows().into_iter().nth(row).map(|r| r.text)
+    }
+
+    /// Sets rows' texts of SmartArt `id` on `slide` and rebuilds its drawing (no undo step).
+    pub(crate) fn set_node_texts(&mut self, engine: &mut TextEngine, slide: usize, id: ShapeId, texts: &[(usize, String)]) -> bool {
+        let Some(d) = self.pres.shape(slide, id).and_then(|s| data(&s.kind)) else { return false };
+        let mut d = (**d).clone();
+        let mut changed = false;
+        for (row, text) in texts {
+            changed |= d.set_text(*row, text);
+        }
+        if changed {
+            self.store_diagram(engine, slide, id, d);
+        }
+        changed
+    }
+
+    /// Puts `d` (with its drawing rebuilt) in place of SmartArt `id`'s content.
+    fn store_diagram(&mut self, engine: &mut TextEngine, slide: usize, id: ShapeId, mut d: Diagram) {
+        let mut shapes = d.layout();
+        fit_text(engine, &d, &mut shapes);
+        if let Some(shape) = self.pres.shape_mut(slide, id)
+            && let ShapeKind::Diagram { shapes: drawn, data, .. } = &mut shape.kind
+        {
+            *drawn = Arc::new(shapes);
+            *data = Some(Arc::new(d));
+        }
+    }
+
     /// Applies `f` to a copy of the selected SmartArt; when it reports a change,
     /// that copy (with its drawing rebuilt) replaces the original as one undo step.
     fn edit_diagram<R>(&mut self, engine: &mut TextEngine, merge_typing: Option<usize>, f: impl FnOnce(&mut Diagram) -> Option<R>) -> Option<R> {
@@ -110,15 +142,8 @@ impl Editor {
             self.push_undo(snap);
         }
         self.diagram_undo = key;
-        let mut shapes = d.layout();
-        fit_text(engine, &d, &mut shapes);
-        let slide = self.slide;
-        if let Some(shape) = self.pres.shape_mut(slide, id)
-            && let ShapeKind::Diagram { shapes: drawn, data, .. } = &mut shape.kind
-        {
-            *drawn = Arc::new(shapes);
-            *data = Some(Arc::new(d));
-        }
+        self.node_match = None;
+        self.store_diagram(engine, self.slide, id, d);
         Some(result)
     }
 

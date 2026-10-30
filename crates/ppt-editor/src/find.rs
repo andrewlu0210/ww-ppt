@@ -1,5 +1,5 @@
-//! Find and replace across the deck: every slide's shape text, table cells
-//! and speaker notes, in slide order.
+//! Find and replace across the deck: every slide's shape text, table cells,
+//! SmartArt nodes and speaker notes, in slide order.
 
 use std::ops::Range;
 
@@ -21,6 +21,8 @@ pub enum FindPlace {
     Shape(ShapeId),
     /// A table cell (row, column).
     Cell(ShapeId, usize, usize),
+    /// A SmartArt node, by its row in the text pane.
+    Node(ShapeId, usize),
     Notes,
 }
 
@@ -69,6 +71,9 @@ pub fn find_in(text: &str, query: &str, opts: FindOptions) -> Vec<Range<usize>> 
     out
 }
 
+/// New texts for SmartArt rows: (row, text).
+type NodeTexts = Vec<(usize, String)>;
+
 /// Replaces `ranges` (sorted, non-overlapping) of `body` with `with`, each
 /// taking the style of the text it replaces.
 fn replace_ranges(body: &mut TextBody, ranges: &[Range<usize>], with: &str) {
@@ -92,6 +97,11 @@ impl Editor {
                     self.text.as_ref().filter(|t| i == self.slide && t.shape == shape.id && t.cell == cell).map(|t| t.rich.body.plain_text())
                 };
                 match &shape.kind {
+                    ShapeKind::Diagram { data: Some(d), .. } => {
+                        for (r, row) in d.rows().into_iter().enumerate() {
+                            out.push((i, FindPlace::Node(shape.id, r), row.text));
+                        }
+                    }
                     ShapeKind::Table(table) => {
                         for (r, c) in table.visible_cells() {
                             let text = live(Some((r, c))).unwrap_or_else(|| table.rows[r].cells[c].text.plain_text());
@@ -125,6 +135,9 @@ impl Editor {
         if let Some(r) = notes {
             return (self.slide, Some(FindPlace::Notes), r);
         }
+        if let Some(m) = self.node_match.as_ref().filter(|m| m.slide == self.slide && self.text.is_none()) {
+            return (m.slide, Some(m.place), m.range.clone());
+        }
         match &self.text {
             Some(t) => {
                 let place = match t.cell {
@@ -135,6 +148,13 @@ impl Editor {
             }
             None => (self.slide, None, 0..0),
         }
+    }
+
+    /// What the search position currently selects, as a match to replace:
+    /// text in the box being edited, a shown SmartArt match, or `notes`.
+    pub fn current_match(&self, notes: Option<Range<usize>>) -> Option<FindMatch> {
+        let (slide, place, range) = self.find_position(notes);
+        Some(FindMatch { slide, place: place?, range })
     }
 
     /// The match after (or before) the current position, wrapping around:
@@ -168,11 +188,26 @@ impl Editor {
         if m.slide >= self.pres.slides.len() {
             return false;
         }
+        self.node_match = None;
+        if let FindPlace::Node(id, row) = m.place {
+            // Shown in the SmartArt's text pane.
+            if self.slide != m.slide {
+                self.set_slide(engine, m.slide);
+            } else {
+                self.end_text_edit(engine);
+            }
+            self.selection = vec![id];
+            self.diagram_focus = Some(row);
+            self.diagram_range = Some(m.range.clone());
+            self.diagram_requests += 1;
+            self.node_match = Some(m.clone());
+            return true;
+        }
         let editing_it = self.slide == m.slide
             && self.text.as_ref().is_some_and(|t| match m.place {
                 FindPlace::Shape(id) => t.shape == id && t.cell.is_none(),
                 FindPlace::Cell(id, r, c) => t.shape == id && t.cell == Some((r, c)),
-                FindPlace::Notes => false,
+                FindPlace::Node(..) | FindPlace::Notes => false,
             });
         if !editing_it {
             if self.slide != m.slide {
@@ -190,6 +225,7 @@ impl Editor {
                     self.selection.clear();
                     return true;
                 }
+                FindPlace::Node(..) => unreachable!("handled above"),
             }
         }
         if let Some(t) = &mut self.text {
@@ -211,6 +247,20 @@ impl Editor {
             let notes = &mut self.pres.slides[m.slide].notes;
             notes.replace_range(m.range.clone(), with);
             self.push_undo(before);
+            return true;
+        }
+        if let FindPlace::Node(id, row) = m.place {
+            self.end_text_edit(engine);
+            let Some(mut text) = self.node_text(m.slide, id, row) else { return false };
+            text.replace_range(m.range.clone(), with);
+            let before = self.snapshot();
+            if !self.set_node_texts(engine, m.slide, id, &[(row, text)]) {
+                return false;
+            }
+            self.push_undo(before);
+            // Continue after the replacement.
+            let end = m.range.start + with.len();
+            self.node_match = Some(FindMatch { range: end..end, ..m.clone() });
             return true;
         }
         self.replace_range(engine, m, with)
@@ -241,11 +291,24 @@ impl Editor {
             return 0;
         }
         let before = self.snapshot();
+        // New node texts per SmartArt: (slide, shape, [(row, text)]).
+        let mut nodes: Vec<(usize, ShapeId, NodeTexts)> = Vec::new();
         let mut i = 0;
         while i < all.len() {
             let (slide, place) = (all[i].slide, all[i].place);
             let ranges: Vec<Range<usize>> = all[i..].iter().take_while(|m| m.slide == slide && m.place == place).map(|m| m.range.clone()).collect();
             i += ranges.len();
+            if let FindPlace::Node(id, row) = place {
+                let mut text = self.node_text(slide, id, row).unwrap_or_default();
+                for r in ranges.iter().rev() {
+                    text.replace_range(r.clone(), with);
+                }
+                match nodes.last_mut().filter(|n| n.0 == slide && n.1 == id) {
+                    Some(n) => n.2.push((row, text)),
+                    None => nodes.push((slide, id, vec![(row, text)])),
+                }
+                continue;
+            }
             let s = &mut self.pres.slides[slide];
             match place {
                 FindPlace::Notes => {
@@ -265,7 +328,11 @@ impl Editor {
                         replace_ranges(&mut cell.text, &ranges, with);
                     }
                 }
+                FindPlace::Node(..) => unreachable!("handled above"),
             }
+        }
+        for (slide, id, texts) in nodes {
+            self.set_node_texts(engine, slide, id, &texts);
         }
         self.push_undo(before);
         self.refresh_tables(engine);

@@ -200,15 +200,18 @@ export function App() {
   const diagramRowRef = useRef(0);
   diagramRowRef.current = diagramRow;
   const [diagramFocus, setDiagramFocus] = useState(0);
-  // A double-click on a SmartArt opens its text pane at the node clicked.
+  const [diagramRange, setDiagramRange] = useState<[number, number] | null>(null);
+  // Another selection starts at the first node (unless the request below names one: it runs after).
+  useEffect(() => setDiagramRow(0), [status.selectionName, status.slideIndex]);
+  // A double-click on a SmartArt (or a find match in it) opens its text pane at that node.
   useEffect(() => {
     if (!status.diagramRequests) return;
     setDiagramRow(Math.max(0, status.diagramFocus ?? 0));
+    setDiagramRange(status.diagramRange ?? null);
     setDiagramPane(true);
     setDiagramFocus((n) => n + 1);
-  }, [status.diagramRequests, status.diagramFocus]);
-  // Another selection starts at the first node.
-  useEffect(() => setDiagramRow(0), [status.selectionName, status.slideIndex]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.diagramRequests]);
   const diagramShown = diagramPane && !!status.smartArt;
   const [viewMode, setViewMode] = useState<"normal" | "sorter">("normal");
   const viewModeRef = useRef(viewMode);
@@ -802,6 +805,7 @@ export function App() {
         const next = engine.diagramCommand(c.command, diagramRowRef.current);
         if (next >= 0) {
           setDiagramRow(next);
+          setDiagramRange(null);
           setDiagramPane(true);
           setDiagramFocus((n) => n + 1);
           refresh();
@@ -1376,6 +1380,7 @@ export function App() {
                 row={diagramRow}
                 onRow={setDiagramRow}
                 focusRequest={diagramFocus}
+                focusRange={diagramRange}
                 onChange={refresh}
                 onClose={() => {
                   setDiagramPane(false);

@@ -278,6 +278,10 @@ pub struct Editor {
     /// at `diagram_focus`.
     pub diagram_requests: u32,
     pub diagram_focus: Option<usize>,
+    /// Text to select in that row (a find match), as a byte range.
+    pub diagram_range: Option<std::ops::Range<usize>>,
+    /// The SmartArt find match last shown, to continue searching from.
+    node_match: Option<FindMatch>,
 }
 
 /// A snap target: (position, extent start, extent end).
@@ -317,6 +321,8 @@ impl Editor {
             diagram_undo: None,
             diagram_requests: 0,
             diagram_focus: None,
+            diagram_range: None,
+            node_match: None,
         }
     }
 
@@ -672,6 +678,7 @@ impl Editor {
                 if ev.clicks >= 2 && matches!(shape.kind, ShapeKind::Diagram { data: Some(_), .. }) {
                     // SmartArt text is edited in the text pane, at the node clicked.
                     self.diagram_focus = self.diagram_row_at(id, ev.x, ev.y);
+                    self.diagram_range = None;
                     self.diagram_requests += 1;
                     return true;
                 }

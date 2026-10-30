@@ -22,7 +22,7 @@ pub fn range_rects(layout: &BodyLayout, range: Range<usize>) -> Vec<BoundingBox>
 impl Editor {
     /// The current slide's texts (shapes and table cells), live while edited.
     pub fn slide_texts(&self) -> Vec<(FindPlace, String)> {
-        self.find_places().into_iter().filter(|(s, p, _)| *s == self.slide && *p != FindPlace::Notes).map(|(_, p, t)| (p, t)).collect()
+        self.find_places().into_iter().filter(|(s, p, _)| *s == self.slide && !matches!(p, FindPlace::Notes | FindPlace::Node(..))).map(|(_, p, t)| (p, t)).collect()
     }
 
     /// A text's layout and the transform from its layout space (points) to slide space.
@@ -31,7 +31,7 @@ impl Editor {
             let edited = match place {
                 FindPlace::Shape(id) => t.shape == id && t.cell.is_none(),
                 FindPlace::Cell(id, r, c) => t.shape == id && t.cell == Some((r, c)),
-                FindPlace::Notes => false,
+                FindPlace::Node(..) | FindPlace::Notes => false,
             };
             if edited {
                 let layout = t.rich.layout().clone();
@@ -51,7 +51,7 @@ impl Editor {
                 let heights = self.table_heights.get(&id).cloned().unwrap_or_else(|| engine.table_row_heights(table));
                 (&table.cell(r, c)?.text, TextFrame::plain(table.cell_frame(&heights, &shape.xfrm, r, c)))
             }
-            FindPlace::Notes => return None,
+            FindPlace::Node(..) | FindPlace::Notes => return None,
         };
         let layout = engine.layout_body(body, text_width_pt(&frame, body));
         let tf = text_affine(&frame, body, layout.height);

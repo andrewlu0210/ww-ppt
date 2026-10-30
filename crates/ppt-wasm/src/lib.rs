@@ -102,11 +102,13 @@ const SHADOWS: [(&str, f64, i64, i64); 5] = [
     ("center", 0.0, 0, 63_500),
 ];
 
-/// Key of a text for spelling results: `s<id>` for a shape, `c<id>:<row>:<col>` for a cell.
+/// Key of a text for spelling results: `s<id>` for a shape, `c<id>:<row>:<col>`
+/// for a cell, `d<id>:<row>` for a SmartArt node.
 fn spell_key(place: FindPlace) -> String {
     match place {
         FindPlace::Shape(id) => format!("s{}", id.0),
         FindPlace::Cell(id, r, c) => format!("c{}:{r}:{c}", id.0),
+        FindPlace::Node(id, r) => format!("d{}:{r}", id.0),
         FindPlace::Notes => "n".into(),
     }
 }
@@ -860,17 +862,7 @@ impl App {
     pub fn replace_next(&mut self, query: &str, with: &str, match_case: bool, whole_word: bool, notes_start: i32, notes_end: i32) -> JsValue {
         let opts = FindOptions { match_case, whole_word };
         let notes = self.notes_range(notes_start, notes_end);
-        let current = match &notes {
-            Some(r) => Some(FindMatch { slide: self.editor.slide, place: FindPlace::Notes, range: r.clone() }),
-            None => self.editor.text.as_ref().map(|t| FindMatch {
-                slide: self.editor.slide,
-                place: match t.cell {
-                    Some((r, c)) => FindPlace::Cell(t.shape, r, c),
-                    None => FindPlace::Shape(t.shape),
-                },
-                range: t.rich.range(),
-            }),
-        };
+        let current = self.editor.current_match(notes.clone());
         let mut after_notes = notes;
         if let Some(m) = current
             && self.editor.replace_match(&mut self.engine, &m, query, with, opts)
@@ -2445,6 +2437,14 @@ impl App {
         set("smartArt", e.diagram_info().is_some().into());
         set("diagramRequests", e.diagram_requests.into());
         set("diagramFocus", e.diagram_focus.map_or(-1, |r| r as i32).into());
+        // Text to select in the focused row (a find match), in UTF-16 units.
+        if let (Some(range), Some(row), Some(info)) = (&e.diagram_range, e.diagram_focus, e.diagram_info())
+            && let Some(text) = info.rows.get(row).map(|r| r.text.as_str()).filter(|t| range.end <= t.len() && t.is_char_boundary(range.start) && t.is_char_boundary(range.end))
+        {
+            let u16 = |b: usize| text[..b].encode_utf16().count() as u32;
+            let r = Array::of2(&u16(range.start).into(), &u16(range.end).into());
+            set("diagramRange", r.into());
+        }
         set("canMerge", e.can_merge_cells().into());
         if let Some(t) = e.current_table() {
             set("tableStyle", t.style.as_ref().map(|s| s.id.clone()).unwrap_or_default().into());

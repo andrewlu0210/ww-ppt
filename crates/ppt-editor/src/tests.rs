@@ -1468,3 +1468,40 @@ fn double_clicking_a_smartart_asks_for_its_text_pane() {
     assert_eq!(e.diagram_focus, Some(2));
     assert_eq!(e.selection, vec![id]);
 }
+
+#[test]
+fn find_and_replace_reach_smartart_nodes() {
+    let mut eng = engine();
+    let (mut e, id) = smartart_editor(&mut eng, "/vList2");
+    let opts = FindOptions::default();
+    let row = e.diagram_info().unwrap().rows[2].text.clone();
+    let word: String = row.chars().take(2).collect();
+    let found = e.find_all(&word, opts);
+    let m = found.iter().find(|m| m.place == FindPlace::Node(id, 2)).cloned().expect("node text is searchable");
+    // Showing it opens the text pane at that node with the match selected.
+    e.selection.clear();
+    assert!(e.select_match(&mut eng, &m));
+    assert_eq!((e.selection.clone(), e.diagram_focus, e.diagram_range.clone()), (vec![id], Some(2), Some(m.range.clone())));
+    let requests = e.diagram_requests;
+    assert!(requests > 0);
+    // Replacing goes through the node tree and the drawing, as one undo step.
+    assert_eq!(e.current_match(None), Some(m.clone()));
+    assert!(e.replace_match(&mut eng, &m, &word, "替換", opts));
+    let now = e.diagram_info().unwrap().rows[2].text.clone();
+    assert_eq!(now, row.replacen(&word, "替換", 1));
+    let ShapeKind::Diagram { shapes, .. } = &e.pres.shape(e.slide, id).unwrap().kind else { panic!() };
+    assert!(shapes.iter().any(|s| s.text.as_ref().is_some_and(|t| t.plain_text() == now)));
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.diagram_info().unwrap().rows[2].text, row);
+    // Replace all covers every node, saved through the data model.
+    let n = e.replace_all(&mut eng, &word, "替換", opts);
+    assert!(n >= 1);
+    assert!(e.find_all(&word, opts).iter().all(|m| !matches!(m.place, FindPlace::Node(..))));
+    let back = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&e.pres).unwrap()).unwrap();
+    // Shape ids are reassigned on opening: look for the SmartArt that has the text.
+    let saved = back.slides[e.slide].shapes.iter().filter_map(|s| match &s.kind {
+        ShapeKind::Diagram { data: Some(d), .. } => Some(d.rows()),
+        _ => None,
+    });
+    assert!(saved.flatten().any(|r| r.text.contains("替換")));
+}
