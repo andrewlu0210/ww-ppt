@@ -4,6 +4,7 @@ export type Command =
   | { kind: "new" }
   | { kind: "save" }
   | { kind: "saveAs" }
+  | { kind: "exportPdf" }
   | { kind: "undo" }
   | { kind: "redo" }
   | { kind: "cut" }

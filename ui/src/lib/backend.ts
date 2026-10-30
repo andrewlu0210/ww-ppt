@@ -42,10 +42,12 @@ export async function pickImage(): Promise<string | null> {
   return typeof picked === "string" ? picked : null;
 }
 
-export async function pickSavePath(defaultName: string): Promise<string | null> {
-  const path = await save({ defaultPath: `${defaultName}.pptx`, filters: [{ name: "PowerPoint 簡報", extensions: ["pptx"] }] });
+const SAVE_FILTERS = { pptx: "PowerPoint 簡報", pdf: "PDF 文件" };
+
+export async function pickSavePath(defaultName: string, ext: keyof typeof SAVE_FILTERS = "pptx"): Promise<string | null> {
+  const path = await save({ defaultPath: `${defaultName}.${ext}`, filters: [{ name: SAVE_FILTERS[ext], extensions: [ext] }] });
   if (!path) return null;
-  return path.toLowerCase().endsWith(".pptx") ? path : `${path}.pptx`;
+  return path.toLowerCase().endsWith(`.${ext}`) ? path : `${path}.${ext}`;
 }
 
 /** "save" | "discard" | "cancel" for a document with unsaved changes. */

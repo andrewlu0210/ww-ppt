@@ -1,8 +1,8 @@
-//! Slide rendering into a vello [`Scene`].
+//! Slide rendering onto a [`Canvas`]: a vello [`Scene`] or a PDF page.
 //!
 //! Everything is drawn in slide space (EMU) and mapped to device pixels by a
 //! single `view` transform, so the same code serves the editor canvas,
-//! thumbnails and (later) export.
+//! thumbnails and export.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,10 +14,12 @@ use ppt_model::{Color, Gradient, GradientKind, Paint, Presentation, Shape, Shape
 use ppt_text::{BodyLayout, TextEngine};
 use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Cap, Circle, Line, ParamCurve, PathEl, PathSeg, Point, Rect, Shape as _, Stroke, Vec2};
-use vello::peniko::{Blob, Color as PColor, ColorStop, Fill, Gradient as PGradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat, StyleRef};
+use vello::peniko::{Blob, Color as PColor, ColorStop, Fill, Gradient as PGradient, ImageAlphaType, ImageData, ImageFormat};
 
 mod anim;
+mod canvas;
 mod chart;
+pub use canvas::{Canvas, CanvasExt, GlyphRun};
 pub use anim::{draw_slide_animated, reveal_mask};
 mod transition;
 pub use transition::draw_transition;
@@ -30,7 +32,7 @@ pub fn color(c: Color) -> PColor {
 
 /// A shape's drop shadow, for rectangular shapes and pictures (a blurred rounded rectangle).
 /// Other outlines are skipped rather than drawn with a wrong silhouette.
-fn draw_shadow(scene: &mut Scene, shape: &Shape, shadow: &ppt_model::Shadow, view: Affine) {
+fn draw_shadow(scene: &mut dyn Canvas, shape: &Shape, shadow: &ppt_model::Shadow, view: Affine) {
     let xf = &shape.xfrm;
     let (w, h) = (xf.w as f64, xf.h as f64);
     let radius = match &shape.geometry {
@@ -52,7 +54,7 @@ fn draw_shadow(scene: &mut Scene, shape: &Shape, shadow: &ppt_model::Shadow, vie
 }
 
 /// Strokes `path` with the line's width and dash pattern, plus arrowheads on open paths.
-pub fn stroke_line(scene: &mut Scene, tf: Affine, line: &ppt_model::Line, path: &BezPath) {
+pub fn stroke_line(scene: &mut dyn Canvas, tf: Affine, line: &ppt_model::Line, path: &BezPath) {
     let width = line.width.max(1) as f64;
     let mut stroke = Stroke::new(width).with_caps(Cap::Butt);
     let pattern = line.dash.pattern();
@@ -73,7 +75,7 @@ pub fn stroke_line(scene: &mut Scene, tf: Affine, line: &ppt_model::Line, path: 
 }
 
 /// An arrowhead at `tip`, pointing away from `toward` (a point just inside the path).
-fn draw_line_end(scene: &mut Scene, tf: Affine, line: &ppt_model::Line, end: ppt_model::LineEnd, tip: Point, toward: Point) {
+fn draw_line_end(scene: &mut dyn Canvas, tf: Affine, line: &ppt_model::Line, end: ppt_model::LineEnd, tip: Point, toward: Point) {
     use ppt_model::EndKind;
     if end.kind == EndKind::None {
         return;
@@ -132,7 +134,7 @@ fn draw_line_end(scene: &mut Scene, tf: Affine, line: &ppt_model::Line, end: ppt
 }
 
 /// Fills `path` (in a `w` × `h` local box mapped by `tf`) with a solid color or gradient.
-pub fn fill_paint(scene: &mut Scene, tf: Affine, paint: &Paint, w: f64, h: f64, path: &impl vello::kurbo::Shape) {
+pub fn fill_paint(scene: &mut dyn Canvas, tf: Affine, paint: &Paint, w: f64, h: f64, path: &impl vello::kurbo::Shape) {
     match paint {
         Paint::Solid(c) => scene.fill(Fill::NonZero, tf, color(*c), None, path),
         Paint::Gradient(g) => {
@@ -232,7 +234,7 @@ pub struct DrawOptions {
 }
 
 /// Draws the whole slide.
-pub fn draw_slide(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions) {
+pub fn draw_slide(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions) {
     let page = Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64);
     scene.fill(Fill::NonZero, view, color(slide.background.unwrap_or(Color::WHITE)), None, &page);
     scene.push_clip_layer(Fill::NonZero, view, &page);
@@ -247,7 +249,7 @@ pub fn draw_slide(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sl
 
 const FRAME: PColor = PColor::from_rgba8(0xA6, 0xA6, 0xA6, 255);
 
-pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, shape: &Shape, view: Affine, opts: &DrawOptions) {
+pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, shape: &Shape, view: Affine, opts: &DrawOptions) {
     let xf = &shape.xfrm;
     let tf = view * shape_affine(xf, true);
     let (w, h) = (xf.w as f64, xf.h as f64);
@@ -307,8 +309,9 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
                 if mask.elements().is_empty() {
                     mask = Rect::new(0.0, 0.0, w, h).to_path(0.1);
                 }
+                let encoded = media.as_deref().and_then(|m| pres.media.get(m)).map(|b| b.as_slice());
                 scene.push_clip_layer(Fill::NonZero, tf, &mask);
-                scene.draw_image(&ImageBrush::new(img.clone()), tf * place);
+                scene.draw_image_data(&img.clone(), encoded, tf * place);
                 scene.pop_layer();
             }
             _ => {
@@ -361,7 +364,7 @@ pub fn draw_shape(scene: &mut Scene, cx: &mut RenderCtx, pres: &Presentation, sh
 }
 
 /// Draws a table: cell fills, then text, then borders on top.
-pub fn draw_table(scene: &mut Scene, engine: &mut TextEngine, table: &Table, xf: &Xfrm, view: Affine, skip_cell: Option<(usize, usize)>) {
+pub fn draw_table(scene: &mut dyn Canvas, engine: &mut TextEngine, table: &Table, xf: &Xfrm, view: Affine, skip_cell: Option<(usize, usize)>) {
     let heights = engine.table_row_heights(table);
     let cells: Vec<(usize, usize, Xfrm)> = table.visible_cells().into_iter().map(|(r, c)| (r, c, table.cell_frame(&heights, xf, r, c))).collect();
     let looks: Vec<CellLook> = cells.iter().map(|&(r, c, _)| table.look(r, c)).collect();
@@ -393,25 +396,26 @@ pub fn draw_table(scene: &mut Scene, engine: &mut TextEngine, table: &Table, xf:
     }
 }
 
-pub fn draw_body(scene: &mut Scene, engine: &mut TextEngine, body: &TextBody, frame: &TextFrame, view: Affine) {
+pub fn draw_body(scene: &mut dyn Canvas, engine: &mut TextEngine, body: &TextBody, frame: &TextFrame, view: Affine) {
     let layout = engine.layout_body(body, text_width_pt(frame, body));
     draw_body_layout(scene, &layout, view * text_affine(frame, body, layout.height));
 }
 
 /// Draws a laid-out text body (glyphs and bullets); `tf` maps points to device space.
-pub fn draw_body_layout(scene: &mut Scene, layout: &BodyLayout, tf: Affine) {
-    draw_layout(scene, &layout.layout, tf);
+pub fn draw_body_layout(scene: &mut dyn Canvas, layout: &BodyLayout, tf: Affine) {
+    draw_layout(scene, &layout.layout, &layout.text, tf);
     for b in &layout.bullets {
-        draw_layout(scene, &b.layout, tf * Affine::translate(Vec2::new(b.x as f64, b.y as f64)));
+        draw_layout(scene, &b.layout, &b.text, tf * Affine::translate(Vec2::new(b.x as f64, b.y as f64)));
     }
 }
 
 /// Outline width for synthetic bold, relative to the font size.
 const SYNTHETIC_BOLD: f32 = 0.035;
 
-/// Draws a parley layout whose units are points; `tf` maps points to device space.
-pub fn draw_layout(scene: &mut Scene, layout: &Layout<Color>, tf: Affine) {
+/// Draws a parley layout built from `text`, whose units are points; `tf` maps points to device space.
+pub fn draw_layout(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str, tf: Affine) {
     for line in layout.lines() {
+        let line_text = line.text_range();
         for item in line.items() {
             let PositionedLayoutItem::GlyphRun(glyph_run) = item else { continue };
             let run = glyph_run.run();
@@ -421,22 +425,29 @@ pub fn draw_layout(scene: &mut Scene, layout: &Layout<Color>, tf: Affine) {
             // vello applies this in font space (y up), so a positive x-skew leans glyphs to the right.
             let glyph_transform = run.synthesis().skew().map(|angle| Affine::skew((angle as f64).to_radians().tan(), 0.0));
             let glyphs: Vec<vello::Glyph> = glyph_run.positioned_glyphs().map(|g| vello::Glyph { id: g.id, x: g.x, y: g.y }).collect();
-            let mut draw = |style: StyleRef| {
-                scene
-                    .draw_glyphs(run.font())
-                    .brush(brush)
-                    .hint(false)
-                    .transform(tf)
-                    .glyph_transform(glyph_transform)
-                    .font_size(run.font_size())
-                    .normalized_coords(&coords)
-                    .draw(style, glyphs.iter().copied());
-            };
-            draw(Fill::NonZero.into());
-            // Synthetic bold when the family has no face heavy enough: thicken the outlines.
-            if run.synthesis().embolden() {
-                draw((&Stroke::new((run.font_size() * SYNTHETIC_BOLD) as f64)).into());
+            // Each glyph's source text: the clusters of this run on this line, in glyph order.
+            let mut ranges: Vec<std::ops::Range<usize>> = Vec::with_capacity(glyphs.len());
+            for cluster in run.visual_clusters().filter(|c| c.text_range().start >= line_text.start && c.text_range().end <= line_text.end) {
+                for _ in cluster.glyphs() {
+                    ranges.push(cluster.text_range());
+                }
             }
+            if ranges.len() != glyphs.len() {
+                ranges = vec![0..0; glyphs.len()];
+            }
+            scene.draw_glyph_run(&GlyphRun {
+                font: run.font(),
+                size: run.font_size(),
+                coords: &coords,
+                transform: tf,
+                glyph_transform,
+                color: brush,
+                glyphs: &glyphs,
+                // Synthetic bold when the family has no face heavy enough: thicken the outlines.
+                embolden: run.synthesis().embolden().then_some(run.font_size() * SYNTHETIC_BOLD),
+                text,
+                ranges: &ranges,
+            });
             if let Some(underline) = &style.underline {
                 let metrics = run.font_metrics();
                 let offset = underline.offset.unwrap_or(metrics.underline_offset) as f64;

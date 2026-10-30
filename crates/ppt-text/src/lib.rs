@@ -149,7 +149,7 @@ impl TextEngine {
 
         // Bullets are shaped separately and drawn in the hanging indent.
         let numbers = list_numbers(&body.paragraphs, &ranges);
-        let bullets_shaped: Vec<Option<Layout<Color>>> = body
+        let bullets_shaped: Vec<Option<(Layout<Color>, String)>> = body
             .paragraphs
             .iter()
             .zip(&ranges)
@@ -179,7 +179,7 @@ impl TextEngine {
                         breaker.state_mut().set_line_y(y + (prev.space_after + p.space_before) as f64);
                     }
                     x += to_pt(p.indent);
-                    if let Some(Some(b)) = bullets_shaped.get(para) {
+                    if let Some(Some((b, _))) = bullets_shaped.get(para) {
                         x = (x + b.width() + BULLET_GAP).max(to_pt(p.mar_l));
                     }
                 }
@@ -221,7 +221,7 @@ impl TextEngine {
                 continue;
             }
             let p = &body.paragraphs[info.paragraph];
-            if let Some(Some(b)) = bullets_shaped.get(info.paragraph) {
+            if let Some(Some((b, label))) = bullets_shaped.get(info.paragraph) {
                 let baseline = b.lines().next().map(|l| l.metrics().baseline).unwrap_or(0.0);
                 // Left-aligned bullets sit at the hanging indent; otherwise just before the text.
                 let text_start = line.metrics().inline_min_coord + line.metrics().offset;
@@ -229,15 +229,16 @@ impl TextEngine {
                     Align::Left | Align::Justify => to_pt(p.mar_l + p.indent).max(0.0),
                     _ => text_start - b.width() - BULLET_GAP,
                 };
-                bullets.push(Bullet { layout: b.clone(), x, y: line.metrics().baseline - baseline });
+                bullets.push(Bullet { layout: b.clone(), text: label.clone(), x, y: line.metrics().baseline - baseline });
             }
         }
         let height = layout.lines().last().map(|l| l.metrics().block_max_coord).unwrap_or(0.0);
-        BodyLayout { layout, lines, bullets, height }
+        BodyLayout { layout, text, lines, bullets, height }
     }
 
     /// Shapes item `n`'s bullet: its own font, color and relative size, else the text's.
-    fn layout_bullet(&mut self, bullet: &BulletDef, n: u32, style: &RunStyle, scale: f32) -> Layout<Color> {
+    /// Also returns the label's text.
+    fn layout_bullet(&mut self, bullet: &BulletDef, n: u32, style: &RunStyle, scale: f32) -> (Layout<Color>, String) {
         let (text, font) = bullet.label(n);
         let mut style = RunStyle { size_pt: style.size_pt * bullet.size.unwrap_or(1.0), color: bullet.color.unwrap_or(style.color), ..style.clone() };
         if let Some(font) = font {
@@ -252,7 +253,7 @@ impl TextEngine {
         builder.push_default(StyleProperty::Underline(false));
         let mut layout = builder.build(&text);
         layout.break_all_lines(None);
-        layout
+        (layout, text)
     }
 }
 
@@ -343,6 +344,8 @@ pub struct LineInfo {
 #[derive(Clone)]
 pub struct Bullet {
     pub layout: Layout<Color>,
+    /// The label's text (for text extraction in exports).
+    pub text: String,
     /// Offset of the bullet layout's origin in body layout space.
     pub x: f32,
     pub y: f32,
@@ -352,6 +355,8 @@ pub struct Bullet {
 pub struct BodyLayout {
     /// Every paragraph in one layout; coordinates are points.
     pub layout: Layout<Color>,
+    /// The text the layout was built from.
+    pub text: String,
     /// One entry per layout line.
     pub lines: Vec<LineInfo>,
     pub bullets: Vec<Bullet>,

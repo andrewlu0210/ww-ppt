@@ -42,8 +42,18 @@ cargo run -p ppt-vr --release -- --only test  # 只跑一份
 - **分數**：不一致像素佔整頁的百分比。容許 1px 位移和反鋸齒差異，所以剩下的差異主要來自字型不同，例如微軟雅黑被替換成蘋方。
 - **結果**：輸出到 `target/vr/<名稱>/`。`page-NN.png` 由左到右是基準、本程式渲染、差異（紅色）；`report.md` 是分數表。
 - **私人樣本**：`samples/vr/test.*` 是真實工作簡報，已列在 `.gitignore`，不要提交。
+- **匯出 PDF 的比對**：`cargo run -p ppt-vr --release --example pdf -- samples/vr/test.pptx` 會把簡報匯出成 PDF，再和 PowerPoint 的 PDF 以及螢幕渲染逐頁比較。結果在 `target/vr-pdf/<名稱>/`，`page-NN.png` 由左到右是基準、匯出的 PDF、螢幕渲染。
 
-## 功能（M3 進行中）
+## 功能（M4 進行中）
+
+- **匯出 PDF**（檔案 > 匯出為 PDF…，⌘⇧E）：
+  - 每張投影片一頁，頁面大小和投影片相同；隱藏的投影片不匯出。
+  - 和螢幕共用同一套繪圖程式（`Canvas` 介面：螢幕畫到 vello，匯出畫到 krilla 的 PDF 頁面），所以內容和畫面一致。
+  - 圖形、線條、漸層維持向量；文字維持文字：字型以子集嵌入並帶 Unicode 對應，可以搜尋和複製。
+  - 圖片直接嵌入原始的 JPEG 或 PNG，不重新壓縮。
+  - 限制：陰影用幾層半透明圖形近似模糊；可變字型以預設字重嵌入。
+
+## 功能（M3）
 
 - **投影片放映**：
   - 開始：「投影片放映」分頁、選單，或快捷鍵。從頭播放是 ⌘⇧↩ 或 F5，從目前的投影片播放是 ⌘↩ 或 ⇧F5。
@@ -136,7 +146,8 @@ cargo run -p ppt-vr --release -- --only test  # 只跑一份
 | `crates/ppt-ooxml` | PPTX 匯入與儲存、內建範本：佈景主題、佔位符繼承、文字樣式鏈、群組、圖片、表格 |
 | `crates/ppt-geometry` | 預設圖形公式引擎（`presets.xml` 取自 Apache POI，Apache 2.0）、自訂幾何、文字區域、座標轉換 |
 | `crates/ppt-text` | 字型註冊、字型替代；整個文字框一個 parley 排版，逐行套用段落縮排與對齊 |
-| `crates/ppt-render` | 用 vello 繪製投影片、選取框、文字游標 |
+| `crates/ppt-render` | 繪製投影片（透過 `Canvas` 介面，螢幕用 vello）、選取框、文字游標 |
+| `crates/ppt-pdf` | 匯出 PDF：用 krilla 實作 `Canvas`，文字嵌入字型子集 |
 | `crates/ppt-editor` | 選取、多選、參考線、縮放、旋轉、富文字編輯（`richedit.rs`）、IME、格式、投影片操作、復原 |
 | `crates/ppt-wasm` | 給前端呼叫的 WASM 介面，包含 WebGPU 繪製流程 |
 | `crates/ppt-fonts` | 原生字型服務：用 fontique 找系統字型檔，加上 Office 字型替代表（App 和測試共用） |

@@ -9,11 +9,10 @@ use std::f64::consts::PI;
 use ppt_model::chart::{Axis, AxisPos, Chart, DataLabels, Grouping, LabelPosition, LegendPos, MarkerSymbol, Plot, PlotKind, Series, format_number};
 use ppt_model::{Color, EMU_PER_PT, Line as ModelLine, Paint, RunStyle, TextBody, Xfrm};
 use ppt_text::{BodyLayout, TextEngine};
-use vello::Scene;
 use vello::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, Shape as _, Stroke, Vec2};
 use vello::peniko::Fill;
 
-use crate::{color, draw_body_layout, fill_paint, stroke_line};
+use crate::{Canvas, CanvasExt, color, draw_body_layout, fill_paint, stroke_line};
 use ppt_geometry::shape_affine;
 
 const PT: f64 = EMU_PER_PT;
@@ -36,13 +35,13 @@ fn measure(engine: &mut TextEngine, text: &str, style: &RunStyle) -> Label {
 }
 
 /// Draws `label` with its anchor point (fractions of its size) at `at`.
-fn place(scene: &mut Scene, tf: Affine, label: &Label, at: Point, ax: f64, ay: f64) {
+fn place(scene: &mut dyn Canvas, tf: Affine, label: &Label, at: Point, ax: f64, ay: f64) {
     let origin = Vec2::new(at.x - label.w * ax, at.y - label.h * ay);
     draw_body_layout(scene, &label.layout, tf * Affine::translate(origin) * Affine::scale(PT));
 }
 
 /// Draws `label` rotated by `angle` (radians) around its anchor at `at`.
-fn place_rotated(scene: &mut Scene, tf: Affine, label: &Label, at: Point, ax: f64, ay: f64, angle: f64) {
+fn place_rotated(scene: &mut dyn Canvas, tf: Affine, label: &Label, at: Point, ax: f64, ay: f64, angle: f64) {
     let t = tf * Affine::translate(at.to_vec2()) * Affine::rotate(angle) * Affine::translate(Vec2::new(-label.w * ax, -label.h * ay)) * Affine::scale(PT);
     draw_body_layout(scene, &label.layout, t);
 }
@@ -184,7 +183,7 @@ fn offset_of(l: &DataLabels, i: usize, w: f64, h: f64) -> Vec2 {
 }
 
 /// The chart drawn into the frame `xf`.
-pub fn draw_chart(scene: &mut Scene, engine: &mut TextEngine, chart: &Chart, xf: &Xfrm, view: Affine) {
+pub fn draw_chart(scene: &mut dyn Canvas, engine: &mut TextEngine, chart: &Chart, xf: &Xfrm, view: Affine) {
     let (w, h) = (xf.w as f64, xf.h as f64);
     if w <= 0.0 || h <= 0.0 {
         return;
@@ -577,7 +576,7 @@ fn point_color(chart: &Chart, s: &Series, i: usize) -> Color {
     s.point_fills.iter().find(|f| f.0 == i).map(|f| f.1.color()).unwrap_or_else(|| chart.auto_color(i))
 }
 
-fn draw_marker(scene: &mut Scene, tf: Affine, m: &ppt_model::chart::Marker, at: Point, fill: Color, line: Color) {
+fn draw_marker(scene: &mut dyn Canvas, tf: Affine, m: &ppt_model::chart::Marker, at: Point, fill: Color, line: Color) {
     let r = m.size * PT / 2.0;
     let path = match m.symbol {
         MarkerSymbol::None => return,
@@ -608,7 +607,7 @@ fn draw_marker(scene: &mut Scene, tf: Affine, m: &ppt_model::chart::Marker, at: 
 /// Pie and doughnut charts; 3D pies are drawn as a tilted disc with a side.
 #[allow(clippy::too_many_arguments)]
 fn draw_pie(
-    scene: &mut Scene,
+    scene: &mut dyn Canvas,
     engine: &mut TextEngine,
     chart: &Chart,
     p: &Plot,

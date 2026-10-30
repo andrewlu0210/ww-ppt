@@ -101,6 +101,8 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
         .item(&item("save", "儲存", Some("CmdOrCtrl+S"))?)
         .item(&item("save_as", "另存新檔…", Some("CmdOrCtrl+Shift+S"))?)
         .separator()
+        .item(&item("export_pdf", "匯出為 PDF…", Some("CmdOrCtrl+Shift+E"))?)
+        .separator()
         .item(&PredefinedMenuItem::close_window(app, Some("關閉視窗"))?)
         .build()?;
     // Undo/redo/select-all go to the editor core instead of WebKit's own handlers.

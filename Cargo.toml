@@ -15,6 +15,7 @@ ppt-text = { path = "crates/ppt-text" }
 ppt-render = { path = "crates/ppt-render" }
 ppt-editor = { path = "crates/ppt-editor" }
 ppt-fonts = { path = "crates/ppt-fonts" }
+ppt-pdf = { path = "crates/ppt-pdf" }
 
 vello = "0.11"
 parley = { version = "0.12", default-features = false, features = ["std"] }

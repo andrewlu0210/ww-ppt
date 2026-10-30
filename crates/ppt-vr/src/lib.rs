@@ -99,6 +99,12 @@ impl SlideRenderer {
         self.render_scene(&scene, width, height)
     }
 
+    /// The deck as a PDF (every slide, hidden ones included, to line up with reference PDFs).
+    pub fn export_pdf(&mut self, pres: &Presentation) -> Result<Vec<u8>, String> {
+        let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+        ppt_pdf::export_pdf(pres, &mut cx, ppt_pdf::PdfOptions { include_hidden: true })
+    }
+
     /// Renders a slide with an animation frame applied.
     pub fn render_animated(&mut self, pres: &Presentation, slide: &Slide, frame: &ppt_model::anim::Frame, width: u32) -> Result<RgbaImage, String> {
         let height = ((width as f64) * pres.slide_height as f64 / pres.slide_width as f64).round().max(1.0) as u32;

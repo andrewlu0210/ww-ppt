@@ -10,6 +10,7 @@ ppt-model.workspace = true
 ppt-ooxml.workspace = true
 ppt-text.workspace = true
 ppt-render.workspace = true
+ppt-pdf.workspace = true
 ppt-fonts.workspace = true
 ppt-geometry.workspace = true
 vello.workspace = true

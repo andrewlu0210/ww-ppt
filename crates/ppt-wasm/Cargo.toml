@@ -13,6 +13,7 @@ ppt-ooxml.workspace = true
 ppt-geometry.workspace = true
 ppt-text.workspace = true
 ppt-render.workspace = true
+ppt-pdf.workspace = true
 ppt-editor.workspace = true
 vello.workspace = true
 # Must match the installed wasm-bindgen CLI exactly.

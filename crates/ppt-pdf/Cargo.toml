@@ -1,0 +1,14 @@
+[package]
+name = "ppt-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ppt-model.workspace = true
+ppt-render.workspace = true
+ppt-text.workspace = true
+krilla = { version = "0.8.2", default-features = false, features = ["raster-images"] }
+
+[dev-dependencies]
+ppt-ooxml.workspace = true

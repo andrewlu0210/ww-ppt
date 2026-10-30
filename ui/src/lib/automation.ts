@@ -93,6 +93,9 @@ async function step(cmd: string, h: Hooks) {
     case "save":
       await writeFile(rest, engine.savePptx());
       break;
+    case "pdf":
+      await writeFile(rest, engine.exportPdf());
+      break;
     case "thumbinfo": {
       const t = (await engine.renderThumbnail(num(0), 320, false)) as { width: number; height: number; pixels: Uint8Array };
       let dark = 0;

@@ -478,6 +478,15 @@ impl App {
         ppt_ooxml::save_pptx(&self.editor.pres).map_err(js_err)
     }
 
+    /// The deck as a PDF (slides hidden from the show are left out).
+    #[wasm_bindgen(js_name = exportPdf)]
+    pub fn export_pdf(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.editor.end_text_edit(&mut self.engine);
+        self.dirty = true;
+        let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+        ppt_pdf::export_pdf(&self.editor.pres, &mut cx, ppt_pdf::PdfOptions::default()).map_err(|e| JsValue::from_str(&e))
+    }
+
     /// Increases on every document change; the shell compares it to know about unsaved edits.
     pub fn revision(&self) -> f64 {
         self.editor.revision() as f64

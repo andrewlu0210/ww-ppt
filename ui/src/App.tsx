@@ -236,6 +236,18 @@ export function App() {
 
   const save = useCallback(async () => (docRef.current.path ? saveTo(docRef.current.path) : saveAs()), [saveAs, saveTo]);
 
+  const exportPdf = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const path = await pickSavePath(docRef.current.name, "pdf");
+    if (!path) return;
+    try {
+      await writeFile(path, engine.exportPdf());
+    } catch (e) {
+      await showError(`無法匯出 PDF：${String(e)}`);
+    }
+  }, []);
+
   /** Asks about unsaved changes; resolves true when it is fine to discard the document. */
   const confirmDiscard = useCallback(async () => {
     if (!dirtyRef.current) return true;
@@ -398,6 +410,9 @@ export function App() {
           break;
         case "saveAs":
           await saveAs();
+          break;
+        case "exportPdf":
+          await exportPdf();
           break;
         case "undo":
           engine.undo();
@@ -579,7 +594,7 @@ export function App() {
       refresh();
       focusCanvas();
     },
-    [confirmDiscard, documentReplaced, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow],
+    [confirmDiscard, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow],
   );
 
   // Native menu items are forwarded here by the backend.
@@ -589,6 +604,7 @@ export function App() {
       new: { kind: "new" },
       save: { kind: "save" },
       save_as: { kind: "saveAs" },
+      export_pdf: { kind: "exportPdf" },
       undo: { kind: "undo" },
       redo: { kind: "redo" },
       new_slide: { kind: "newSlide" },
