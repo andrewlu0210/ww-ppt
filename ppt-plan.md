@@ -151,3 +151,12 @@ ww-ppt/
 2. **無障礙**：畫布對 VoiceOver 不可見，要另外維護一棵隱藏的 ARIA DOM 樹。
 3. **WebGPU 相容性**：舊版 macOS 要有 tiny-skia → Canvas2D 的 CPU 退回方案。
 4. **工程量**：完整的 PowerPoint 是好幾年、多人的規模。建議 M0、M1 先把範圍收窄到「能好好編輯和放映常見簡報」。
+
+## 八、To Do
+
+發佈前（之後再處理）：
+
+- [ ] **打包**：用 `tauri build` 產生正式版 `.app` 與 `.dmg`。
+- [ ] **Developer ID 簽章與公證**：需要 Apple Developer 帳號與 Developer ID Application 憑證；簽章後送 notarization 並 staple，別人下載後才不會被 macOS 擋下。
+- [ ] **`.pptx` 檔案關聯**：在 `tauri.conf.json` 宣告 `.pptx` 的 UTI／文件類型，讓 Finder 點兩下可用 ww-ppt 開啟。
+- [ ] **冷啟動時間量測**：用正式打包的版本量，目標 < 1 秒（見「五、效能目標」）。
