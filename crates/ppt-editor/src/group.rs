@@ -47,7 +47,7 @@ pub(crate) fn detach_partial_groups(copies: &mut [Shape], slide: &[Shape]) {
 }
 
 impl Editor {
-    fn members(&self, group: ShapeId) -> Vec<ShapeId> {
+    pub(crate) fn members(&self, group: ShapeId) -> Vec<ShapeId> {
         self.current_shapes().iter().filter(|s| s.group == Some(group)).map(|s| s.id).collect()
     }
 

@@ -28,6 +28,7 @@ import {
   writeFile,
 } from "./lib/backend";
 import { startAutomation } from "./lib/automation";
+import { cyclePanes } from "./lib/keyboard";
 import { SHAPES_MARKER, type Command, type TableStyleInfo } from "./lib/commands";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
@@ -36,6 +37,8 @@ import { FindBar, type FindBarHandle } from "./components/FindBar";
 import { SpellMenu, type SpellHit } from "./components/SpellMenu";
 import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
+import type { AltTextInfo } from "./components/AltTextDialog";
+import { SelectionPane } from "./components/SelectionPane";
 import type { BackgroundInfo, ColorSchemeInfo, FontSchemeInfo, ThemeInfo } from "./components/DesignTab";
 import { setThemePalette } from "./components/ColorPicker";
 
@@ -78,6 +81,8 @@ const SORTER_BASE = 200;
 
 interface ViewPrefs {
   ruler: boolean;
+  /** The selection pane is open. */
+  pane: boolean;
   grid: boolean;
   /** Slide sorter thumbnail width in CSS px. */
   sorterSize: number;
@@ -87,9 +92,9 @@ interface ViewPrefs {
 function loadViewPrefs(): ViewPrefs {
   try {
     const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as Partial<ViewPrefs> | null;
-    return { ruler: v?.ruler === true, grid: v?.grid === true, sorterSize: typeof v?.sorterSize === "number" ? v.sorterSize : SORTER_BASE };
+    return { ruler: v?.ruler === true, pane: v?.pane === true, grid: v?.grid === true, sorterSize: typeof v?.sorterSize === "number" ? v.sorterSize : SORTER_BASE };
   } catch {
-    return { ruler: false, grid: false, sorterSize: SORTER_BASE };
+    return { ruler: false, pane: false, grid: false, sorterSize: SORTER_BASE };
   }
 }
 
@@ -571,6 +576,10 @@ export function App() {
         setViewPrefs((p) => ({ ...p, ruler: !p.ruler }));
         return;
       }
+      if (c.kind === "selectionPane") {
+        setViewPrefs((p) => ({ ...p, pane: !p.pane }));
+        return;
+      }
       if (c.kind === "showGrid") {
         setViewPrefs((p) => ({ ...p, grid: c.on }));
         return;
@@ -761,6 +770,9 @@ export function App() {
           break;
         case "showGuides":
           engine.setShowGuides(c.on);
+          break;
+        case "altText":
+          engine.setAltText(c.text, c.decorative);
           break;
         case "snapToGrid":
           engine.setSnapToGrid(c.on);
@@ -962,10 +974,17 @@ export function App() {
     return () => void unlisten.then((f) => f());
   }, [run, refresh]);
 
-  // F5 / Shift+F5 start the show, as in PowerPoint for Windows.
+  // F5 / Shift+F5 start the show, as in PowerPoint for Windows; F6 cycles the panes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "F5" || showingRef.current) return;
+      if (showingRef.current) return;
+      if (e.key === "F6") {
+        // F6 / Shift+F6 move between the panes, as in PowerPoint.
+        e.preventDefault();
+        cyclePanes(e.shiftKey);
+        return;
+      }
+      if (e.key !== "F5") return;
       e.preventDefault();
       void run({ kind: "slideShow", fromBeginning: !e.shiftKey });
     };
@@ -1023,8 +1042,10 @@ export function App() {
         loadBackground={() => (engineRef.current?.background() as BackgroundInfo | undefined) ?? null}
         viewMode={viewMode}
         rulerOn={viewPrefs.ruler}
+        paneOpen={viewPrefs.pane}
+        loadAltText={() => (engineRef.current?.altText() as AltTextInfo | null | undefined) ?? null}
       />
-      <main className={viewMode === "sorter" && !showing ? "workspace sorting" : "workspace"}>
+      <main className={["workspace", viewMode === "sorter" && !showing && "sorting", viewPrefs.pane && !showing && "with-pane"].filter(Boolean).join(" ")}>
         {viewMode === "sorter" && !showing && (
           <SlideSorter
             count={status.slideCount}
@@ -1105,6 +1126,14 @@ export function App() {
             />
           )}
         </section>
+        {viewPrefs.pane && !showing && (
+          <SelectionPane
+            engine={engineRef.current}
+            version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}`}
+            onChange={refresh}
+            onClose={() => setViewPrefs((p) => ({ ...p, pane: false }))}
+          />
+        )}
       </main>
       <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} run={run} />
     </div>

@@ -574,7 +574,7 @@ impl SlideOut<'_> {
 
 fn shape_unchanged(shape: &Shape, src: &ShapeSource) -> bool {
     let p = &src.parsed;
-    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind && shape.group == p.group && shape.placeholder == p.placeholder && shape.geometry == p.geometry && shape.shadow == p.shadow
+    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind && shape.group == p.group && shape.placeholder == p.placeholder && shape.geometry == p.geometry && shape.shadow == p.shadow && shape.name == p.name && shape.access == p.access
 }
 
 fn shadow_xml(s: &ppt_model::Shadow) -> String {
@@ -634,6 +634,66 @@ pub(crate) fn wrap(xml: &str, namespaces: &[(String, String)]) -> (String, usize
     (format!("{head}{xml}</w>"), offset)
 }
 
+/// `ext` of `a:cNvPr/a:extLst` marking a shape decorative.
+const DECORATIVE_EXT: &str = "{C183D7F6-B498-43B3-948B-1728B52AA6E4}";
+
+fn decorative_ext() -> String {
+    format!(r#"<a:ext uri="{DECORATIVE_EXT}"><adec:decorative xmlns:adec="http://schemas.microsoft.com/office/drawing/2017/decorative" val="1"/></a:ext>"#)
+}
+
+/// `p:cNvPr` of a generated shape: id, name, alternative text, visibility.
+fn c_nv_pr_xml(id: u32, shape: &Shape) -> String {
+    let a = &shape.access;
+    let descr = if a.alt_text.is_empty() { String::new() } else { format!(r#" descr="{}""#, esc(&a.alt_text)) };
+    let hidden = if a.hidden { r#" hidden="1""# } else { "" };
+    let open = format!(r#"<p:cNvPr id="{id}" name="{}"{descr}{hidden}"#, esc(&shape.name));
+    if a.decorative { format!("{open}><a:extLst>{}</a:extLst></p:cNvPr>", decorative_ext()) } else { format!("{open}/>") }
+}
+
+/// A loaded `cNvPr` (in `src`) rewritten with the shape's name, alternative
+/// text, decorative mark and visibility; other attributes and children are kept.
+fn patch_c_nv_pr(src: &str, n: Node, shape: &Shape) -> String {
+    let a = &shape.access;
+    let mut tag = open_tag(src, n);
+    let set = |tag: &mut String, name: &str, value: Option<&str>| {
+        let key = format!(" {name}=\"");
+        if let Some(i) = tag.find(&key) {
+            let end = tag[i + key.len()..].find('"').map_or(tag.len(), |j| i + key.len() + j + 1);
+            tag.replace_range(i..end, "");
+        }
+        if let Some(v) = value {
+            tag.push_str(&format!(r#" {name}="{}""#, esc(v)));
+        }
+    };
+    set(&mut tag, "name", Some(&shape.name));
+    set(&mut tag, "descr", (!a.alt_text.is_empty()).then_some(a.alt_text.as_str()));
+    set(&mut tag, "hidden", a.hidden.then_some("1"));
+    // Children: everything but our decorative ext, then that ext when wanted.
+    let mut inner = String::new();
+    let mut exts = String::new();
+    let mut ext_tag = None;
+    for c in n.children().filter(|c| c.is_element()) {
+        if c.tag_name().name() == "extLst" {
+            ext_tag = Some(open_tag(src, c));
+            for e in c.children().filter(|e| e.is_element() && e.attribute("uri") != Some(DECORATIVE_EXT)) {
+                exts.push_str(&src[e.range()]);
+            }
+        } else {
+            inner.push_str(&src[c.range()]);
+        }
+    }
+    if a.decorative {
+        exts.push_str(&decorative_ext());
+    }
+    if !exts.is_empty() {
+        let open = ext_tag.unwrap_or_else(|| "<a:extLst".to_string());
+        let close = open.split_whitespace().next().unwrap_or("<a:extLst").replacen('<', "</", 1);
+        inner.push_str(&format!("{open}>{exts}{close}>"));
+    }
+    let close = tag.split_whitespace().next().unwrap_or("<p:cNvPr").replacen('<', "</", 1);
+    if inner.is_empty() { format!("{tag}/>") } else { format!("{tag}>{inner}{close}>") }
+}
+
 /// Rewrites a loaded shape's XML for `out`, touching only what changed.
 fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut SlideOut) -> String {
     out.need_namespaces(&src.namespaces);
@@ -644,7 +704,10 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
     let Ok(doc) = Document::parse(&wrapped) else { return src.xml().to_string() };
     let Some(el) = doc.root_element().first_element_child() else { return src.xml().to_string() };
     let mut edits = Vec::new();
-    if let Some(c_nv_pr) = el.descendants().find(|n| n.tag_name().name() == "cNvPr")
+    let c_nv_pr = el.descendants().find(|n| n.tag_name().name() == "cNvPr");
+    // Applied in pass 2, after the id is settled.
+    let names_changed = shape.name != src.parsed.name || shape.access != src.parsed.access;
+    if let Some(c_nv_pr) = c_nv_pr
         && let Some(attr) = c_nv_pr.attribute_node("id")
     {
         let want: u32 = attr.value().parse().unwrap_or(0);
@@ -694,6 +757,9 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
     let geometry_changed = shape.geometry != p.geometry;
     let shadow_changed = shape.shadow != p.shadow;
     let mut edits = Vec::new();
+    if names_changed && let Some(c) = el.descendants().find(|n| n.tag_name().name() == "cNvPr") {
+        edits.push((c.range(), patch_c_nv_pr(&wrapped, c, shape)));
+    }
     match el.tag_name().name() {
         "sp" | "cxnSp" | "pic" => {
             if let (ShapeKind::Picture { crop, .. }, ShapeKind::Picture { crop: old, .. }) = (&shape.kind, &p.kind)
@@ -819,7 +885,7 @@ fn rebuild_sp_pr(src: &str, sp_pr: Option<Node>, shape: &Shape, changes: SpPrCha
 fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
     let id = out.take_id(0);
     out.written.insert(shape.id, id);
-    let name = esc(&shape.name);
+    let c_nv_pr = c_nv_pr_xml(id, shape);
     let ph = shape.placeholder.as_ref().map(|ph| {
         let ty = if ph.kind == "obj" { String::new() } else { format!(r#" type="{}""#, esc(&ph.kind)) };
         let idx = if ph.idx != 0 { format!(r#" idx="{}""#, ph.idx) } else { String::new() };
@@ -842,10 +908,10 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             sp_pr.push_str("</p:spPr>");
             let c_nv_sp_pr = if text_box { r#"<p:cNvSpPr txBox="1"/>"# } else { "<p:cNvSpPr/>" };
             let tx = shape.text.as_ref().map(|t| new_tx_body_xml(t, out)).unwrap_or_default();
-            Some(format!(r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{name}"/>{c_nv_sp_pr}{nv_pr}</p:nvSpPr>{sp_pr}{tx}</p:sp>"#))
+            Some(format!(r#"<p:sp><p:nvSpPr>{c_nv_pr}{c_nv_sp_pr}{nv_pr}</p:nvSpPr>{sp_pr}{tx}</p:sp>"#))
         }
         ShapeKind::Table(table) => Some(format!(
-            r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="{id}" name="{name}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>{}<a:graphic><a:graphicData uri="{TABLE_URI}">{}</a:graphicData></a:graphic></p:graphicFrame>"#,
+            r#"<p:graphicFrame><p:nvGraphicFramePr>{c_nv_pr}<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>{}<a:graphic><a:graphicData uri="{TABLE_URI}">{}</a:graphicData></a:graphic></p:graphicFrame>"#,
             xfrm_xml("p:xfrm", &shape.xfrm),
             table_xml(table, None, &mut |l| link_rel(out, l))
         )),
@@ -853,7 +919,7 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             let part = out.media.part_for(out.pres, key)?;
             let rid = out.rel_for(&format!("{REL_BASE}image"), &part, false);
             Some(format!(
-                r#"<p:pic><p:nvPicPr><p:cNvPr id="{id}" name="{name}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>{nv_pr}</p:nvPicPr><p:blipFill><a:blip r:embed="{rid}"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}{}{}</p:spPr></p:pic>"#,
+                r#"<p:pic><p:nvPicPr>{c_nv_pr}<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>{nv_pr}</p:nvPicPr><p:blipFill><a:blip r:embed="{rid}"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}{}{}</p:spPr></p:pic>"#,
                 src_rect_xml(crop),
                 xfrm_xml("a:xfrm", &shape.xfrm),
                 geometry_xml(&shape.geometry),
@@ -929,6 +995,7 @@ fn moved_as_a_whole(members: &[Shape], container: &ContainerSource, out: &SlideO
     let same_otherwise = members.iter().zip(&srcs).all(|(s, src)| {
         let p = &src.parsed;
         src.container.as_deref() == Some(container) && s.fill == p.fill && s.line == p.line && s.text == p.text && s.kind == p.kind && s.group == p.group
+            && s.geometry == p.geometry && s.shadow == p.shadow && s.placeholder == p.placeholder && s.name == p.name && s.access == p.access
     });
     if !same_otherwise {
         return None;

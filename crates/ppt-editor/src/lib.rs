@@ -3,6 +3,7 @@
 //! All pointer coordinates are in slide space (EMU). The host converts from
 //! screen coordinates and passes tolerances already scaled to EMU.
 
+mod access;
 mod anim;
 mod design;
 mod draw;
@@ -28,6 +29,7 @@ use ppt_model::{
 };
 use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
 
+pub use access::PaneItem;
 pub use draw::ARROW_LINE;
 pub use find::{FindMatch, FindOptions, FindPlace, find_in};
 pub use footer::{DateText, HeaderFooter};
@@ -1414,9 +1416,21 @@ impl Editor {
         match key {
             "Backspace" | "Delete" => self.delete_selected(),
             "Escape" => {
+                // Inside a group, Esc goes back to the whole group first.
+                if let Some(g) = self.entered_group.take() {
+                    self.selection = self.members(g);
+                    return true;
+                }
                 let had = !self.selection.is_empty();
                 self.selection.clear();
                 had
+            }
+            // Enter on a group steps into it, selecting its first member.
+            "Enter" if self.selection_group().is_some() => {
+                let g = self.selection_group().expect("checked");
+                self.entered_group = Some(g);
+                self.selection = self.members(g).into_iter().take(1).collect();
+                true
             }
             "Enter" | "F2" => {
                 if let Some(id) = self.selected_shape().filter(|s| matches!(s.kind, ShapeKind::Table(_))).map(|s| s.id) {
@@ -1432,8 +1446,22 @@ impl Editor {
                 self.selection = self.current_shapes().iter().filter(|s| selectable(s)).map(|s| s.id).collect();
                 true
             }
+            // Option+←/→ rotates by 15° (1° with Shift), like PowerPoint.
+            "ArrowLeft" | "ArrowRight" if m.alt => {
+                let deg = if m.shift { 1.0 } else { 15.0 };
+                self.rotate_selection(if key == "ArrowLeft" { -deg } else { deg })
+            }
             "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" => {
-                let step = if m.shift { EMU_PER_INCH / 10.0 } else { EMU_PER_INCH / 100.0 } as i64;
+                // ⌘ nudges finely past the grid; with snap to grid a step is one grid unit.
+                let step = if m.shift {
+                    EMU_PER_INCH / 10.0
+                } else if self.pres.view.snap_to_grid && !m.meta {
+                    self.pres.view.grid_spacing as f64
+                } else if m.meta {
+                    EMU_PER_INCH / 400.0
+                } else {
+                    EMU_PER_INCH / 100.0
+                } as i64;
                 let (dx, dy) = match key {
                     "ArrowLeft" => (-step, 0),
                     "ArrowRight" => (step, 0),
@@ -1482,20 +1510,33 @@ impl Editor {
         true
     }
 
+    /// Tab / Shift+Tab: selects the next or previous shape in drawing order.
+    /// Groups count as one shape unless the group is entered.
     fn cycle_selection(&mut self, forward: bool) -> bool {
-        let shapes: Vec<&Shape> = self.current_shapes().iter().filter(|s| selectable(s)).collect();
-        if shapes.is_empty() {
+        let mut units: Vec<Vec<ShapeId>> = Vec::new();
+        for s in self.current_shapes().iter().filter(|s| selectable(s)) {
+            if let Some(g) = self.entered_group
+                && s.group != Some(g)
+            {
+                continue;
+            }
+            let target = self.click_target(s.id);
+            if !units.iter().any(|u| u.contains(&s.id)) {
+                units.push(target);
+            }
+        }
+        if units.is_empty() {
             return false;
         }
-        let current = self.selection.last().and_then(|id| shapes.iter().position(|s| s.id == *id));
-        let n = shapes.len();
+        let current = self.selection.last().and_then(|id| units.iter().position(|u| u.contains(id)));
+        let n = units.len();
         let next = match current {
             Some(i) if forward => (i + 1) % n,
             Some(i) => (i + n - 1) % n,
             None if forward => 0,
             None => n - 1,
         };
-        self.selection = vec![shapes[next].id];
+        self.selection = units.swap_remove(next);
         true
     }
 
@@ -1601,28 +1642,10 @@ impl Editor {
         }
         let before = self.snapshot();
         let selection = self.selection.clone();
+        let entered = self.entered_group;
         let shapes = &mut self.pres.slides[self.slide].shapes;
         let original = shapes.clone();
-        match order {
-            ZOrder::Front | ZOrder::Back => {
-                let (sel, rest): (Vec<Shape>, Vec<Shape>) = shapes.drain(..).partition(|s| selection.contains(&s.id));
-                *shapes = if order == ZOrder::Front { [rest, sel].concat() } else { [sel, rest].concat() };
-            }
-            ZOrder::Forward => {
-                for i in (0..shapes.len().saturating_sub(1)).rev() {
-                    if selection.contains(&shapes[i].id) && !selection.contains(&shapes[i + 1].id) {
-                        shapes.swap(i, i + 1);
-                    }
-                }
-            }
-            ZOrder::Backward => {
-                for i in 1..shapes.len() {
-                    if selection.contains(&shapes[i].id) && !selection.contains(&shapes[i - 1].id) {
-                        shapes.swap(i, i - 1);
-                    }
-                }
-            }
-        }
+        *shapes = reordered(std::mem::take(shapes), &selection, entered, order);
         if *shapes == original {
             return false;
         }
@@ -1813,8 +1836,58 @@ fn grow_size(size: f32, up: bool) -> f32 {
 }
 
 /// Hidden content kept only for saving is never selectable.
+/// The shapes with the selection moved in z-order. A group moves as one block
+/// (and others step over it whole); members of the entered group move only
+/// among themselves.
+fn reordered(shapes: Vec<Shape>, selection: &[ShapeId], entered: Option<ShapeId>, order: ZOrder) -> Vec<Shape> {
+    // Consecutive shapes of one (not entered) group form a block.
+    let mut blocks: Vec<Vec<Shape>> = Vec::new();
+    for s in shapes {
+        let joins = s.group.is_some() && s.group != entered && blocks.last().is_some_and(|b| b[0].group == s.group);
+        if joins {
+            blocks.last_mut().expect("checked").push(s);
+        } else {
+            blocks.push(vec![s]);
+        }
+    }
+    let selected = |b: &Vec<Shape>| b.iter().any(|s| selection.contains(&s.id));
+    // Members of the entered group stay inside it.
+    let scope = |b: &Vec<Shape>| if entered.is_some() && b[0].group == entered { entered } else { None };
+    let step_forward = |blocks: &mut Vec<Vec<Shape>>| {
+        let mut moved = false;
+        for i in (0..blocks.len().saturating_sub(1)).rev() {
+            if selected(&blocks[i]) && !selected(&blocks[i + 1]) && scope(&blocks[i]) == scope(&blocks[i + 1]) {
+                blocks.swap(i, i + 1);
+                moved = true;
+            }
+        }
+        moved
+    };
+    let step_backward = |blocks: &mut Vec<Vec<Shape>>| {
+        let mut moved = false;
+        for i in 1..blocks.len() {
+            if selected(&blocks[i]) && !selected(&blocks[i - 1]) && scope(&blocks[i]) == scope(&blocks[i - 1]) {
+                blocks.swap(i, i - 1);
+                moved = true;
+            }
+        }
+        moved
+    };
+    match order {
+        ZOrder::Forward => {
+            step_forward(&mut blocks);
+        }
+        ZOrder::Backward => {
+            step_backward(&mut blocks);
+        }
+        ZOrder::Front => while step_forward(&mut blocks) {},
+        ZOrder::Back => while step_backward(&mut blocks) {},
+    }
+    blocks.into_iter().flatten().collect()
+}
+
 fn selectable(shape: &Shape) -> bool {
-    !matches!(&shape.kind, ShapeKind::Opaque { label } if label == "hidden")
+    !shape.access.hidden && !matches!(&shape.kind, ShapeKind::Opaque { label } if label == "hidden")
 }
 
 fn can_hold_text(shape: &Shape) -> bool {

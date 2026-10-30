@@ -187,7 +187,7 @@ async function step(cmd: string, h: Hooks) {
       // A key on an element: `press .find-input Enter shift`.
       const el = document.querySelector<HTMLElement>(args[0]);
       if (!el) throw new Error(`no ${args[0]}`);
-      el.dispatchEvent(new KeyboardEvent("keydown", { key: args[1], shiftKey: has("shift"), bubbles: true }));
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: args[1], shiftKey: has("shift"), metaKey: has("meta"), bubbles: true, cancelable: true }));
       break;
     }
     case "rclick": {
@@ -205,6 +205,12 @@ async function step(cmd: string, h: Hooks) {
         .find((b) => b.textContent === rest)
         ?.click();
       break;
+    case "focused": {
+      // What has keyboard focus, e.g. `focused` → "BUTTON.rb-btn 色彩 ▾".
+      const el = document.activeElement as HTMLElement | null;
+      await log(`focused ${el?.tagName}.${(el?.className || "").toString().split(" ").join(".")} ${el?.textContent?.trim().slice(0, 30) ?? ""}`);
+      break;
+    }
     case "dom": {
       // Count and text of the elements matching a selector, e.g. `dom .anim-badge`.
       const els = Array.from(document.querySelectorAll<HTMLElement>(rest));

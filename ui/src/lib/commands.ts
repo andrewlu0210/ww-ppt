@@ -88,6 +88,8 @@ export type Command =
   | { kind: "toggleNotes" }
   | { kind: "viewMode"; mode: "normal" | "sorter" }
   | { kind: "toggleRuler" }
+  | { kind: "selectionPane" }
+  | { kind: "altText"; text: string; decorative: boolean }
   | { kind: "showGrid"; on: boolean }
   | { kind: "showGuides"; on: boolean }
   | { kind: "snapToGrid"; on: boolean }

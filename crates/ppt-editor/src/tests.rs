@@ -1296,3 +1296,117 @@ fn new_guides_step_off_existing_ones() {
     assert_eq!(g.len(), 2);
     assert!((g[1].pos - g[0].pos - 360_000).abs() < 1_600, "{g:?}");
 }
+
+#[test]
+fn keyboard_tabs_through_groups_steps_in_and_out_rotates_and_nudges() {
+    let mut eng = engine();
+    let (mut e, a) = editor();
+    let b = add_rect(&mut e, 3 * IN, IN);
+    let c = add_rect(&mut e, 5 * IN, IN);
+    let no = Modifiers::default();
+    // Group b and c: Tab treats the group as one stop.
+    e.selection = vec![b, c];
+    assert!(e.group_selected());
+    e.selection.clear();
+    assert!(e.key_down(&mut eng, "Tab", no));
+    assert_eq!(e.selection, vec![a]);
+    assert!(e.key_down(&mut eng, "Tab", no));
+    assert!(e.selection_group().is_some() && e.selection.len() == 2);
+    assert!(e.key_down(&mut eng, "Tab", no));
+    assert_eq!(e.selection, vec![a], "wraps around");
+    assert!(e.key_down(&mut eng, "Tab", Modifiers { shift: true, ..no }));
+    // Enter steps into the group; Tab then cycles its members; Esc goes back to the group.
+    assert!(e.key_down(&mut eng, "Enter", no));
+    assert_eq!(e.selection, vec![b]);
+    assert!(e.key_down(&mut eng, "Tab", no));
+    assert_eq!(e.selection, vec![c]);
+    assert!(e.key_down(&mut eng, "Tab", no));
+    assert_eq!(e.selection, vec![b], "stays inside the group");
+    assert!(e.key_down(&mut eng, "Escape", no));
+    assert!(e.selection_group().is_some() && e.entered_group.is_none());
+    assert!(e.key_down(&mut eng, "Escape", no));
+    assert!(e.selection.is_empty());
+
+    // Option+→ rotates 15°, Option+Shift+← 1° back.
+    e.selection = vec![a];
+    assert!(e.key_down(&mut eng, "ArrowRight", Modifiers { alt: true, ..no }));
+    assert!(e.key_down(&mut eng, "ArrowLeft", Modifiers { alt: true, shift: true, ..no }));
+    assert!((xfrm(&e, a).rot - 14.0).abs() < 1e-9);
+    // With snap to grid an arrow moves one grid unit; ⌘ moves finely past it.
+    assert!(e.set_snap_to_grid(&mut eng, true));
+    let x0 = xfrm(&e, a).x;
+    assert!(e.key_down(&mut eng, "ArrowRight", no));
+    assert_eq!(xfrm(&e, a).x - x0, e.pres.view.grid_spacing);
+    assert!(e.key_down(&mut eng, "ArrowLeft", Modifiers { meta: true, ..no }));
+    assert_eq!(xfrm(&e, a).x - x0, e.pres.view.grid_spacing - IN / 400);
+}
+
+#[test]
+fn selection_pane_lists_hides_renames_and_reorders() {
+    let mut eng = engine();
+    let (mut e, a) = editor();
+    let b = add_rect(&mut e, 3 * IN, IN);
+    let c = add_rect(&mut e, 5 * IN, IN);
+    e.selection = vec![b, c];
+    assert!(e.group_selected());
+    let g = e.pres.shape(0, b).unwrap().group.unwrap();
+    // Top-most first; group members under their header.
+    let rows: Vec<(ShapeId, u8)> = e.pane_items().iter().map(|i| (i.id, i.depth)).collect();
+    assert_eq!(rows, vec![(g, 0), (c, 1), (b, 1), (a, 0)]);
+    // Selecting a member enters its group; the header selects the whole group.
+    assert!(e.select_in_pane(&mut eng, c, false));
+    assert_eq!((e.selection.clone(), e.entered_group), (vec![c], Some(g)));
+    assert!(e.select_in_pane(&mut eng, g, false));
+    assert!(e.selection_group() == Some(g) && e.entered_group.is_none());
+    // Hiding the group hides both members, deselects them, and they no longer hit.
+    assert!(e.select_in_pane(&mut eng, c, false));
+    assert!(e.set_shape_hidden(&mut eng, g, true));
+    assert_eq!(e.entered_group, None, "a hidden group is left");
+    assert!(e.selection.is_empty() && e.pane_items()[0].hidden);
+    assert_eq!(e.hit_test(3.5 * IN as f64, 1.5 * IN as f64, 0.0), None);
+    assert!(!e.select_in_pane(&mut eng, b, false), "hidden shapes are not selectable");
+    assert!(e.set_all_hidden(&mut eng, false));
+    // Rename, and move `a` up to the front.
+    assert!(e.rename_shape(&mut eng, a, "標誌"));
+    assert!(!e.rename_shape(&mut eng, a, "  "));
+    assert!(e.move_in_pane(&mut eng, a, true));
+    assert_eq!(e.pane_items()[0].name, "標誌");
+}
+
+#[test]
+fn alt_text_hidden_and_decorative_marks_are_saved() {
+    let mut eng = engine();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    let id = e.pres.slides[0].shapes[0].id;
+    e.selection = vec![id];
+    assert!(e.set_alt_text(&mut eng, " 公司標誌 ", true));
+    assert_eq!(e.alt_text(), Some(("公司標誌".to_string(), true)));
+    assert!(e.rename_shape(&mut eng, id, "主標題"));
+    let second = e.pres.slides[0].shapes[1].id;
+    assert!(e.set_shape_hidden(&mut eng, second, true));
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    let xml = zip_part(&saved, "ppt/slides/slide1.xml");
+    assert!(xml.contains(r#"name="主標題""#) && xml.contains(r#"descr="公司標誌""#) && xml.contains(r#"hidden="1""#), "{xml}");
+    assert!(xml.contains("adec:decorative"));
+    let re = ppt_ooxml::parse_pptx(&saved).unwrap();
+    let s0 = &re.slides[0].shapes[0];
+    assert_eq!((s0.name.as_str(), s0.access.alt_text.as_str(), s0.access.decorative), ("主標題", "公司標誌", true));
+    assert!(re.slides[0].shapes[1].access.hidden, "hidden shapes load as shapes, not raw XML");
+    // Grouped members keep their marks too (the group is not copied verbatim then).
+    e.selection = e.pres.slides[0].shapes.iter().take(2).map(|s| s.id).collect();
+    assert!(e.set_shape_hidden(&mut eng, second, false));
+    e.selection = e.pres.slides[0].shapes.iter().take(2).map(|s| s.id).collect();
+    assert!(e.group_selected());
+    let re = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&e.pres).unwrap()).unwrap();
+    let saved = ppt_ooxml::save_pptx(&re).unwrap();
+    let mut again = Editor::new(ppt_ooxml::parse_pptx(&saved).unwrap());
+    let member = again.pres.slides[0].shapes[1].id;
+    assert!(again.set_shape_hidden(&mut eng, member, true));
+    let xml = zip_part(&ppt_ooxml::save_pptx(&again.pres).unwrap(), "ppt/slides/slide1.xml");
+    assert!(xml.contains("<p:grpSp>") && xml.contains(r#"hidden="1""#), "{xml}");
+    // Clearing the marks removes them again.
+    e.selection = vec![id];
+    assert!(e.set_alt_text(&mut eng, "", false));
+    let xml = zip_part(&ppt_ooxml::save_pptx(&e.pres).unwrap(), "ppt/slides/slide1.xml");
+    assert!(!xml.contains("descr=") && !xml.contains("decorative"), "{xml}");
+}

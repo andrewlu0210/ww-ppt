@@ -1829,3 +1829,174 @@ button {
 .grid-menu {
   width: 270px;
 }
+
+/* Keyboard focus: a clear ring on whatever control has it. */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+[role="tab"]:focus-visible,
+.slide-item:focus-visible {
+  outline: 2px solid #2f6fd6;
+  outline-offset: 1px;
+  position: relative;
+  z-index: 1;
+}
+
+.slide-item:focus-visible .slide-card {
+  outline: 2px solid #2f6fd6;
+  outline-offset: 3px;
+}
+
+.slide-sorter:focus-visible .sorter-item.current .sorter-card {
+  outline-color: #2f6fd6;
+}
+
+/* A pane reached with F6 is outlined briefly. */
+.pane-focus {
+  outline: 3px solid rgb(47 111 214 / 0.7) !important;
+  outline-offset: -3px;
+  transition: outline-color 0.6s;
+}
+
+.slide-item:focus-visible {
+  outline: none;
+}
+
+/* Selection pane (選取窗格), on the right of the editor. */
+.workspace.with-pane {
+  grid-template-columns: 200px 1fr 230px;
+}
+
+.selection-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: #fafafa;
+  font-size: 12px;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px 4px;
+}
+
+.pane-title {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+}
+
+.pane-close {
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.pane-tools {
+  display: flex;
+  gap: 4px;
+  padding: 4px 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-tools button {
+  font: inherit;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+}
+
+.pane-tools .spacer {
+  flex: 1;
+}
+
+.pane-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  outline: none;
+}
+
+.pane-list:focus-visible .pane-row.selected {
+  outline: 2px solid #2f6fd6;
+  outline-offset: -2px;
+}
+
+.pane-empty {
+  padding: 10px;
+  color: var(--muted);
+}
+
+.pane-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-right: 4px;
+  cursor: default;
+}
+
+.pane-row:hover {
+  background: #eef1f5;
+}
+
+.pane-row.selected {
+  background: #dce8fb;
+}
+
+.pane-row.hidden .pane-name,
+.pane-row.hidden .pane-kind {
+  color: #a0a0a0;
+}
+
+.pane-kind {
+  width: 16px;
+  text-align: center;
+  color: #5a6b85;
+}
+
+.pane-name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pane-rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 1px 4px;
+}
+
+.pane-eye {
+  display: flex;
+  border: 0;
+  background: transparent;
+  color: #555;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+.pane-eye:hover {
+  background: #d9dee6;
+}
+
+.alt-dialog {
+  width: 320px;
+}
+
+.alt-text {
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  resize: vertical;
+}

@@ -651,6 +651,17 @@ pub enum ShapeKind {
     Opaque { label: String },
 }
 
+/// Accessibility and visibility settings of a shape (`p:cNvPr`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Access {
+    /// Alternative text read by screen readers (`descr`).
+    pub alt_text: String,
+    /// Purely decorative: screen readers skip it (`adec:decorative`).
+    pub decorative: bool,
+    /// Hidden in the editor and in shows (`hidden="1"`), shown again from the selection pane.
+    pub hidden: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Shape {
     pub id: ShapeId,
@@ -668,6 +679,7 @@ pub struct Shape {
     /// Drop shadow (`a:outerShdw`); drawn only, saved with the shape's XML.
     pub shadow: Option<Shadow>,
     /// Where the shape came from in the opened file, for lossless saving.
+    pub access: Access,
     pub source: Option<Arc<ShapeSource>>,
 }
 
@@ -710,6 +722,8 @@ pub struct ParsedShape {
     pub placeholder: Option<Placeholder>,
     pub geometry: Geometry,
     pub shadow: Option<Shadow>,
+    pub name: String,
+    pub access: Access,
 }
 
 impl ShapeSource {
@@ -759,6 +773,7 @@ impl Shape {
             placeholder: None,
             group: None,
             shadow: None,
+            access: Access::default(),
             source: None,
         }
     }

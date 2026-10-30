@@ -1323,6 +1323,77 @@ impl App {
         self.touch(changed)
     }
 
+    // --- Accessibility ----------------------------------------------------------------
+
+    /// Selection pane rows, top-most first:
+    /// `[{ id, name, kind, depth, hidden, selected, altText, decorative }]`.
+    #[wasm_bindgen(js_name = paneItems)]
+    pub fn pane_items(&self) -> Array {
+        self.editor
+            .pane_items()
+            .into_iter()
+            .map(|i| {
+                let o = Object::new();
+                let _ = Reflect::set(&o, &"id".into(), &i.id.0.into());
+                let _ = Reflect::set(&o, &"name".into(), &i.name.into());
+                let _ = Reflect::set(&o, &"kind".into(), &i.kind.into());
+                let _ = Reflect::set(&o, &"depth".into(), &i.depth.into());
+                let _ = Reflect::set(&o, &"hidden".into(), &i.hidden.into());
+                let _ = Reflect::set(&o, &"selected".into(), &i.selected.into());
+                let _ = Reflect::set(&o, &"altText".into(), &i.alt_text.into());
+                let _ = Reflect::set(&o, &"decorative".into(), &i.decorative.into());
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
+    #[wasm_bindgen(js_name = selectInPane)]
+    pub fn select_in_pane(&mut self, id: u32, additive: bool) -> bool {
+        let changed = self.editor.select_in_pane(&mut self.engine, ppt_model::ShapeId(id), additive);
+        self.dirty |= changed;
+        changed
+    }
+
+    #[wasm_bindgen(js_name = setShapeHidden)]
+    pub fn set_shape_hidden(&mut self, id: u32, hidden: bool) -> bool {
+        let changed = self.editor.set_shape_hidden(&mut self.engine, ppt_model::ShapeId(id), hidden);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = setAllHidden)]
+    pub fn set_all_hidden(&mut self, hidden: bool) -> bool {
+        let changed = self.editor.set_all_hidden(&mut self.engine, hidden);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = renameShape)]
+    pub fn rename_shape(&mut self, id: u32, name: &str) -> bool {
+        let changed = self.editor.rename_shape(&mut self.engine, ppt_model::ShapeId(id), name);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = moveInPane)]
+    pub fn move_in_pane(&mut self, id: u32, up: bool) -> bool {
+        let changed = self.editor.move_in_pane(&mut self.engine, ppt_model::ShapeId(id), up);
+        self.touch(changed)
+    }
+
+    /// The selected shape's `{ text, decorative }`, or null without a single selection.
+    #[wasm_bindgen(js_name = altText)]
+    pub fn alt_text(&self) -> JsValue {
+        let Some((text, decorative)) = self.editor.alt_text() else { return JsValue::NULL };
+        let o = Object::new();
+        let _ = Reflect::set(&o, &"text".into(), &text.into());
+        let _ = Reflect::set(&o, &"decorative".into(), &decorative.into());
+        o.into()
+    }
+
+    #[wasm_bindgen(js_name = setAltText)]
+    pub fn set_alt_text(&mut self, text: &str, decorative: bool) -> bool {
+        let changed = self.editor.set_alt_text(&mut self.engine, text, decorative);
+        self.touch(changed)
+    }
+
     // --- View -------------------------------------------------------------------------
 
     /// `{ showGrid, showGuides, snapToGrid, gridSpacing (EMU), guides (count) }`.

@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use package::{Package, REL_NS, Rel};
 use ppt_model::{
-    Background, Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
+    Access, Background, Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
     PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
 use ppt_model::table::TableStyle;
@@ -449,7 +449,8 @@ impl Parser<'_> {
                     if is_ph && !include_placeholders {
                         continue;
                     }
-                    let shape = if is_hidden(n) { None } else { self.shape(n, cx, group) };
+                    // Hidden shapes are parsed too, so the selection pane can show them again.
+                    let shape = self.shape(n, cx, group).filter(|s| !is_hidden(n) || s.access.hidden);
                     match shape {
                         Some(shape) => out.push(shape),
                         // Hidden or unplaceable shapes are kept (invisible) so saving preserves them.
@@ -653,7 +654,7 @@ impl Parser<'_> {
             namespaces: src.namespaces.clone(),
             rels,
             container: None,
-            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill.clone(), line: shape.line, text: shape.text.clone(), kind: shape.kind.clone(), group: shape.group, placeholder: shape.placeholder.clone(), geometry: shape.geometry.clone(), shadow: shape.shadow },
+            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill.clone(), line: shape.line, text: shape.text.clone(), kind: shape.kind.clone(), group: shape.group, placeholder: shape.placeholder.clone(), geometry: shape.geometry.clone(), shadow: shape.shadow, name: shape.name.clone(), access: shape.access.clone() },
         }))
     }
 
@@ -762,11 +763,22 @@ impl Parser<'_> {
                     dir: attr_f64(s, "dir").unwrap_or(0.0) / 60_000.0,
                 })
             }),
+            access: access(c_nv_pr),
             source: None,
         };
         shape.source = self.source_of(n, cx, &shape);
         Some(shape)
     }
+}
+
+/// Alternative text, the decorative mark and visibility from `p:cNvPr`.
+fn access(c_nv_pr: Node) -> Access {
+    let decorative = path(c_nv_pr, &["extLst"])
+        .into_iter()
+        .flat_map(|l| l.descendants())
+        .find(|n| n.tag_name().name() == "decorative")
+        .is_some_and(|d| attr_bool(d, "val").unwrap_or(true));
+    Access { alt_text: c_nv_pr.attribute("descr").unwrap_or_default().to_string(), decorative, hidden: attr_bool(c_nv_pr, "hidden").unwrap_or(false) }
 }
 
 fn is_hidden(n: Node) -> bool {

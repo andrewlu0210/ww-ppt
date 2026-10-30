@@ -11,8 +11,11 @@ import { PictureFormatTab, RotateMenu, ShadowMenu, SizeGroup } from "./FormatGro
 import { ShapeGallery, type PresetIcon } from "./ShapeGallery";
 import { HeaderFooterDialog, type HeaderFooterInfo } from "./HeaderFooterDialog";
 import { SymbolPicker } from "./SymbolPicker";
+import { AltTextDialog, type AltTextInfo } from "./AltTextDialog";
 import { DesignTab, type BackgroundInfo, type ColorSchemeInfo, type FontSchemeInfo, type ThemeInfo } from "./DesignTab";
 import { LinkPicker } from "./LinkPicker";
+import { focusables, moveFocus, ownsArrows } from "../lib/keyboard";
+import { focusCanvas } from "./CanvasHost";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { AnimationPreset, Status } from "../lib/status";
 
@@ -100,9 +103,12 @@ interface Props {
   loadBackground: () => BackgroundInfo | null;
   viewMode: "normal" | "sorter";
   rulerOn: boolean;
+  paneOpen: boolean;
+  /** The selected object's alternative text, read when the dialog opens. */
+  loadAltText: () => AltTextInfo | null;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, loadAltText }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -132,8 +138,55 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
     />
   );
 
+  // 協助工具: alternative text of the selected object, and the selection pane.
+  const accessGroup = (
+    <Group label="協助工具">
+      <AltTextDialog
+        load={loadAltText}
+        run={run}
+        button={(open, toggle) => <Button large icon={icons.altText} label="替代文字" active={open} disabled={!status.frame || status.selectionCount !== 1} onClick={toggle} />}
+      />
+      <Button large icon={icons.selectionPane} label="選取窗格" active={paneOpen} onClick={() => run({ kind: "selectionPane" })} />
+    </Group>
+  );
+
+  // Keyboard: ←/→ switch tabs on the tab row and move between controls in the
+  // body; ↓/Enter goes from the tab row into the body, Esc goes back up and then
+  // to the slide. Tab/Shift+Tab also move between controls (WebKit skips buttons).
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const el = e.target as HTMLElement;
+    if (el.closest(".popover")) return;
+    const ribbon = e.currentTarget;
+    const tabsRow = ribbon.querySelector(".rb-tabs");
+    const body = ribbon.querySelector(".rb-body");
+    const activeTab = () => ribbon.querySelector<HTMLElement>(".rb-tabs [aria-selected='true']");
+    if (tabsRow?.contains(el)) {
+      const buttons = focusables(tabsRow);
+      const at = buttons.indexOf(el);
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        const next = buttons[(at + (e.key === "ArrowLeft" ? -1 : 1) + buttons.length) % buttons.length];
+        next.focus();
+        next.click();
+      } else if (e.key === "ArrowDown" || e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
+        focusables(body)[0]?.focus();
+      } else if (e.key === "Escape") {
+        focusCanvas();
+      } else return;
+      e.preventDefault();
+      return;
+    }
+    if (!body?.contains(el)) return;
+    const items = focusables(body);
+    if (e.key === "Tab" || ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !ownsArrows(el))) {
+      moveFocus(items, e.key === "ArrowLeft" || (e.key === "Tab" && e.shiftKey) ? -1 : 1);
+    } else if (e.key === "Escape" || (e.key === "ArrowUp" && !ownsArrows(el))) {
+      activeTab()?.focus();
+    } else return;
+    e.preventDefault();
+  };
+
   return (
-    <div className="ribbon">
+    <div className="ribbon" onKeyDown={onKeyDown}>
       <div className="rb-tabs" role="tablist">
         {tabs.map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", (isTableTab(t) || t === PICTURE_TAB) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
@@ -473,6 +526,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 <RotateMenu disabled={!status.frame} run={run} />
               </div>
             </Group>
+            {accessGroup}
             <SizeGroup status={status} run={run} />
             <Group label="對齊">
               {(
@@ -494,7 +548,12 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "表格設計" && <TableDesignTab status={status} styles={tableStyles} run={run} />}
         {tab === "版面配置" && <TableLayoutTab status={status} run={run} />}
         {tab === "轉場" && <TransitionTab status={status} run={run} />}
-        {tab === PICTURE_TAB && <PictureFormatTab status={status} run={run} />}
+        {tab === PICTURE_TAB && (
+          <>
+            <PictureFormatTab status={status} run={run} />
+            {accessGroup}
+          </>
+        )}
         {tab === "動畫" && <AnimationTab status={status} run={run} presets={animPresets} />}
         {tab === "投影片放映" && (
           <>

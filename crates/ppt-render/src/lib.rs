@@ -299,6 +299,9 @@ pub fn draw_background(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presen
 const FRAME: PColor = PColor::from_rgba8(0xA6, 0xA6, 0xA6, 255);
 
 pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, shape: &Shape, view: Affine, opts: &DrawOptions) {
+    if shape.access.hidden {
+        return;
+    }
     let xf = &shape.xfrm;
     let tf = view * shape_affine(xf, true);
     let (w, h) = (xf.w as f64, xf.h as f64);

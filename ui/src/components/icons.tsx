@@ -8,6 +8,19 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  altText: (
+    <Svg>
+      <rect x="3" y="4" width="13" height="10" rx="1" />
+      <path d="M3 11.5l3.5-3 3 2.5 2-1.5 4.5 3.5" />
+      <path d="M13 19h8M13 16h8" />
+    </Svg>
+  ),
+  selectionPane: (
+    <Svg>
+      <rect x="3.5" y="4" width="17" height="16" rx="1" />
+      <path d="M13 4v16M15.5 8h3M15.5 11.5h3M15.5 15h3" />
+    </Svg>
+  ),
   normalView: (
     <Svg>
       <rect x="3" y="4.5" width="18" height="15" rx="1" />
