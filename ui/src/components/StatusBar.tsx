@@ -8,10 +8,12 @@ interface Props {
   viewMode: "normal" | "sorter";
   /** Thumbnail scale in the slide sorter (1 = 100%). */
   sorterZoom: number;
+  /** How many accessibility problems the checker found. */
+  a11yIssues: number;
   run: (c: Command) => void;
 }
 
-export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoom, run }: Props) {
+export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoom, a11yIssues, run }: Props) {
   const view = (mode: "normal" | "sorter", label: string) => (
     <button className={viewMode === mode ? "toggle on" : "toggle"} onClick={() => run({ kind: "viewMode", mode })} onMouseDown={(e) => e.preventDefault()} aria-pressed={viewMode === mode}>
       {label}
@@ -25,6 +27,9 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoo
       {status.editingText && <span>編輯文字</span>}
       {!status.editingText && status.selectionName && <span>已選取：{status.selectionName}</span>}
       {fontsLoading && <span>正在載入字型…</span>}
+      <button className="a11y-status" onClick={() => run({ kind: "checker", open: true })} onMouseDown={(e) => e.preventDefault()} title="檢查協助工具">
+        協助工具：{a11yIssues === 0 ? "良好" : `${a11yIssues} 個問題`}
+      </button>
       <span className="spacer" />
       <span className="muted">WebGPU · vello · {status.frameMs.toFixed(1)} ms</span>
       <button className={notesOpen ? "toggle on" : "toggle"} onClick={() => run({ kind: "toggleNotes" })} onMouseDown={(e) => e.preventDefault()} aria-pressed={notesOpen} title="顯示或隱藏備忘稿">

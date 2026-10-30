@@ -28,7 +28,20 @@ pub struct GlyphRun<'a> {
 }
 
 /// A drawing target. Paths are in the space `tf` maps to device space.
+/// Structure hints for canvases that keep it (tagged PDF); the screen ignores them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    /// A new paragraph of the text being drawn starts.
+    Paragraph,
+    /// What follows is decoration (bullet labels) until [`Mark::EndDecoration`].
+    Decoration,
+    EndDecoration,
+}
+
 pub trait Canvas {
+    /// A structure hint; drawing is unaffected.
+    fn mark(&mut self, _mark: Mark) {}
+
     fn fill_path(&mut self, rule: Fill, tf: Affine, brush: BrushRef<'_>, brush_tf: Option<Affine>, path: &BezPath);
     fn stroke_path(&mut self, style: &Stroke, tf: Affine, brush: BrushRef<'_>, path: &BezPath);
     fn push_clip_path(&mut self, rule: Fill, tf: Affine, path: &BezPath);

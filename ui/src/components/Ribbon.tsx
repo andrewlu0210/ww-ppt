@@ -104,11 +104,12 @@ interface Props {
   viewMode: "normal" | "sorter";
   rulerOn: boolean;
   paneOpen: boolean;
+  checkerOpen: boolean;
   /** The selected object's alternative text, read when the dialog opens. */
   loadAltText: () => AltTextInfo | null;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, loadAltText }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, loadAltText }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -571,9 +572,19 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
           </>
         )}
         {tab === "校閱" && (
-          <Group label="校訂">
-            <Button large icon={icons.spelling} label="拼字檢查" active={spellOn} onClick={() => run({ kind: "spellCheck", on: !spellOn })} />
-          </Group>
+          <>
+            <Group label="校訂">
+              <Button large icon={icons.spelling} label="拼字檢查" active={spellOn} onClick={() => run({ kind: "spellCheck", on: !spellOn })} />
+            </Group>
+            <Group label="協助工具">
+              <Button large icon={icons.checkAccess} label="檢查協助工具" active={checkerOpen} onClick={() => run({ kind: "checker" })} />
+              <AltTextDialog
+                load={loadAltText}
+                run={run}
+                button={(open, toggle) => <Button large icon={icons.altText} label="替代文字" active={open} disabled={!status.frame || status.selectionCount !== 1} onClick={toggle} />}
+              />
+            </Group>
+          </>
         )}
         {tab === "檢視" && (
           <>

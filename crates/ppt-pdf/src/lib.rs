@@ -15,10 +15,14 @@ use krilla::page::PageSettings;
 use krilla::surface::Surface;
 use krilla::text::{Font, GlyphId, KrillaGlyph};
 use krilla::{Data, Document};
-use ppt_model::{EMU_PER_PT, Presentation};
+use std::num::NonZeroU16;
+
+use krilla::metadata::Metadata;
+use krilla::tagging::{Artifact, ArtifactType, ContentTag, Identifier, Node, Tag, TagGroup, TagTree};
+use ppt_model::{EMU_PER_PT, Presentation, Shape, ShapeKind};
 use ppt_render::vello::kurbo::{self, Affine, BezPath, PathEl, Rect, Shape as _};
 use ppt_render::vello::peniko::{self, BrushRef, Color as PColor, FontData, ImageData};
-use ppt_render::{Canvas, DrawOptions, GlyphRun, RenderCtx, draw_slide};
+use ppt_render::{Canvas, CanvasExt, DrawOptions, Mark, GlyphRun, RenderCtx, draw_background_contents, draw_shape, slide_number};
 
 /// What to export.
 #[derive(Clone, Copy, Debug, Default)]
@@ -27,7 +31,49 @@ pub struct PdfOptions {
     pub include_hidden: bool,
 }
 
-/// The deck as a PDF, one page per slide at the slide's size.
+/// How a shape appears in the PDF's structure (its tag), in reading order.
+enum Role {
+    /// Not part of the content: decorative, or a plain shape without text or description.
+    Artifact,
+    Heading,
+    Paragraph,
+    Figure(String),
+}
+
+fn role(s: &Shape) -> Role {
+    let alt = s.access.alt_text.trim();
+    let has_text = s.text_bodies().any(|t| !t.is_empty());
+    if s.access.decorative || matches!(s.kind, ShapeKind::Opaque { .. }) {
+        return Role::Artifact;
+    }
+    if s.placeholder.as_ref().is_some_and(|p| matches!(p.kind.as_str(), "title" | "ctrTitle")) && has_text {
+        return Role::Heading;
+    }
+    match &s.kind {
+        // Pictures and charts are figures, described by their alternative text (else their name).
+        ShapeKind::Picture { .. } | ShapeKind::Chart(_) | ShapeKind::Diagram { .. } => {
+            let chart_title = match &s.kind {
+                ShapeKind::Chart(c) => c.title.as_ref().map(|t| t.text.clone()),
+                _ => None,
+            };
+            Role::Figure(if alt.is_empty() { chart_title.unwrap_or_else(|| s.name.clone()) } else { alt.to_string() })
+        }
+        _ if has_text => Role::Paragraph,
+        _ if !alt.is_empty() => Role::Figure(alt.to_string()),
+        _ => Role::Artifact,
+    }
+}
+
+/// The text of a slide's title placeholder.
+fn title_of(slide: &ppt_model::Slide) -> Option<String> {
+    let title = slide.shapes.iter().find(|s| s.placeholder.as_ref().is_some_and(|p| matches!(p.kind.as_str(), "title" | "ctrTitle")))?;
+    let text = title.text.as_ref()?.plain_text().replace('\n', " ").trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+/// The deck as a PDF, one page per slide at the slide's size. The PDF is tagged:
+/// each slide is a section whose titles, text, tables and figures (with their
+/// alternative text) are in reading order; backgrounds and decorations are artifacts.
 pub fn export_pdf(pres: &Presentation, cx: &mut RenderCtx, opts: PdfOptions) -> Result<Vec<u8>, String> {
     let (w, h) = ((pres.slide_width as f64 / EMU_PER_PT) as f32, (pres.slide_height as f64 / EMU_PER_PT) as f32);
     let settings = || PageSettings::from_wh(w, h).ok_or("invalid slide size");
@@ -36,26 +82,76 @@ pub fn export_pdf(pres: &Presentation, cx: &mut RenderCtx, opts: PdfOptions) -> 
     let view = Affine::scale(1.0 / EMU_PER_PT);
     // Slide units per output "pixel": hairlines drawn by the renderer come out at a quarter point.
     let draw = DrawOptions { emu_per_px: EMU_PER_PT / 4.0, ..Default::default() };
+    let mut tree = TagTree::new().with_lang(Some(LANG.to_string()));
     let mut pages = 0;
+    let page_rect = Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64);
     for slide in pres.slides.iter().filter(|s| opts.include_hidden || !s.hidden) {
         let mut page = doc.start_page_with(settings()?);
         let mut surface = page.surface();
-        let mut canvas = PdfCanvas { surface: &mut surface, fonts: &mut fonts, clips: Vec::new() };
-        draw_slide(&mut canvas, cx, pres, slide, view, &draw);
+        let mut canvas = PdfCanvas { surface: &mut surface, tags: None, fonts: &mut fonts, clips: Vec::new() };
+        let draw = DrawOptions { slide_number: slide_number(pres, slide), ..draw };
+        let mut section = TagGroup::new(Tag::Section);
+        // The page background and the layout's decorations are artifacts.
+        canvas.surface.start_tagged(ContentTag::Artifact(Artifact::with_kind(ArtifactType::Layout)));
+        canvas.fill(peniko::Fill::NonZero, view, PColor::WHITE, None, &page_rect);
+        canvas.surface.end_tagged();
+        canvas.push_clip_layer(peniko::Fill::NonZero, view, &page_rect);
+        canvas.surface.start_tagged(ContentTag::Artifact(Artifact::with_kind(ArtifactType::Layout)));
+        draw_background_contents(&mut canvas, cx, pres, slide, view, &draw);
+        canvas.surface.end_tagged();
+        for shape in slide.shapes.iter().filter(|s| !s.access.hidden) {
+            let role = role(shape);
+            if matches!(role, Role::Artifact) {
+                canvas.surface.start_tagged(ContentTag::Artifact(Artifact::with_kind(ArtifactType::Layout)));
+                draw_shape(&mut canvas, cx, pres, shape, view, &draw);
+                canvas.surface.end_tagged();
+                continue;
+            }
+            canvas.begin_shape(matches!(role, Role::Paragraph));
+            draw_shape(&mut canvas, cx, pres, shape, view, &draw);
+            let paragraphs = canvas.end_shape();
+            let ids = |p: Vec<Vec<Identifier>>| p.into_iter().flatten().map(Node::from).collect::<Vec<_>>();
+            match role {
+                Role::Heading => section.push(TagGroup::with_children(Tag::Hn(NonZeroU16::MIN, None), ids(paragraphs))),
+                Role::Figure(alt) => section.push(TagGroup::with_children(Tag::Figure(Some(alt)), ids(paragraphs))),
+                // Each paragraph of a text shape is its own P.
+                _ => {
+                    for p in paragraphs {
+                        section.push(TagGroup::with_children(Tag::P, p.into_iter().map(Node::from).collect()));
+                    }
+                }
+            }
+        }
         canvas.close_clips();
         surface.finish();
         page.finish();
+        tree.push(section);
         pages += 1;
     }
     if pages == 0 {
         // A PDF needs a page: an empty one when every slide is hidden.
         doc.start_page_with(settings()?).finish();
     }
+    let title = pres.slides.iter().find_map(title_of).unwrap_or_else(|| "簡報".to_string());
+    doc.set_metadata(Metadata::new().language(LANG.to_string()).title(title));
+    doc.set_tag_tree(tree);
     doc.finish().map_err(|e| format!("{e:?}"))
+}
+
+/// Document language for screen readers.
+const LANG: &str = "zh-TW";
+
+/// The tagged content of the shape being drawn: identifiers per paragraph.
+struct ShapeTags {
+    paragraphs: Vec<Vec<Identifier>>,
+    /// Paragraph marks start a new paragraph (text shapes; headings and figures stay whole).
+    split: bool,
+    in_decoration: bool,
 }
 
 struct PdfCanvas<'a, 'b> {
     surface: &'a mut Surface<'b>,
+    tags: Option<ShapeTags>,
     /// Fonts by (blob id, collection index); `None` when krilla can't read one.
     fonts: &'a mut HashMap<(u64, u32), Option<Font>>,
     /// Surface pushes per open clip layer.
@@ -149,6 +245,18 @@ fn paint(brush: BrushRef, brush_tf: Option<Affine>) -> Option<(Paint, f32)> {
 }
 
 impl PdfCanvas<'_, '_> {
+    /// Starts tagged content for a shape; `split` makes paragraph marks start new paragraphs.
+    fn begin_shape(&mut self, split: bool) {
+        let id = self.surface.start_tagged(ContentTag::Other);
+        self.tags = Some(ShapeTags { paragraphs: vec![vec![id]], split, in_decoration: false });
+    }
+
+    /// Ends the shape's tagged content; its identifiers by paragraph.
+    fn end_shape(&mut self) -> Vec<Vec<Identifier>> {
+        self.surface.end_tagged();
+        self.tags.take().map(|t| t.paragraphs).unwrap_or_default()
+    }
+
     fn close_clips(&mut self) {
         while !self.clips.is_empty() {
             self.pop_layer();
@@ -210,6 +318,28 @@ impl Canvas for PdfCanvas<'_, '_> {
                 self.clips.push(1);
             }
             None => self.clips.push(0),
+        }
+    }
+
+    fn mark(&mut self, mark: Mark) {
+        let Some(t) = &mut self.tags else { return };
+        match mark {
+            Mark::Paragraph if t.split && !t.in_decoration => {
+                self.surface.end_tagged();
+                t.paragraphs.push(vec![self.surface.start_tagged(ContentTag::Other)]);
+            }
+            Mark::Decoration if !t.in_decoration => {
+                self.surface.end_tagged();
+                self.surface.start_tagged(ContentTag::Artifact(Artifact::with_kind(ArtifactType::Layout)));
+                t.in_decoration = true;
+            }
+            Mark::EndDecoration if t.in_decoration => {
+                self.surface.end_tagged();
+                let id = self.surface.start_tagged(ContentTag::Other);
+                t.paragraphs.last_mut().expect("a shape has a paragraph").push(id);
+                t.in_decoration = false;
+            }
+            _ => {}
         }
     }
 
@@ -318,5 +448,25 @@ mod tests {
         assert!(text.contains("/FontFile2") || text.contains("/FontFile3"), "fonts are embedded");
         let all = export_pdf(&pres, &mut cx, PdfOptions { include_hidden: true }).unwrap();
         assert!(all.len() > pdf.len());
+    }
+
+    #[test]
+    fn tags_give_headings_paragraphs_and_described_figures() {
+        let mut pres = ppt_ooxml::parse_pptx(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap()).unwrap();
+        let pic = pres.slides[3].shapes.iter_mut().find(|s| matches!(s.kind, ShapeKind::Picture { .. })).unwrap();
+        pic.access.alt_text = "彩色漸層圖片".into();
+        let mut engine = TextEngine::new(false);
+        engine.register_font(std::fs::read("/System/Library/Fonts/Helvetica.ttc").unwrap());
+        engine.set_fallbacks(vec!["Helvetica".into()]);
+        let mut images = ImageCache::default();
+        let mut cx = RenderCtx { engine: &mut engine, images: &mut images };
+        let pdf = export_pdf(&pres, &mut cx, PdfOptions::default()).unwrap();
+        let text = String::from_utf8_lossy(&pdf);
+        for key in ["/StructTreeRoot", "/MarkInfo", "/S/H1", "/S/P", "/S/Figure", "/Lang(zh-TW)"] {
+            assert!(text.contains(key), "{key} missing");
+        }
+        // The alternative text is written as a UTF-16 hex string with a byte order mark.
+        let hex: String = "彩色漸層圖片".encode_utf16().map(|u| format!("{u:04X}")).collect();
+        assert!(text.contains(&format!("/Alt<FEFF{hex}>")), "figure alt text");
     }
 }

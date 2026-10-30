@@ -1377,6 +1377,38 @@ impl App {
         o
     }
 
+    /// Accessibility problems: `[{ slide, shape (id or null), severity: "error" | "warning" | "tip",
+    /// kind, message }]`, by slide.
+    #[wasm_bindgen(js_name = checkAccessibility)]
+    pub fn check_accessibility(&self) -> Array {
+        self.editor
+            .check_accessibility()
+            .into_iter()
+            .map(|i| {
+                let o = Object::new();
+                let severity = match i.severity {
+                    ppt_editor::Severity::Error => "error",
+                    ppt_editor::Severity::Warning => "warning",
+                    ppt_editor::Severity::Tip => "tip",
+                };
+                let kind = match i.kind {
+                    ppt_editor::IssueKind::MissingAltText => "altText",
+                    ppt_editor::IssueKind::MissingTitle => "title",
+                    ppt_editor::IssueKind::DuplicateTitle => "duplicateTitle",
+                    ppt_editor::IssueKind::LowContrast => "contrast",
+                    ppt_editor::IssueKind::NoHeaderRow => "headerRow",
+                    ppt_editor::IssueKind::ReadingOrder => "readingOrder",
+                };
+                let _ = Reflect::set(&o, &"slide".into(), &(i.slide as u32).into());
+                let _ = Reflect::set(&o, &"shape".into(), &i.shape.map_or(JsValue::NULL, |s| s.0.into()));
+                let _ = Reflect::set(&o, &"severity".into(), &severity.into());
+                let _ = Reflect::set(&o, &"kind".into(), &kind.into());
+                let _ = Reflect::set(&o, &"message".into(), &i.message.into());
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
     /// What is selected or edited, in one sentence ("" when nothing is).
     #[wasm_bindgen(js_name = describeSelection)]
     pub fn describe_selection(&self) -> String {

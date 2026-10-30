@@ -8,6 +8,12 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  checkAccess: (
+    <Svg>
+      <circle cx="12" cy="4.5" r="1.8" />
+      <path d="M5 8.5l7 1.5 7-1.5M12 10v4.5l-3 6M12 14.5l3 6" />
+    </Svg>
+  ),
   altText: (
     <Svg>
       <rect x="3" y="4" width="13" height="10" rx="1" />

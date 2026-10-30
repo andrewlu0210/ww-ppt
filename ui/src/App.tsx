@@ -39,6 +39,7 @@ import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 import type { AltTextInfo } from "./components/AltTextDialog";
 import { SelectionPane } from "./components/SelectionPane";
+import { CheckerPane, type A11yIssue } from "./components/CheckerPane";
 import { A11yMirror } from "./components/A11yMirror";
 import { announce } from "./lib/announce";
 import type { BackgroundInfo, ColorSchemeInfo, FontSchemeInfo, ThemeInfo } from "./components/DesignTab";
@@ -85,6 +86,8 @@ interface ViewPrefs {
   ruler: boolean;
   /** The selection pane is open. */
   pane: boolean;
+  /** The accessibility checker is open. */
+  checker: boolean;
   grid: boolean;
   /** Slide sorter thumbnail width in CSS px. */
   sorterSize: number;
@@ -94,9 +97,9 @@ interface ViewPrefs {
 function loadViewPrefs(): ViewPrefs {
   try {
     const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as Partial<ViewPrefs> | null;
-    return { ruler: v?.ruler === true, pane: v?.pane === true, grid: v?.grid === true, sorterSize: typeof v?.sorterSize === "number" ? v.sorterSize : SORTER_BASE };
+    return { ruler: v?.ruler === true, pane: v?.pane === true, checker: v?.checker === true, grid: v?.grid === true, sorterSize: typeof v?.sorterSize === "number" ? v.sorterSize : SORTER_BASE };
   } catch {
-    return { ruler: false, pane: false, grid: false, sorterSize: SORTER_BASE };
+    return { ruler: false, pane: false, checker: false, grid: false, sorterSize: SORTER_BASE };
   }
 }
 
@@ -117,6 +120,12 @@ export function App() {
     [status.revision, status.slideCount],
   );
   slideLabelsRef.current = slideLabels;
+  // Accessibility problems, rechecked as the deck changes.
+  const a11yIssues = useMemo(
+    () => (engineRef.current ? (engineRef.current.checkAccessibility() as A11yIssue[]) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [status.revision, status.slideCount],
+  );
   // What VoiceOver hears: slide changes, the selection, keyboard moves.
   const spoken = useRef({ slide: -1, selection: "", frame: "" });
   useEffect(() => {
@@ -624,7 +633,11 @@ export function App() {
         return;
       }
       if (c.kind === "selectionPane") {
-        setViewPrefs((p) => ({ ...p, pane: !p.pane }));
+        setViewPrefs((p) => ({ ...p, pane: c.open ?? !p.pane }));
+        return;
+      }
+      if (c.kind === "checker") {
+        setViewPrefs((p) => ({ ...p, checker: c.open ?? !p.checker }));
         return;
       }
       if (c.kind === "showGrid") {
@@ -1090,9 +1103,10 @@ export function App() {
         viewMode={viewMode}
         rulerOn={viewPrefs.ruler}
         paneOpen={viewPrefs.pane}
+        checkerOpen={viewPrefs.checker}
         loadAltText={() => (engineRef.current?.altText() as AltTextInfo | null | undefined) ?? null}
       />
-      <main className={["workspace", viewMode === "sorter" && !showing && "sorting", viewPrefs.pane && !showing && "with-pane"].filter(Boolean).join(" ")}>
+      <main className={["workspace", viewMode === "sorter" && !showing && "sorting", (viewPrefs.pane || viewPrefs.checker) && !showing && "with-pane"].filter(Boolean).join(" ")}>
         {viewMode === "sorter" && !showing && (
           <SlideSorter
             count={status.slideCount}
@@ -1176,16 +1190,21 @@ export function App() {
             />
           )}
         </section>
-        {viewPrefs.pane && !showing && (
-          <SelectionPane
-            engine={engineRef.current}
-            version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}`}
-            onChange={refresh}
-            onClose={() => setViewPrefs((p) => ({ ...p, pane: false }))}
-          />
+        {(viewPrefs.pane || viewPrefs.checker) && !showing && (
+          <div className="side-panels">
+            {viewPrefs.checker && <CheckerPane engine={engineRef.current} issues={a11yIssues} run={run} onChange={refresh} onClose={() => setViewPrefs((p) => ({ ...p, checker: false }))} />}
+            {viewPrefs.pane && (
+              <SelectionPane
+                engine={engineRef.current}
+                version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}`}
+                onChange={refresh}
+                onClose={() => setViewPrefs((p) => ({ ...p, pane: false }))}
+              />
+            )}
+          </div>
         )}
       </main>
-      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} run={run} />
+      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} />
     </div>
   );
 }

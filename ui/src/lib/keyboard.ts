@@ -48,6 +48,14 @@ const PANES: Pane[] = [
     },
   },
   {
+    root: () => document.querySelector(".checker-pane"),
+    focus: () => {
+      const first = document.querySelector<HTMLElement>(".checker-pane .check-summary, .checker-pane .pane-close");
+      first?.focus();
+      return !!first;
+    },
+  },
+  {
     root: () => document.querySelector(".selection-pane"),
     focus: () => {
       const list = document.querySelector<HTMLElement>(".selection-pane .pane-list");
@@ -91,7 +99,7 @@ const SORTER_PANES: Pane[] = [
       return !!s;
     },
   },
-  PANES[4],
+  PANES[5],
 ];
 
 /** F6 / Shift+F6: focus the next or previous pane. */

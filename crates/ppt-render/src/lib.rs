@@ -19,7 +19,7 @@ use vello::peniko::{Blob, Color as PColor, ColorStop, Fill, Gradient as PGradien
 mod anim;
 mod canvas;
 mod chart;
-pub use canvas::{Canvas, CanvasExt, GlyphRun};
+pub use canvas::{Canvas, CanvasExt, GlyphRun, Mark};
 pub use anim::{draw_slide_animated, reveal_mask};
 mod transition;
 pub use transition::draw_transition;
@@ -275,10 +275,16 @@ pub fn draw_slide(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
 /// Fills the page with the slide's background and draws the layout's
 /// decorations, leaving a clip layer to the page pushed.
 pub fn draw_background(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions) {
-    let (w, h) = (pres.slide_width as f64, pres.slide_height as f64);
-    let page = Rect::new(0.0, 0.0, w, h);
+    let page = Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64);
     scene.fill(Fill::NonZero, view, color(Color::WHITE), None, &page);
     scene.push_clip_layer(Fill::NonZero, view, &page);
+    draw_background_contents(scene, cx, pres, slide, view, opts);
+}
+
+/// The background fill and the layout's decorations, inside an already clipped page.
+pub fn draw_background_contents(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions) {
+    let (w, h) = (pres.slide_width as f64, pres.slide_height as f64);
+    let page = Rect::new(0.0, 0.0, w, h);
     match pres.slide_background(slide) {
         Background::Paint(paint) => fill_paint(scene, view, paint, w, h, &page),
         Background::Picture { media } => {
@@ -456,9 +462,13 @@ pub fn draw_body(scene: &mut dyn Canvas, engine: &mut TextEngine, body: &TextBod
 
 /// Draws a laid-out text body (glyphs and bullets); `tf` maps points to device space.
 pub fn draw_body_layout(scene: &mut dyn Canvas, layout: &BodyLayout, tf: Affine) {
-    draw_layout(scene, &layout.layout, &layout.text, tf);
-    for b in &layout.bullets {
-        draw_layout(scene, &b.layout, &b.text, tf * Affine::translate(Vec2::new(b.x as f64, b.y as f64)));
+    draw_layout_lines(scene, &layout.layout, &layout.text, tf, Some(&layout.lines));
+    if !layout.bullets.is_empty() {
+        scene.mark(Mark::Decoration);
+        for b in &layout.bullets {
+            draw_layout(scene, &b.layout, &b.text, tf * Affine::translate(Vec2::new(b.x as f64, b.y as f64)));
+        }
+        scene.mark(Mark::EndDecoration);
     }
 }
 
@@ -467,7 +477,15 @@ const SYNTHETIC_BOLD: f32 = 0.035;
 
 /// Draws a parley layout built from `text`, whose units are points; `tf` maps points to device space.
 pub fn draw_layout(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str, tf: Affine) {
-    for line in layout.lines() {
+    draw_layout_lines(scene, layout, text, tf, None);
+}
+
+/// [`draw_layout`], marking where each paragraph after the first starts when `lines` are known.
+fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str, tf: Affine, lines: Option<&[ppt_text::LineInfo]>) {
+    for (index, line) in layout.lines().enumerate() {
+        if index > 0 && lines.and_then(|l| l.get(index)).is_some_and(|l| l.first) {
+            scene.mark(Mark::Paragraph);
+        }
         let line_text = line.text_range();
         for item in line.items() {
             let PositionedLayoutItem::GlyphRun(glyph_run) = item else { continue };
