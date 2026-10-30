@@ -31,3 +31,7 @@ lto = "thin"
 # Keep wasm debug builds usable: layout and rendering are too slow unoptimized.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Trimming system font collections (hundreds of MB) takes seconds unoptimized.
+[profile.dev.package.ppt-fonts]
+opt-level = 3

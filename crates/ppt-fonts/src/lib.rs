@@ -3,6 +3,10 @@
 //! Office decks name Windows fonts (Calibri, 微軟正黑體, ...) that macOS does not
 //! ship, so each request goes through a substitution table first.
 
+mod collection;
+
+pub use collection::trim_collection;
+
 use std::collections::HashSet;
 use std::sync::Mutex;
 

@@ -210,7 +210,8 @@ async function step(cmd: string, h: Hooks) {
     case "perf": {
       // Timing marks since the last `perf`, and the WASM heap size.
       for (const [label, ms] of takeMarks()) await log(`perf ${label}: ${ms} ms`);
-      await log(`perf wasm heap: ${wasmMemoryMB().toFixed(0)} MB`);
+      const [now, peak, images] = Array.from(engine.memoryStats()).map((b) => (b / 1048576).toFixed(0));
+      await log(`perf wasm memory ${wasmMemoryMB().toFixed(0)} MB; heap in use ${now} MB, peak ${peak} MB, decoded images ${images} MB`);
       break;
     }
     case "time": {

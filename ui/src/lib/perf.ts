@@ -35,5 +35,14 @@ export function takeMarks(): [string, number][] {
   return marks.splice(0, marks.length);
 }
 
-/** Resolves after the next frame is painted. */
-export const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+/** Resolves after the next frame is painted (or after 250 ms: hidden windows get no frames). */
+export const nextFrame = () =>
+  new Promise<void>((r) => {
+    const t = window.setTimeout(r, 250);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        window.clearTimeout(t);
+        r();
+      }),
+    );
+  });

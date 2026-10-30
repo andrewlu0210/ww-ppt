@@ -15,6 +15,14 @@ fn read_file(path: String) -> Result<Response, String> {
     std::fs::read(&path).map(Response::new).map_err(|e| format!("{path}: {e}"))
 }
 
+/// A font file for the editor: large collections come trimmed to the weights
+/// slides use (see `ppt_fonts::trim_collection`).
+#[tauri::command]
+fn read_font(path: String) -> Result<Response, String> {
+    let data = std::fs::read(&path).map_err(|e| format!("{path}: {e}"))?;
+    Ok(Response::new(ppt_fonts::trim_collection(&data).unwrap_or(data)))
+}
+
 /// Writes raw bytes (the request body) to the path in the `path` header.
 #[tauri::command]
 fn write_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
@@ -176,6 +184,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             read_file,
+            read_font,
             write_file,
             list_fonts,
             resolve_font,

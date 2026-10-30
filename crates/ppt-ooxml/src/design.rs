@@ -14,7 +14,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::package::Package;
 use crate::style::Theme;
 use crate::writer::{apply_edits, esc};
-use crate::{Error, parse_pptx, save_pptx};
+use crate::{Error, parse_pptx_owned, save_pptx};
 
 /// A built-in theme color variant: `dk2`, `lt2`, `accent1`..`accent6`,
 /// `hlink`, `folHlink` (`dk1`/`lt1` stay the system text and window colors).
@@ -161,7 +161,7 @@ fn rewrite(pres: &Presentation, mut f: impl FnMut(&str, &str) -> Option<String>)
         }
     }
     let out = writer.finish().map_err(|e| Error::Zip(e.to_string()))?.into_inner();
-    parse_pptx(&out)
+    parse_pptx_owned(out)
 }
 
 /// Theme parts of `pres`'s slide masters.

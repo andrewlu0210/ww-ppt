@@ -32,9 +32,8 @@ fn main() {
     let (bytes, t_read) = step("read file", || std::fs::read(&path).unwrap());
     println!("  {:.1} MB on disk", bytes.len() as f64 / 1e6);
     let (pres, t_parse) = step("parse", || ppt_ooxml::parse_pptx(&bytes).unwrap());
-    let media: usize = pres.media.values().map(|m| m.len()).sum();
     let shapes: usize = pres.slides.iter().map(|s| s.shapes.len()).sum();
-    println!("  {} slides, {} shapes, {} layouts, {} media files ({:.1} MB)", pres.slides.len(), shapes, pres.layouts.len(), pres.media.len(), media as f64 / 1e6);
+    println!("  {} slides, {} shapes, {} layouts", pres.slides.len(), shapes, pres.layouts.len());
     let (_, t_fonts) = step("load fonts", || r.ensure_fonts(pres.font_families()));
 
     // The editor's first slide at a typical canvas width (device pixels).
@@ -63,7 +62,7 @@ fn main() {
         println!("  slide {n:3}  {} / {}  GPU {}", ms(*enc), ms(*again), ms(*gpu));
     }
     let total = |f: fn(&(usize, Duration, Duration, Duration)) -> Duration| first.iter().map(f).sum::<Duration>();
-    println!("  all slides: first {}  again {}  GPU {}   RSS {:.0} MB", ms(total(|x| x.1)), ms(total(|x| x.2)), ms(total(|x| x.3)), rss_mb());
+    println!("  all slides: first {}  again {}  GPU {}   RSS {:.0} MB, decoded images {:.0} MB", ms(total(|x| x.1)), ms(total(|x| x.2)), ms(total(|x| x.3)), rss_mb(), r.image_memory() as f64 / 1048576.0);
     let again_max = first.iter().map(|x| x.2).max().unwrap_or_default();
     println!("  slowest repeat build (drag/typing redraw budget 8–16 ms): {}", ms(again_max));
 

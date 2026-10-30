@@ -81,6 +81,11 @@ impl SlideRenderer {
         &mut self.engine
     }
 
+    /// Bytes held by decoded images.
+    pub fn image_memory(&self) -> usize {
+        self.images.memory()
+    }
+
     /// Forgets decoded media; call before rendering a different deck (media keys repeat across decks).
     pub fn new_deck(&mut self) {
         self.images.clear();

@@ -194,41 +194,98 @@ fn gradient_brush(g: &Gradient, w: f64, h: f64) -> (PGradient, Affine) {
 /// Longest side decoded images are kept at.
 const MAX_IMAGE_SIDE: u32 = 2560;
 
-/// Decoded images keyed by media part name. Failed decodes are cached as `None`.
+/// Decoded images are kept up to this many bytes; the least recently used go first.
+const IMAGE_BUDGET: usize = 192 << 20;
+/// Smallest decoded size (longest side, pixels).
+const MIN_IMAGE_SIDE: u32 = 64;
+
+struct Decoded {
+    image: ImageData,
+    last_used: u64,
+}
+
+/// Decoded images by media part name, each at the size it is shown at (the
+/// longest side rounded up to a power of two, so zooming a little reuses it).
+/// Memory is bounded by [`IMAGE_BUDGET`].
 #[derive(Default)]
 pub struct ImageCache {
-    images: HashMap<String, Option<ImageData>>,
+    /// Decoded copies by (media key, longest side).
+    images: HashMap<(String, u32), Decoded>,
+    /// Pixel size of each image; `None` when it cannot be decoded.
+    sizes: HashMap<String, Option<(u32, u32)>>,
+    bytes: usize,
+    tick: u64,
 }
 
 impl ImageCache {
-    fn get(&mut self, pres: &Presentation, key: &str) -> Option<&ImageData> {
-        self.images
-            .entry(key.to_string())
-            .or_insert_with(|| {
-                let bytes = pres.media.get(key)?;
-                let mut img = image::load_from_memory(bytes).ok()?.to_rgba8();
-                // Photos far larger than any slide display would crowd the GPU image atlas
-                // (images can then fail to draw) and memory; slides never need more.
-                let (w, h) = img.dimensions();
-                if w.max(h) > MAX_IMAGE_SIDE {
-                    let s = MAX_IMAGE_SIDE as f64 / w.max(h) as f64;
-                    let (nw, nh) = (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1));
-                    img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
-                }
-                let (width, height) = img.dimensions();
-                Some(ImageData {
-                    data: Blob::new(Arc::new(img.into_raw())),
-                    format: ImageFormat::Rgba8,
-                    alpha_type: ImageAlphaType::Alpha,
-                    width,
-                    height,
-                })
-            })
-            .as_ref()
+    /// `key` decoded large enough for its longest side to cover `needed` pixels
+    /// (`f64::INFINITY`: as large as images are kept).
+    pub fn get(&mut self, pres: &Presentation, key: &str, needed: f64) -> Option<ImageData> {
+        self.tick += 1;
+        let mut encoded = None;
+        let (w, h) = match self.sizes.get(key) {
+            Some(size) => (*size)?,
+            None => {
+                let bytes = pres.media.get(key);
+                let size = bytes.as_deref().and_then(|b| image_size(b));
+                self.sizes.insert(key.to_string(), size);
+                encoded = bytes;
+                size?
+            }
+        };
+        let natural = w.max(h).min(MAX_IMAGE_SIDE);
+        let want = if needed.is_finite() { (needed.max(1.0).ceil() as u32).next_power_of_two().clamp(MIN_IMAGE_SIDE, MAX_IMAGE_SIDE) } else { MAX_IMAGE_SIDE };
+        let side = want.min(natural);
+        // A copy at least that large serves (the smallest such).
+        let best = self.images.iter_mut().filter(|((k, s), _)| k == key && *s >= side).min_by_key(|((_, s), _)| *s);
+        if let Some((_, d)) = best {
+            d.last_used = self.tick;
+            return Some(d.image.clone());
+        }
+        let bytes = encoded.or_else(|| pres.media.get(key))?;
+        let Some(mut img) = image::load_from_memory(&bytes).ok().map(|i| i.to_rgba8()) else {
+            self.sizes.insert(key.to_string(), None);
+            return None;
+        };
+        drop(bytes);
+        let (iw, ih) = img.dimensions();
+        if iw.max(ih) > side {
+            let s = side as f64 / iw.max(ih) as f64;
+            let (nw, nh) = (((iw as f64 * s).round() as u32).max(1), ((ih as f64 * s).round() as u32).max(1));
+            img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+        }
+        let (width, height) = img.dimensions();
+        let image = ImageData { data: Blob::new(Arc::new(img.into_raw())), format: ImageFormat::Rgba8, alpha_type: ImageAlphaType::Alpha, width, height };
+        // Smaller copies of the same image are superseded.
+        let smaller: Vec<(String, u32)> = self.images.keys().filter(|(k, s)| k == key && *s < side).cloned().collect();
+        for k in smaller {
+            self.remove(&k);
+        }
+        self.bytes += (width * height * 4) as usize;
+        self.images.insert((key.to_string(), side), Decoded { image: image.clone(), last_used: self.tick });
+        // Over budget: drop the least recently used (never the one just made).
+        while self.bytes > IMAGE_BUDGET {
+            let Some(oldest) = self.images.iter().filter(|(_, d)| d.last_used != self.tick).min_by_key(|(_, d)| d.last_used).map(|(k, _)| k.clone()) else { break };
+            self.remove(&oldest);
+        }
+        Some(image)
+    }
+
+    fn remove(&mut self, key: &(String, u32)) {
+        if let Some(d) = self.images.remove(key) {
+            self.bytes -= (d.image.width * d.image.height * 4) as usize;
+        }
+    }
+
+    /// Bytes held by decoded images.
+    pub fn memory(&self) -> usize {
+        self.bytes
     }
 
     pub fn clear(&mut self) {
         self.images.clear();
+        self.sizes.clear();
+        self.bytes = 0;
     }
 }
 
@@ -255,6 +312,11 @@ pub struct DrawOptions {
     pub emu_per_px: f64,
     /// Number shown by slide number fields (set by [`draw_slide`]).
     pub slide_number: Option<usize>,
+}
+
+/// Device pixels per slide unit for `opts` (unknown scale: as large as images go).
+fn px_per_emu(opts: &DrawOptions) -> f64 {
+    if opts.emu_per_px > 0.0 { 1.0 / opts.emu_per_px } else { f64::INFINITY }
 }
 
 /// The 1-based position of `slide` in the deck, when it is one of its slides.
@@ -288,10 +350,11 @@ pub fn draw_background_contents(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres
     match pres.slide_background(slide) {
         Background::Paint(paint) => fill_paint(scene, view, paint, w, h, &page),
         Background::Picture { media } => {
-            if let Some(img) = cx.images.get(pres, media).filter(|i| i.width > 0 && i.height > 0) {
+            let needed = w.max(h) * px_per_emu(opts);
+            if let Some(img) = cx.images.get(pres, media, needed).filter(|i| i.width > 0 && i.height > 0) {
                 let place = Affine::scale_non_uniform(w / img.width as f64, h / img.height as f64);
-                let encoded = pres.media.get(media).map(|b| b.as_slice());
-                scene.draw_image_data(&img.clone(), encoded, view * place);
+                let encoded = scene.wants_encoded().then(|| pres.media.get(media)).flatten();
+                scene.draw_image_data(&img, encoded.as_deref().map(|b| b.as_slice()), view * place);
             }
         }
     }
@@ -352,7 +415,9 @@ pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
     }
 
     if let ShapeKind::Picture { media, crop } = &shape.kind {
-        match media.as_deref().and_then(|m| cx.images.get(pres, m)) {
+        // The whole image's longest side on screen, cropped parts included.
+        let needed = (w / (1.0 - crop.left - crop.right).max(1e-3)).max(h / (1.0 - crop.top - crop.bottom).max(1e-3)) * px_per_emu(opts);
+        match media.as_deref().and_then(|m| cx.images.get(pres, m, needed)) {
             Some(img) if img.width > 0 && img.height > 0 => {
                 // The visible part of the image (after cropping) stretches to the frame.
                 let (iw, ih) = (img.width as f64, img.height as f64);
@@ -367,9 +432,9 @@ pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
                 if mask.elements().is_empty() {
                     mask = Rect::new(0.0, 0.0, w, h).to_path(0.1);
                 }
-                let encoded = media.as_deref().and_then(|m| pres.media.get(m)).map(|b| b.as_slice());
+                let encoded = scene.wants_encoded().then(|| media.as_deref().and_then(|m| pres.media.get(m))).flatten();
                 scene.push_clip_layer(Fill::NonZero, tf, &mask);
-                scene.draw_image_data(&img.clone(), encoded, tf * place);
+                scene.draw_image_data(&img, encoded.as_deref().map(|b| b.as_slice()), tf * place);
                 scene.pop_layer();
             }
             _ => {

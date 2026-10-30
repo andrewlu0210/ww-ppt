@@ -41,6 +41,11 @@ pub enum Mark {
 pub trait Canvas {
     /// A structure hint; drawing is unaffected.
     fn mark(&mut self, _mark: Mark) {}
+    /// Whether [`Canvas::draw_image_data`] uses the original file (reading it
+    /// from the package costs time, so the screen does not ask for it).
+    fn wants_encoded(&self) -> bool {
+        false
+    }
 
     fn fill_path(&mut self, rule: Fill, tf: Affine, brush: BrushRef<'_>, brush_tf: Option<Affine>, path: &BezPath);
     fn stroke_path(&mut self, style: &Stroke, tf: Affine, brush: BrushRef<'_>, path: &BezPath);

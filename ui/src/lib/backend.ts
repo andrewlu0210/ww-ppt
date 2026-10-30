@@ -15,6 +15,12 @@ export async function readFile(path: string): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
+/** A font file, with large collections trimmed to the regular and bold weights. */
+export async function readFont(path: string): Promise<Uint8Array> {
+  const buf = await invoke<ArrayBuffer>("read_font", { path });
+  return new Uint8Array(buf);
+}
+
 /** Writes raw bytes; the path travels in a header so the body stays binary. */
 export function writeFile(path: string, bytes: Uint8Array): Promise<void> {
   return invoke("write_file", bytes, { headers: { path: encodeURIComponent(path) } });

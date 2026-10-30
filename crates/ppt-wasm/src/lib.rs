@@ -118,6 +118,46 @@ fn parse_spell_key(key: &str) -> Option<FindPlace> {
     Some(FindPlace::Cell(id(parts.next()?)?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
 
+/// Counts heap use, for `memoryStats` (the WASM memory itself only grows, so it
+/// shows the high-water mark, not what is in use).
+struct CountingAlloc;
+
+static HEAP_NOW: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static HEAP_PEAK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn heap_add(n: usize) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let now = HEAP_NOW.fetch_add(n, Relaxed) + n;
+    HEAP_PEAK.fetch_max(now, Relaxed);
+}
+
+unsafe impl std::alloc::GlobalAlloc for CountingAlloc {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let p = unsafe { std::alloc::System.alloc(layout) };
+        if !p.is_null() {
+            heap_add(layout.size());
+        }
+        p
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { std::alloc::System.dealloc(ptr, layout) };
+        HEAP_NOW.fetch_sub(layout.size(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
+        let p = unsafe { std::alloc::System.realloc(ptr, layout, new_size) };
+        if !p.is_null() {
+            HEAP_NOW.fetch_sub(layout.size(), std::sync::atomic::Ordering::Relaxed);
+            heap_add(new_size);
+        }
+        p
+    }
+}
+
+#[global_allocator]
+static ALLOC: CountingAlloc = CountingAlloc;
+
 fn js_err(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
@@ -502,6 +542,15 @@ impl App {
 
 #[wasm_bindgen]
 impl App {
+    /// Heap in use and its peak since the last call, in bytes, plus decoded images: `[now, peak, images]`.
+    #[wasm_bindgen(js_name = memoryStats)]
+    pub fn memory_stats(&self) -> Vec<f64> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let now = HEAP_NOW.load(Relaxed);
+        let peak = HEAP_PEAK.swap(now, Relaxed);
+        vec![now as f64, peak as f64, self.images.memory() as f64]
+    }
+
     // --- Fonts ---------------------------------------------------------------
 
     /// Registers font bytes; returns the family names in the file.
@@ -538,8 +587,8 @@ impl App {
     // --- Documents -----------------------------------------------------------
 
     #[wasm_bindgen(js_name = loadPptx)]
-    pub fn load_pptx(&mut self, bytes: &[u8]) -> Result<(), JsValue> {
-        let pres = ppt_ooxml::parse_pptx(bytes).map_err(js_err)?;
+    pub fn load_pptx(&mut self, bytes: Vec<u8>) -> Result<(), JsValue> {
+        let pres = ppt_ooxml::parse_pptx_owned(bytes).map_err(js_err)?;
         if pres.slides.is_empty() {
             return Err(JsValue::from_str("簡報中沒有投影片"));
         }
@@ -1241,7 +1290,7 @@ impl App {
     #[wasm_bindgen(js_name = resetPicture)]
     pub fn reset_picture(&mut self) -> bool {
         let pixels = self.editor.selected_shape().and_then(|s| match &s.kind {
-            ppt_model::ShapeKind::Picture { media: Some(m), .. } => self.editor.pres.media.get(m).and_then(|b| image_size(b)),
+            ppt_model::ShapeKind::Picture { media: Some(m), .. } => self.editor.pres.media.get(m).and_then(|b| image_size(&b)),
             _ => None,
         });
         let changed = self.editor.reset_picture(pixels);

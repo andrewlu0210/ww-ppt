@@ -3,7 +3,6 @@
 //! All slide geometry is stored in EMU (English Metric Units, 914400 per inch),
 //! the native unit of OOXML. Font sizes are stored in points.
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -14,6 +13,7 @@ pub use transition::{Transition, TransitionKind};
 pub mod anim;
 pub mod bullet;
 pub mod chart;
+pub mod media;
 pub mod table;
 pub mod transition;
 mod text;
@@ -886,7 +886,7 @@ pub struct Presentation {
     pub slides: Vec<Slide>,
     pub layouts: Vec<Layout>,
     /// Encoded image bytes keyed by package part name.
-    pub media: HashMap<String, Arc<Vec<u8>>>,
+    pub media: media::MediaStore,
     /// Theme fonts used as defaults for new text (latin, east asian).
     pub minor_font: (String, String),
     /// Defaults for new text boxes (the presentation's default text style).
@@ -910,7 +910,7 @@ impl Default for Presentation {
             slide_height: DEFAULT_SLIDE_HEIGHT,
             slides: Vec::new(),
             layouts: Vec::new(),
-            media: HashMap::new(),
+            media: media::MediaStore::default(),
             minor_font: ("Calibri".to_string(), String::new()),
             text_defaults: None,
             package: None,

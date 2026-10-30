@@ -156,7 +156,14 @@ impl GroupTf {
 
 /// Parses a `.pptx` file into a [`Presentation`].
 pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
-    let mut pkg = Package::open(bytes)?;
+    parse_pptx_owned(bytes.to_vec())
+}
+
+/// [`parse_pptx`] taking ownership of the file, which the deck keeps for saving
+/// (no second copy of a large file).
+pub fn parse_pptx_owned(bytes: Vec<u8>) -> Result<Presentation, Error> {
+    let package = Arc::new(bytes);
+    let mut pkg = Package::open(package.as_slice())?;
     let pres_part = pkg.rel_of_type("", "officeDocument").unwrap_or_else(|| "ppt/presentation.xml".to_string());
     let pres_xml = pkg.read_string(&pres_part)?;
     let mut parser = Parser {
@@ -194,7 +201,8 @@ pub fn parse_pptx(bytes: &[u8]) -> Result<Presentation, Error> {
     {
         parser.pres.view = view::parse(&xml);
     }
-    parser.pres.package = Some(Arc::new(bytes.to_vec()));
+    parser.pres.media.set_source(Arc::new(package::PackageMedia::new(package.clone())?));
+    parser.pres.package = Some(package.clone());
     for part in slide_parts {
         let slide = parser.slide(&part)?;
         parser.pres.slides.push(slide);
@@ -399,11 +407,8 @@ impl Parser<'_> {
         let bg = path(root, &["cSld", "bg"])?;
         if let Some(pr) = child(bg, "bgPr") {
             if let Some(blip) = path(pr, &["blipFill", "blip"]) {
+                // Read from the package when drawn (see `PackageMedia`).
                 let media = blip.attribute((REL_NS, "embed")).and_then(|id| rels.get(id)).map(|r| r.target.clone())?;
-                if !self.pres.media.contains_key(&media) {
-                    let bytes = self.pkg.read_bytes(&media).ok()?;
-                    self.pres.media.insert(media.clone(), Arc::new(bytes));
-                }
                 return Some(Background::Picture { media });
             }
             return match fill_spec(pr, ctx) {
@@ -701,12 +706,6 @@ impl Parser<'_> {
                 .and_then(|b| b.attribute((REL_NS, "embed")))
                 .and_then(|id| cx.rels.get(id))
                 .map(|r| r.target.clone());
-            if let Some(m) = &media
-                && !self.pres.media.contains_key(m)
-                && let Ok(bytes) = self.pkg.read_bytes(m)
-            {
-                self.pres.media.insert(m.clone(), Arc::new(bytes));
-            }
             let crop = path(n, &["blipFill", "srcRect"])
                 .map(|r| {
                     let f = |name| attr_f64(r, name).unwrap_or(0.0) / 100_000.0;

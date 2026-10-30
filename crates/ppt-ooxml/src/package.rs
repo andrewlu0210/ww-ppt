@@ -2,6 +2,9 @@
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
+use std::sync::{Arc, Mutex};
+
+use ppt_model::media::MediaSource;
 
 use zip::ZipArchive;
 
@@ -61,6 +64,42 @@ impl<'a> Package<'a> {
     /// First relationship of `part` whose type ends with `/{suffix}`.
     pub fn rel_of_type(&mut self, part: &str, suffix: &str) -> Option<String> {
         self.rels(part).into_values().find(|r| !r.external && r.kind.ends_with(&format!("/{suffix}"))).map(|r| r.target)
+    }
+}
+
+/// Shared package bytes as a zip reader's input.
+struct ArcBytes(Arc<Vec<u8>>);
+
+impl AsRef<[u8]> for ArcBytes {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+/// Reads the package's media parts when they are needed, so pictures are not
+/// held in memory twice (once inside the package, once decompressed).
+pub struct PackageMedia {
+    zip: Mutex<ZipArchive<Cursor<ArcBytes>>>,
+}
+
+impl PackageMedia {
+    pub fn new(package: Arc<Vec<u8>>) -> Result<Self, Error> {
+        let zip = ZipArchive::new(Cursor::new(ArcBytes(package))).map_err(|e| Error::Zip(e.to_string()))?;
+        Ok(Self { zip: Mutex::new(zip) })
+    }
+}
+
+impl MediaSource for PackageMedia {
+    fn read(&self, part: &str) -> Option<Vec<u8>> {
+        let mut zip = self.zip.lock().ok()?;
+        let mut file = zip.by_name(part).ok()?;
+        let mut out = Vec::with_capacity(file.size() as usize);
+        file.read_to_end(&mut out).ok()?;
+        Some(out)
+    }
+
+    fn contains(&self, part: &str) -> bool {
+        self.zip.lock().is_ok_and(|z| z.index_for_name(part).is_some())
     }
 }
 

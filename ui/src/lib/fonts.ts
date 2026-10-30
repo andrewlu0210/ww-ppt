@@ -1,6 +1,6 @@
 // Loads system font files into the WASM text engine on demand.
 import type { App } from "../wasm/ppt_wasm";
-import { inTauri, readFile, resolveFont } from "./backend";
+import { inTauri, readFont, resolveFont } from "./backend";
 import { mark } from "./perf";
 
 /// Always available for missing glyphs: a Latin UI face, Traditional Chinese,
@@ -38,7 +38,7 @@ export async function ensureFonts(app: App, families: string[], onProgress?: () 
       if (loadedPaths.has(path)) continue;
       loadedPaths.add(path);
       const t = performance.now();
-      const bytes = await readFile(path);
+      const bytes = await readFont(path);
       const read = performance.now() - t;
       app.registerFont(bytes);
       mark(`font ${path.split("/").pop()} (${(bytes.length / 1e6).toFixed(1)} MB): read ${read.toFixed(0)} + register`, performance.now() - t);

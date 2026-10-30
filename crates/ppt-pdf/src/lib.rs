@@ -321,6 +321,10 @@ impl Canvas for PdfCanvas<'_, '_> {
         }
     }
 
+    fn wants_encoded(&self) -> bool {
+        true
+    }
+
     fn mark(&mut self, mark: Mark) {
         let Some(t) = &mut self.tags else { return };
         match mark {
