@@ -4,6 +4,7 @@
 //! screen coordinates and passes tolerances already scaled to EMU.
 
 mod anim;
+mod find;
 mod group;
 mod richedit;
 pub mod show;
@@ -20,6 +21,7 @@ use ppt_model::{
 };
 use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
 
+pub use find::{FindMatch, FindOptions, FindPlace, find_in};
 pub use richedit::{Move, RichEdit};
 pub use table::{BorderSet, CellRange};
 

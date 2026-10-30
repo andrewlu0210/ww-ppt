@@ -10,7 +10,7 @@ use std::sync::Arc;
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use ppt_editor::show::{Blank, Screen, SlideShow};
 use ppt_model::anim::{PRESETS, Player, SlideStage, Trigger, effect_elements};
-use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
+use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, FindMatch, FindOptions, FindPlace, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
 use ppt_model::{Align, Color, EMU_PER_PT, Presentation};
 use ppt_render::vello::kurbo::{Affine, Point, Rect, Vec2};
@@ -608,6 +608,99 @@ impl App {
         let (x1, y1) = pts.iter().fold((f64::MIN, f64::MIN), |(x, y), p| (x.max(p.x), y.max(p.y)));
         let d = self.dpr;
         vec![x0 / d, y0 / d, (x1 - x0) / d, (y1 - y0) / d]
+    }
+
+    // --- Find and replace ---------------------------------------------------------
+
+    /// Selects the next (or previous) match of `query` after the current
+    /// position: the edited text's selection, or the notes selection
+    /// (`notes_start`/`notes_end` in UTF-16 units, -1 when the notes aren't
+    /// involved). Returns `{ index, total, slide, notes, start, end }` (`start`/`end`
+    /// in UTF-16 units of the notes text, for notes matches) or null.
+    #[wasm_bindgen(js_name = findNext)]
+    pub fn find_next(&mut self, query: &str, match_case: bool, whole_word: bool, backwards: bool, notes_start: i32, notes_end: i32) -> JsValue {
+        let opts = FindOptions { match_case, whole_word };
+        let notes = self.notes_range(notes_start, notes_end);
+        let Some((index, all)) = self.editor.find_next(query, opts, backwards, notes) else { return JsValue::NULL };
+        self.show_match(index, &all)
+    }
+
+    /// How many matches `query` has in the deck.
+    #[wasm_bindgen(js_name = findCount)]
+    pub fn find_count(&self, query: &str, match_case: bool, whole_word: bool) -> u32 {
+        self.editor.find_all(query, FindOptions { match_case, whole_word }).len() as u32
+    }
+
+    /// Replaces the selected match (if the selection is one) and selects the
+    /// next; returns it like `findNext`.
+    #[wasm_bindgen(js_name = replaceNext)]
+    pub fn replace_next(&mut self, query: &str, with: &str, match_case: bool, whole_word: bool, notes_start: i32, notes_end: i32) -> JsValue {
+        let opts = FindOptions { match_case, whole_word };
+        let notes = self.notes_range(notes_start, notes_end);
+        let current = match &notes {
+            Some(r) => Some(FindMatch { slide: self.editor.slide, place: FindPlace::Notes, range: r.clone() }),
+            None => self.editor.text.as_ref().map(|t| FindMatch {
+                slide: self.editor.slide,
+                place: match t.cell {
+                    Some((r, c)) => FindPlace::Cell(t.shape, r, c),
+                    None => FindPlace::Shape(t.shape),
+                },
+                range: t.rich.range(),
+            }),
+        };
+        let mut after_notes = notes;
+        if let Some(m) = current
+            && self.editor.replace_match(&mut self.engine, &m, query, with, opts)
+        {
+            self.dirty = true;
+            // Continue after the replacement.
+            let end = m.range.start + with.len();
+            after_notes = (m.place == FindPlace::Notes).then_some(end..end);
+            if let Some(t) = &mut self.editor.text {
+                t.rich.select_range(end..end);
+            }
+        }
+        let Some((index, all)) = self.editor.find_next(query, opts, false, after_notes) else { return JsValue::NULL };
+        self.show_match(index, &all)
+    }
+
+    /// Replaces every match as one undo step; returns how many.
+    #[wasm_bindgen(js_name = replaceAll)]
+    pub fn replace_all(&mut self, query: &str, with: &str, match_case: bool, whole_word: bool) -> u32 {
+        let n = self.editor.replace_all(&mut self.engine, query, with, FindOptions { match_case, whole_word });
+        self.touch(n > 0);
+        n as u32
+    }
+
+    fn notes_range(&self, start: i32, end: i32) -> Option<std::ops::Range<usize>> {
+        if start < 0 || end < start {
+            return None;
+        }
+        let notes = self.editor.notes(self.editor.slide);
+        Some(utf16_to_byte_offset(notes, start as usize)..utf16_to_byte_offset(notes, end as usize))
+    }
+
+    fn show_match(&mut self, index: usize, all: &[FindMatch]) -> JsValue {
+        let m = &all[index];
+        self.preview_start_ms = None;
+        self.editor.select_match(&mut self.engine, m);
+        self.dirty = true;
+        self.caret_on = true;
+        let o = Object::new();
+        let set = |k: &str, v: JsValue| {
+            let _ = Reflect::set(&o, &k.into(), &v);
+        };
+        set("index", (index as u32).into());
+        set("total", (all.len() as u32).into());
+        set("slide", (m.slide as u32).into());
+        set("notes", (m.place == FindPlace::Notes).into());
+        if m.place == FindPlace::Notes {
+            let notes = self.editor.notes(m.slide);
+            let u16 = |b: usize| notes[..b].encode_utf16().count() as u32;
+            set("start", u16(m.range.start).into());
+            set("end", u16(m.range.end).into());
+        }
+        o.into()
     }
 
     // --- Clipboard -------------------------------------------------------------

@@ -99,6 +99,14 @@ impl RichEdit {
         self.selection.text_range()
     }
 
+    /// Selects a byte range of the text.
+    pub fn select_range(&mut self, range: Range<usize>) {
+        self.last_op = Op::None;
+        self.pending = None;
+        let len = self.body.len();
+        self.set_selection(range.start.min(len), range.end.min(len));
+    }
+
     pub fn is_collapsed(&self) -> bool {
         self.selection.is_collapsed()
     }

@@ -931,3 +931,54 @@ fn animations_are_added_edited_and_follow_shapes() {
     let el = effect_elements(copy.timing.as_deref().unwrap().effects()[0])[0];
     assert!(el != g && copy.shapes.iter().any(|s| s.group == Some(el)));
 }
+
+#[test]
+fn find_and_replace_across_slides_and_notes() {
+    let mut eng = engine();
+    let (mut e, a) = editor();
+    let set_text = |e: &mut Editor, slide: usize, id: ShapeId, text: &str| {
+        let shape = e.pres.slides[slide].shapes.iter_mut().find(|s| s.id == id).unwrap();
+        let mut body = TextBody::default();
+        body.set_plain_text(text);
+        shape.text = Some(body);
+    };
+    set_text(&mut e, 0, a, "營收 Revenue\nrevenue growth");
+    let mut second = Slide::default();
+    let b = e.pres.alloc_id();
+    second.shapes.push(Shape::new(b, "b", Xfrm::new(0, 0, IN, IN)));
+    second.notes = "talk about REVENUE".into();
+    e.pres.slides.push(second);
+    set_text(&mut e, 1, b, "no match");
+    let o = FindOptions::default();
+
+    assert_eq!(e.find_all("revenue", o).len(), 3);
+    assert_eq!(e.find_all("revenue", FindOptions { match_case: true, ..o }).len(), 1);
+    // Next from nothing selected: the first match, selected in a text edit.
+    let (i, all) = e.find_next("revenue", o, false, None).unwrap();
+    assert_eq!(i, 0);
+    assert!(e.select_match(&mut eng, &all[i]));
+    assert_eq!(e.text.as_ref().unwrap().rich.selected_text().as_deref(), Some("Revenue"));
+    let (i, all) = e.find_next("revenue", o, false, None).unwrap();
+    assert_eq!(i, 1);
+    e.select_match(&mut eng, &all[i]);
+    let (i, all) = e.find_next("revenue", o, false, None).unwrap();
+    assert_eq!((i, all[i].slide, all[i].place), (2, 1, FindPlace::Notes));
+    // From the notes match, going on wraps to the first; backwards from the first goes to the last.
+    e.select_match(&mut eng, &all[2]);
+    assert_eq!(e.slide, 1);
+    assert_eq!(e.find_next("revenue", o, false, Some(all[2].range.clone())).map(|r| r.0), Some(0));
+    e.select_match(&mut eng, &all[0]);
+    assert_eq!(e.find_next("revenue", o, true, None).map(|r| r.0), Some(2));
+
+    // Replace the selected match through the editor, then all the rest at once.
+    let m = all[0].clone();
+    assert!(e.replace_match(&mut eng, &m, "revenue", "營業額", o));
+    e.end_text_edit(&mut eng);
+    assert_eq!(e.pres.slides[0].shapes[0].text.as_ref().unwrap().plain_text(), "營收 營業額\nrevenue growth");
+    assert_eq!(e.replace_all(&mut eng, "revenue", "sales", o), 2);
+    assert_eq!(e.pres.slides[0].shapes[0].text.as_ref().unwrap().plain_text(), "營收 營業額\nsales growth");
+    assert_eq!(e.pres.slides[1].notes, "talk about sales");
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.pres.slides[1].notes, "talk about REVENUE");
+    assert!(e.find_next("nothing", o, false, None).is_none());
+}

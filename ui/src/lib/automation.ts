@@ -174,6 +174,25 @@ async function step(cmd: string, h: Hooks) {
       await log(`transition slide=${st.slideIndex} ${JSON.stringify(st.transition ?? null)} marks=${JSON.stringify(st.transitionSlides)}`);
       break;
     }
+    case "fill": {
+      // Types into a React input: `fill .find-input 營收`.
+      const [sel, ...words] = args;
+      const el = document.querySelector<HTMLInputElement>(sel);
+      if (!el) throw new Error(`no ${sel}`);
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, words.join(" "));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      break;
+    }
+    case "press": {
+      // A key on an element: `press .find-input Enter shift`.
+      const el = document.querySelector<HTMLElement>(args[0]);
+      if (!el) throw new Error(`no ${args[0]}`);
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: args[1], shiftKey: has("shift"), bubbles: true }));
+      break;
+    }
+    case "clickel":
+      document.querySelector<HTMLElement>(rest)?.click();
+      break;
     case "tab":
       Array.from(document.querySelectorAll<HTMLButtonElement>(".rb-tabs [role=tab]"))
         .find((b) => b.textContent === rest)

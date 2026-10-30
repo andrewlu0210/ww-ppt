@@ -30,6 +30,7 @@ import { SHAPES_MARKER, type Command, type TableStyleInfo } from "./lib/commands
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
 import { AnimationBadges } from "./components/AnimationTab";
+import { FindBar, type FindBarHandle } from "./components/FindBar";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
@@ -73,6 +74,7 @@ export function App() {
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
   const [animPresets, setAnimPresets] = useState<AnimationPreset[]>([]);
   const [ribbonTab, setRibbonTab] = useState("");
+  const findRef = useRef<FindBarHandle>(null);
   /** Slide show in progress: the slides full screen, or the presenter view. */
   const [showMode, setShowMode] = useState<"slides" | "presenter" | null>(null);
   const showing = showMode !== null;
@@ -164,6 +166,28 @@ export function App() {
       if (s.revision !== thumbState.current.revision) scheduleThumbs(false);
     });
   }, [scheduleThumbs]);
+
+  const findChanged = useCallback(
+    (all: boolean) => {
+      if (all) scheduleThumbs(true);
+      refresh();
+    },
+    [refresh, scheduleThumbs],
+  );
+
+  /** Selects a find match in the notes pane, opening it; focus stays in the find bar. */
+  const showNotesMatch = useCallback((start: number, end: number) => {
+    setNotesPrefs((p) => (p.open ? p : { ...p, open: true }));
+    // After the pane has (re)loaded the slide's notes.
+    window.setTimeout(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(".notes-input");
+      if (!ta) return;
+      const back = document.activeElement as HTMLElement | null;
+      ta.focus({ preventScroll: true });
+      ta.setSelectionRange(start, end);
+      back?.focus({ preventScroll: true });
+    }, 60);
+  }, []);
 
   const loadLayoutThumbs = useCallback(async () => {
     const engine = engineRef.current;
@@ -627,6 +651,21 @@ export function App() {
       const engine = engineRef.current;
       // Editing commands must not touch the deck while it is being presented.
       if (showingRef.current) return;
+      if (id === "find" || id === "replace") {
+        findRef.current?.open(id === "replace");
+        return;
+      }
+      if (id === "find_next" || id === "find_previous") {
+        findRef.current?.step(id === "find_previous");
+        return;
+      }
+      // In a text field (find bar, ribbon inputs), undo/redo/select all act on the field.
+      const field = document.activeElement;
+      if (field instanceof HTMLInputElement && (id === "undo" || id === "redo" || id === "select_all")) {
+        if (id === "select_all") field.select();
+        else document.execCommand(id);
+        return;
+      }
       // In the notes pane, undo/redo/select all act on its text (WebKit's own undo history).
       const notes = notesFocused();
       if (notes && (id === "undo" || id === "redo")) {
@@ -717,6 +756,7 @@ export function App() {
         <section className={showing ? "editor-area showing" : "editor-area"}>
           <div className="canvas-area">
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
+            {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
             {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}
             {showMode === "slides" && <SlideShow state={showState} command={showCommand} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}
             {showMode === "presenter" && engineRef.current && showState && (

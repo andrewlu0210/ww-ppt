@@ -1227,3 +1227,83 @@ button {
 .anim-empty {
   padding: 4px 8px;
 }
+
+/* Find and replace, over the canvas's top-right corner. */
+.find-bar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+}
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-input {
+  width: 200px;
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.find-result {
+  min-width: 64px;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.find-btn,
+.find-toggle-mode {
+  font: inherit;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: default;
+}
+
+.find-btn:hover:not(:disabled),
+.find-toggle-mode:hover {
+  background: #f2f4f7;
+}
+
+.find-btn.active {
+  border-color: #4a7fd6;
+  background: #dce8fb;
+}
+
+.find-btn.text {
+  border-color: var(--border);
+}
+
+.find-btn:disabled {
+  opacity: 0.4;
+}
+
+.find-toggle-mode {
+  transition: transform 0.1s;
+}
+
+.find-toggle-mode.open {
+  transform: rotate(90deg);
+}
+
+.find-toggle-mode.spacer {
+  visibility: hidden;
+}

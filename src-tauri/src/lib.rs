@@ -115,6 +115,11 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
         .item(&PredefinedMenuItem::copy(app, Some("拷貝"))?)
         .item(&PredefinedMenuItem::paste(app, Some("貼上"))?)
         .item(&item("select_all", "全選", Some("CmdOrCtrl+A"))?)
+        .separator()
+        .item(&item("find", "尋找…", Some("CmdOrCtrl+F"))?)
+        .item(&item("replace", "取代…", Some("CmdOrCtrl+Alt+F"))?)
+        .item(&item("find_next", "尋找下一個", Some("CmdOrCtrl+G"))?)
+        .item(&item("find_previous", "尋找上一個", Some("CmdOrCtrl+Shift+G"))?)
         .build()?;
     let insert = SubmenuBuilder::new(app, "插入")
         .item(&item("new_slide", "新增投影片", Some("CmdOrCtrl+Shift+N"))?)
