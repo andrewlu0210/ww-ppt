@@ -20,3 +20,6 @@
 /samples/vr/test5.pdf
 /samples/vr/test6.pptx
 /samples/vr/test6.pdf
+# Any further private sample decks (test7, test8, ...).
+/samples/vr/test*.pptx
+/samples/vr/test*.pdf

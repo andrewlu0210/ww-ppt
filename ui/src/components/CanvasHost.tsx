@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import init, { createApp, type App } from "../wasm/ppt_wasm";
 import { SHAPES_MARKER } from "../lib/commands";
+import { setWasmMemory } from "../lib/perf";
 
 /** Returns keyboard focus to the canvas input (after toolbar clicks, dialogs, ...). */
 export function focusCanvas() {
@@ -70,7 +71,7 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
         onError("此 WebView 不支援 WebGPU（需要 macOS 26 以上）。");
         return;
       }
-      await init();
+      setWasmMemory((await init()).memory);
       const { dpr } = sizeCanvas();
       let app: App;
       try {

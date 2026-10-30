@@ -29,6 +29,7 @@ import {
 } from "./lib/backend";
 import { startAutomation } from "./lib/automation";
 import { cyclePanes } from "./lib/keyboard";
+import { mark, nextFrame, timed } from "./lib/perf";
 import { SHAPES_MARKER, type Command, type TableStyleInfo } from "./lib/commands";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
@@ -245,7 +246,10 @@ export function App() {
   const renderThumbs = useCallback(async (indices: number[]) => {
     const engine = engineRef.current;
     if (!engine) return;
+    const t0 = performance.now();
+    let slowest = 0;
     for (const i of indices) {
+      const ts = performance.now();
       try {
         const t = (await engine.renderThumbnail(i, THUMB_WIDTH, false)) as { width: number; height: number; pixels: Uint8Array };
         const image = new ImageData(new Uint8ClampedArray(t.pixels), t.width, t.height);
@@ -253,6 +257,11 @@ export function App() {
       } catch {
         // The slide may have been deleted while rendering.
       }
+      slowest = Math.max(slowest, performance.now() - ts);
+    }
+    if (indices.length > 1) {
+      mark(`thumbnails: ${indices.length} slides`, performance.now() - t0);
+      mark("thumbnails: slowest one", slowest);
     }
   }, []);
 
@@ -430,8 +439,8 @@ export function App() {
       setThumbs(new Map());
       refresh();
       scheduleThumbs(true);
-      await deckStyleChanged();
-      await loadFonts(engine.fontFamilies() as string[]);
+      await timed("open: theme info", () => deckStyleChanged());
+      await timed("open: fonts", () => loadFonts(engine.fontFamilies() as string[]));
     },
     [deckStyleChanged, loadFonts, refresh, scheduleThumbs],
   );
@@ -484,9 +493,13 @@ export function App() {
       const engine = engineRef.current;
       if (!engine) return;
       try {
-        engine.loadPptx(await readFile(path));
+        const t0 = performance.now();
+        const bytes = await timed("open: read file", () => readFile(path));
+        await timed("open: parse (loadPptx)", () => engine.loadPptx(bytes));
         setError(null);
-        await documentReplaced(path.split("/").pop()?.replace(/\.pptx$/i, "") ?? path, path);
+        await timed("open: fonts + UI", () => documentReplaced(path.split("/").pop()?.replace(/\.pptx$/i, "") ?? path, path));
+        await nextFrame();
+        mark("open: first slide on screen", performance.now() - t0);
       } catch (e) {
         setError(`無法開啟檔案：${String(e)}`);
       }

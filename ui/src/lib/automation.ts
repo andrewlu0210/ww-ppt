@@ -2,6 +2,7 @@
 // pixels relative to the canvas, e.g. `click 400 300 2`, `drag 1 2 3 4`,
 // `text 你好`, `compose ㄋㄧˇ`, `commit 你`, `key Enter meta`, `shot name`.
 import { lastAnnouncement } from "./announce";
+import { nextFrame, takeMarks, wasmMemoryMB } from "./perf";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo } from "@tauri-apps/api/event";
 import { availableMonitors } from "@tauri-apps/api/window";
@@ -206,6 +207,20 @@ async function step(cmd: string, h: Hooks) {
         .find((b) => b.textContent === rest)
         ?.click();
       break;
+    case "perf": {
+      // Timing marks since the last `perf`, and the WASM heap size.
+      for (const [label, ms] of takeMarks()) await log(`perf ${label}: ${ms} ms`);
+      await log(`perf wasm heap: ${wasmMemoryMB().toFixed(0)} MB`);
+      break;
+    }
+    case "time": {
+      // Times a command: `time run {...}` or `time slide 3`.
+      const t = performance.now();
+      await step(rest, h);
+      await nextFrame();
+      await log(`time ${rest}: ${(performance.now() - t).toFixed(1)} ms`);
+      break;
+    }
     case "spoken":
       // The last screen reader announcement.
       await log(`spoken ${lastAnnouncement}`);

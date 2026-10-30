@@ -88,15 +88,19 @@ impl SlideRenderer {
 
     /// Renders one slide `width` pixels wide, as the app would show it (no edit chrome).
     pub fn render(&mut self, pres: &Presentation, slide: &Slide, width: u32) -> Result<RgbaImage, String> {
+        let (scene, height) = self.encode(pres, slide, width);
+        self.render_scene(&scene, width, height)
+    }
+
+    /// The slide's vello scene at `width` pixels (text layout, image decoding), and its height.
+    pub fn encode(&mut self, pres: &Presentation, slide: &Slide, width: u32) -> (Scene, u32) {
         let height = ((width as f64) * pres.slide_height as f64 / pres.slide_width as f64).round().max(1.0) as u32;
         let scale = width as f64 / pres.slide_width as f64;
         let mut scene = Scene::new();
-        {
-            let opts = DrawOptions { editing: false, emu_per_px: 1.0 / scale, ..Default::default() };
-            let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
-            draw_slide(&mut scene, &mut cx, pres, slide, Affine::scale(scale), &opts);
-        }
-        self.render_scene(&scene, width, height)
+        let opts = DrawOptions { editing: false, emu_per_px: 1.0 / scale, ..Default::default() };
+        let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+        draw_slide(&mut scene, &mut cx, pres, slide, Affine::scale(scale), &opts);
+        (scene, height)
     }
 
     /// The deck as a PDF (every slide, hidden ones included, to line up with reference PDFs).
@@ -136,7 +140,7 @@ impl SlideRenderer {
         self.render_scene(&scene, width, height)
     }
 
-    fn render_scene(&mut self, scene: &Scene, width: u32, height: u32) -> Result<RgbaImage, String> {
+    pub fn render_scene(&mut self, scene: &Scene, width: u32, height: u32) -> Result<RgbaImage, String> {
         let dev = &self.cx.devices[self.dev_id];
         let (device, queue) = (&dev.device, &dev.queue);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
