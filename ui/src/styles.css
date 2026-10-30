@@ -1392,3 +1392,14 @@ button {
 .layout-item.active {
   outline: 2px solid #4a7fd6;
 }
+
+/* Number boxes for size, position, rotation and cropping. */
+.num-field input {
+  width: 64px;
+}
+
+.num-unit {
+  color: var(--muted);
+  font-size: 11px;
+  min-width: 2em;
+}

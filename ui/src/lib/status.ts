@@ -35,6 +35,14 @@ export interface Status {
   lineSpacing?: number;
   /** Vertical text position in the edited or selected shape. */
   textAnchor?: "top" | "middle" | "bottom";
+  /** Frame of the single selected shape or selected group (EMU, degrees). */
+  frame?: { x: number; y: number; w: number; h: number; rot: number; single: boolean };
+  /** Shadow preset of the selected shape: a preset name, "none" or "custom". */
+  shadow?: string;
+  canChangeShape?: boolean;
+  /** Cropping of the selected picture (fractions), present only for pictures. */
+  crop?: { left: number; top: number; right: number; bottom: number };
+  cropMode?: boolean;
   /** The current slide's layout index, -1 when unknown. */
   slideLayout?: number;
   textColor?: string;

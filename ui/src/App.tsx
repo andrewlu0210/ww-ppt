@@ -640,6 +640,30 @@ export function App() {
         case "selectAll":
           engine.keyDown("a", false, false, true, false);
           break;
+        case "setFrame":
+          engine.setFrame(c.x, c.y, c.w, c.h, c.rot);
+          break;
+        case "rotate":
+          engine.rotateSelection(c.degrees);
+          break;
+        case "flip":
+          engine.flipSelection(c.horizontal);
+          break;
+        case "changeShape":
+          engine.changeShape(c.preset);
+          break;
+        case "shadow":
+          engine.setShadow(c.preset);
+          break;
+        case "cropMode":
+          engine.setCropMode(c.on);
+          break;
+        case "crop":
+          engine.setCrop(c.left, c.top, c.right, c.bottom);
+          break;
+        case "resetPicture":
+          engine.resetPicture();
+          break;
         case "fontSize":
           engine.setFontSize(c.size);
           break;

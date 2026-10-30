@@ -676,6 +676,8 @@ pub struct ParsedShape {
     pub kind: ShapeKind,
     pub group: Option<ShapeId>,
     pub placeholder: Option<Placeholder>,
+    pub geometry: Geometry,
+    pub shadow: Option<Shadow>,
 }
 
 impl ShapeSource {

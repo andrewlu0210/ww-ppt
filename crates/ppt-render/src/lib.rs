@@ -30,27 +30,49 @@ pub fn color(c: Color) -> PColor {
     PColor::from_rgba8(c.r, c.g, c.b, c.a)
 }
 
-/// A shape's drop shadow, for rectangular shapes and pictures (a blurred rounded rectangle).
-/// Other outlines are skipped rather than drawn with a wrong silhouette.
+/// A shape's drop shadow: a blurred rounded rectangle for rectangular shapes
+/// and pictures, and the outline itself with a soft edge for other shapes.
 fn draw_shadow(scene: &mut dyn Canvas, shape: &Shape, shadow: &ppt_model::Shadow, view: Affine) {
     let xf = &shape.xfrm;
     let (w, h) = (xf.w as f64, xf.h as f64);
-    let radius = match &shape.geometry {
-        ppt_model::Geometry::Preset { name, adjust } if name == "rect" => 0.0,
-        ppt_model::Geometry::Preset { name, adjust } if name == "roundRect" => {
-            w.min(h) * adjust.iter().find(|(k, _)| k == "adj").map_or(16_667.0, |(_, v)| *v) / 100_000.0
-        }
-        _ => return,
-    };
     // Shapes without any visible paint cast no shadow.
-    let visible = shape.fill.is_some() || matches!(shape.kind, ShapeKind::Picture { .. });
-    if !visible {
+    let picture = matches!(shape.kind, ShapeKind::Picture { .. });
+    if shape.fill.is_none() && !picture {
         return;
     }
     let (sin, cos) = shadow.dir.to_radians().sin_cos();
     let offset = Affine::translate((cos * shadow.dist as f64, sin * shadow.dist as f64));
-    let tf = view * offset * shape_affine(xf, false);
-    scene.draw_blurred_rounded_rect(tf, Rect::new(0.0, 0.0, w, h), color(shadow.color), radius, shadow.blur as f64 / 2.0);
+    let radius = match &shape.geometry {
+        ppt_model::Geometry::Preset { name, .. } if name == "rect" => Some(0.0),
+        ppt_model::Geometry::Preset { name, adjust } if name == "roundRect" => Some(w.min(h) * adjust.iter().find(|(k, _)| k == "adj").map_or(16_667.0, |(_, v)| *v) / 100_000.0),
+        _ if picture => Some(0.0),
+        _ => None,
+    };
+    if let Some(radius) = radius {
+        let tf = view * offset * shape_affine(xf, false);
+        scene.draw_blurred_rounded_rect(tf, Rect::new(0.0, 0.0, w, h), color(shadow.color), radius, shadow.blur as f64 / 2.0);
+        return;
+    }
+    let tf = view * offset * shape_affine(xf, true);
+    let mut path = BezPath::new();
+    for outline in outlines(&shape.geometry, w, h).into_iter().filter(|o| o.fill) {
+        path.extend(outline.path);
+    }
+    if path.elements().is_empty() {
+        return;
+    }
+    // Rings of decreasing opacity around a lighter core approximate the blur.
+    let c = color(shadow.color);
+    let a = c.components[3];
+    let blur = shadow.blur as f64;
+    const RINGS: usize = 3;
+    for i in (1..=RINGS).rev() {
+        let width = blur * i as f64 / RINGS as f64;
+        if width > 0.0 {
+            scene.stroke(&Stroke::new(width), tf, c.with_alpha(a * 0.12), None, &path);
+        }
+    }
+    scene.fill(Fill::NonZero, tf, c.with_alpha(a * if blur > 0.0 { 0.6 } else { 1.0 }), None, &path);
 }
 
 /// Strokes `path` with the line's width and dash pattern, plus arrowheads on open paths.

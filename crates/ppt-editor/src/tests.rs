@@ -1048,3 +1048,66 @@ fn zip_part(bytes: &[u8], name: &str) -> String {
     z.by_name(name).unwrap().read_to_string(&mut s).unwrap();
     s
 }
+
+#[test]
+fn shape_format_frame_rotation_flips_shape_and_shadow() {
+    let (mut e, a) = editor();
+    e.selection = vec![a];
+    assert!(e.set_selection_frame(Xfrm { rot: 30.0, ..Xfrm::new(2 * IN, IN, 3 * IN, IN / 2) }));
+    assert_eq!(xfrm(&e, a), Xfrm { rot: 30.0, ..Xfrm::new(2 * IN, IN, 3 * IN, IN / 2) });
+    assert!(e.flip_selection(true));
+    assert!(xfrm(&e, a).flip_h && (xfrm(&e, a).rot - 330.0).abs() < 1e-9);
+    assert!(e.rotate_selection(90.0));
+    assert!((xfrm(&e, a).rot - 60.0).abs() < 1e-9);
+
+    // A group mirrors and turns about its own center.
+    let b = add_rect(&mut e, 4 * IN, IN);
+    e.pres.shape_mut(0, a).unwrap().xfrm = Xfrm::new(IN, IN, IN, IN);
+    e.selection = vec![a, b];
+    assert!(e.group_selected());
+    assert!(e.flip_selection(true));
+    assert_eq!((xfrm(&e, a).x, xfrm(&e, b).x), (4 * IN, IN));
+    assert!(e.rotate_selection(90.0));
+    let (ca, cb) = (xfrm(&e, a).center(), xfrm(&e, b).center());
+    assert!((ca.0 - cb.0).abs() < 2.0 && (ca.1 - cb.1).abs() > IN as f64, "members now stack vertically: {ca:?} {cb:?}");
+    // Resizing a group scales its members.
+    let f = e.selection_frame().unwrap();
+    assert!(e.set_selection_frame(Xfrm { h: f.h * 2, ..f }));
+    assert_eq!(xfrm(&e, a).h, 2 * IN);
+
+    e.selection = vec![a];
+    e.entered_group = e.pres.shape(0, a).unwrap().group;
+    assert!(e.change_shape("ellipse"));
+    assert_eq!(e.pres.shape(0, a).unwrap().geometry, Geometry::preset("ellipse"));
+    let shadow = ppt_model::Shadow { color: Color::BLACK, blur: 50_800, dist: 38_100, dir: 45.0 };
+    assert!(e.set_shadow(Some(shadow)));
+    assert!(!e.set_shadow(Some(shadow)));
+    assert_eq!(e.selection_shadow(), Some(Some(shadow)));
+}
+
+#[test]
+fn cropping_keeps_the_image_scale() {
+    let mut eng = engine();
+    let (mut e, _) = editor();
+    assert!(e.add_picture(&mut eng, "img".into(), std::sync::Arc::new(Vec::new()), 400, 200));
+    let id = e.selection[0];
+    let before = xfrm(&e, id);
+    // Trimming a quarter from the left and right halves the width, centered as before.
+    assert!(e.set_crop(ppt_model::Crop { left: 0.25, right: 0.25, top: 0.0, bottom: 0.0 }));
+    let x = xfrm(&e, id);
+    assert_eq!((x.w, x.h), ((before.w as f64 / 2.0).round() as i64, before.h));
+    assert_eq!(x.x, before.x + (before.w as f64 / 4.0).round() as i64);
+    // The whole image keeps its place in crop mode.
+    assert!(e.set_crop_mode(true));
+    let (_, full) = e.crop_view().unwrap();
+    assert_eq!((full.x, full.w), (before.x, before.w));
+    // Dragging the right handle outwards uncovers what was trimmed, no further.
+    e.crop_drag(id, x, ppt_model::Crop { left: 0.25, right: 0.25, top: 0.0, bottom: 0.0 }, Handle::E, Xfrm { w: x.w * 4, ..x });
+    let c = e.selected_crop().unwrap();
+    assert_eq!((c.left, c.right), (0.25, 0.0));
+    assert_eq!(xfrm(&e, id).w, (before.w as f64 * 0.75).round() as i64);
+    assert!(e.reset_picture(Some((400, 200))));
+    assert_eq!(e.selected_crop(), Some(ppt_model::Crop::default()));
+    assert_eq!(xfrm(&e, id).h, (xfrm(&e, id).w as f64 / 2.0).round() as i64);
+    assert!(e.crop.is_none());
+}

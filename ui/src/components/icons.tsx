@@ -8,6 +8,55 @@ const Svg = ({ children }: { children: ReactNode }) => (
 );
 
 export const icons: Record<string, ReactNode> = {
+  rotateRight: (
+    <Svg>
+      <path d="M18 9a7 7 0 1 0 1 6" />
+      <path d="M19 4v5h-5" />
+    </Svg>
+  ),
+  rotateLeft: (
+    <Svg>
+      <path d="M6 9a7 7 0 1 1-1 6" />
+      <path d="M5 4v5h5" />
+    </Svg>
+  ),
+  flipH: (
+    <Svg>
+      <path d="M12 3v18" strokeDasharray="2 2" />
+      <path d="M9 6L3.5 18H9zM15 6l5.5 12H15z" />
+    </Svg>
+  ),
+  flipV: (
+    <Svg>
+      <path d="M3 12h18" strokeDasharray="2 2" />
+      <path d="M6 9L18 3.5V9zM6 15l12 5.5V15z" />
+    </Svg>
+  ),
+  shadow: (
+    <Svg>
+      <rect x="7" y="7" width="12" height="12" rx="1" fill="currentColor" fillOpacity="0.25" stroke="none" />
+      <rect x="4.5" y="4.5" width="12" height="12" rx="1" />
+    </Svg>
+  ),
+  changeShape: (
+    <Svg>
+      <rect x="3.5" y="11" width="8" height="8" rx="1" />
+      <circle cx="16" cy="8" r="4.5" />
+      <path d="M12.5 15.5h4.5v-3" />
+    </Svg>
+  ),
+  crop: (
+    <Svg>
+      <path d="M7 3v14h14M3 7h14v14" />
+    </Svg>
+  ),
+  resetPicture: (
+    <Svg>
+      <rect x="3.5" y="5" width="17" height="14" rx="1" />
+      <path d="M7 16l3.5-4 2.5 3 2-2 2 3" />
+      <circle cx="15.5" cy="9" r="1.3" />
+    </Svg>
+  ),
   layout: (
     <Svg>
       <rect x="3.5" y="4.5" width="17" height="15" rx="1" />

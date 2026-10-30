@@ -599,7 +599,7 @@ impl Parser<'_> {
             namespaces: src.namespaces.clone(),
             rels,
             container: None,
-            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill.clone(), line: shape.line, text: shape.text.clone(), kind: shape.kind.clone(), group: shape.group, placeholder: shape.placeholder.clone() },
+            parsed: ParsedShape { xfrm: shape.xfrm, fill: shape.fill.clone(), line: shape.line, text: shape.text.clone(), kind: shape.kind.clone(), group: shape.group, placeholder: shape.placeholder.clone(), geometry: shape.geometry.clone(), shadow: shape.shadow },
         }))
     }
 

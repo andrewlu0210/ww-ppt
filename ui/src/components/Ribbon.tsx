@@ -7,6 +7,7 @@ import { Popover } from "./Popover";
 import { TableDesignTab, TableLayoutTab } from "./TableTabs";
 import { TransitionTab } from "./TransitionTab";
 import { AnimationTab } from "./AnimationTab";
+import { PictureFormatTab, RotateMenu, ShadowMenu, SizeGroup } from "./FormatGroups";
 import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { AnimationPreset, Status } from "../lib/status";
@@ -29,7 +30,8 @@ const ANCHORS = [
 const TABS = ["常用", "插入", "圖形格式", "轉場", "動畫", "投影片放映", "校閱", "檢視"] as const;
 /** Shown only while a table (or a cell in it) is the target, like PowerPoint's contextual tabs. */
 const TABLE_TABS = ["表格設計", "版面配置"] as const;
-type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number];
+const PICTURE_TAB = "圖片格式" as const;
+type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number] | typeof PICTURE_TAB;
 const isTableTab = (t: Tab) => (TABLE_TABS as readonly string[]).includes(t);
 
 const SHAPES: [string, string][] = [
@@ -98,9 +100,9 @@ interface Props {
 
 export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
-  const tab = isTableTab(chosen) && !status.inTable ? "常用" : chosen;
+  const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
-  const tabs: Tab[] = status.inTable ? [...TABS, ...TABLE_TABS] : [...TABS];
+  const tabs: Tab[] = [...TABS, ...(status.inTable ? TABLE_TABS : []), ...(status.crop ? [PICTURE_TAB] : [])];
   useEffect(() => {
     if (linkRequest > 0) setTab("插入");
   }, [linkRequest]);
@@ -130,7 +132,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
     <div className="ribbon">
       <div className="rb-tabs" role="tablist">
         {tabs.map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", isTableTab(t) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
+          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", (isTableTab(t) || t === PICTURE_TAB) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
             {t}
           </button>
         ))}
@@ -425,6 +427,36 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 </label>
               </div>
             </Group>
+            <Group label="圖案">
+              <Popover
+                button={(open, toggle) => (
+                  <button className={open ? "rb-btn active" : "rb-btn"} disabled={!status.canChangeShape} onMouseDown={keepFocus} onClick={toggle} title="變更圖案">
+                    {icons.changeShape}
+                    <span>變更圖案 ▾</span>
+                  </button>
+                )}
+              >
+                {(close) => (
+                  <div className="menu-panel">
+                    {SHAPES.filter(([p]) => p !== "line").map(([preset, label]) => (
+                      <button
+                        key={preset}
+                        className="menu-item"
+                        onMouseDown={keepFocus}
+                        onClick={() => {
+                          run({ kind: "changeShape", preset });
+                          close();
+                        }}
+                      >
+                        <span className="menu-icon">{icons[preset]}</span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Popover>
+              <ShadowMenu status={status} disabled={!shapes || status.shadow === undefined} run={run} />
+            </Group>
             <Group label="排列">
               <div className="rb-col">
                 <Button icon={icons.front} label="移到最上層" disabled={!shapes} onClick={() => run({ kind: "reorder", order: "front" })} />
@@ -438,7 +470,11 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 <Button icon={icons.group} label="組成群組 (⌘⌥G)" disabled={!status.canGroup} onClick={() => run({ kind: "group", on: true })} />
                 <Button icon={icons.ungroup} label="取消群組 (⌘⌥⇧G)" disabled={!status.canUngroup} onClick={() => run({ kind: "group", on: false })} />
               </div>
+              <div className="rb-col">
+                <RotateMenu disabled={!status.frame} run={run} />
+              </div>
             </Group>
+            <SizeGroup status={status} run={run} />
             <Group label="對齊">
               {(
                 [
@@ -458,6 +494,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "表格設計" && <TableDesignTab status={status} styles={tableStyles} run={run} />}
         {tab === "版面配置" && <TableLayoutTab status={status} run={run} />}
         {tab === "轉場" && <TransitionTab status={status} run={run} />}
+        {tab === PICTURE_TAB && <PictureFormatTab status={status} run={run} />}
         {tab === "動畫" && <AnimationTab status={status} run={run} presets={animPresets} />}
         {tab === "投影片放映" && (
           <>

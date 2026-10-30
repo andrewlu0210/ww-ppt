@@ -39,6 +39,14 @@ export type Command =
   | { kind: "resetSlide" }
   | { kind: "find"; replace: boolean }
   | { kind: "selectAll" }
+  | { kind: "setFrame"; x: number; y: number; w: number; h: number; rot: number }
+  | { kind: "rotate"; degrees: number }
+  | { kind: "flip"; horizontal: boolean }
+  | { kind: "changeShape"; preset: string }
+  | { kind: "shadow"; preset: string }
+  | { kind: "cropMode"; on: boolean }
+  | { kind: "crop"; left: number; top: number; right: number; bottom: number }
+  | { kind: "resetPicture" }
   | { kind: "fontSize"; size: number }
   | { kind: "fontStep"; up: boolean }
   | { kind: "fontFamily"; family: string }

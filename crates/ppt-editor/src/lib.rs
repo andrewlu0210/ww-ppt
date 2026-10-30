@@ -5,6 +5,7 @@
 
 mod anim;
 mod find;
+mod format;
 mod group;
 mod layout;
 mod richedit;
@@ -245,6 +246,8 @@ pub struct Editor {
     pending_enter: Option<(ShapeId, ShapeId)>,
     /// The slide whose notes typing is folded into the last undo step.
     notes_undo: Option<usize>,
+    /// The picture in crop mode: its handles trim it instead of resizing it.
+    pub crop: Option<ShapeId>,
 }
 
 /// A snap target: (position, extent start, extent end).
@@ -278,6 +281,7 @@ impl Editor {
             pending_enter: None,
             notes_undo: None,
             cell_range: None,
+            crop: None,
         }
     }
 
@@ -297,6 +301,7 @@ impl Editor {
         self.end_text_edit(engine);
         self.slide = index.min(self.pres.slides.len().saturating_sub(1));
         self.selection.clear();
+        self.crop = None;
         self.entered_group = None;
         self.cell_range = None;
         self.refresh_tables(engine);
@@ -430,6 +435,7 @@ impl Editor {
         self.selection = snap.selection.into_iter().filter(|id| self.pres.shape(slide, *id).is_some()).collect();
         self.entered_group = None;
         self.cell_range = None;
+        self.crop = None;
         self.changed();
     }
 
@@ -463,7 +469,12 @@ impl Editor {
     /// Handle positions of the single selected shape, in slide space.
     pub fn handles(&self, tol: &Tolerance) -> Vec<(Handle, (f64, f64))> {
         if let Some(shape) = self.selected_shape() {
-            return handle_points(&shape.xfrm, shape.geometry.is_line(), tol.rotate_offset);
+            let points = handle_points(&shape.xfrm, shape.geometry.is_line(), tol.rotate_offset);
+            // A picture being cropped doesn't rotate.
+            if self.crop == Some(shape.id) {
+                return points.into_iter().filter(|h| h.0 != Handle::Rotate).collect();
+            }
+            return points;
         }
         // A selected group resizes as a whole (it does not rotate).
         let Some(frame) = self.selection_frame() else { return Vec::new() };
@@ -548,6 +559,10 @@ impl Editor {
             self.end_text_edit(engine);
         }
 
+        // Crop mode ends with a click anywhere but on the picture's handles.
+        if self.crop.is_some() && self.handle_at(ev.x, ev.y, tol).is_none() {
+            self.crop = None;
+        }
         if let Some(handle) = self.handle_at(ev.x, ev.y, tol) {
             let kind = if handle == Handle::Rotate { DragKind::Rotate } else { DragKind::Resize(handle) };
             self.drag = Some(Drag { kind, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
@@ -709,6 +724,17 @@ impl Editor {
                     if let Some(shape) = self.pres.shape_mut(self.slide, *id) {
                         shape.xfrm = group::rescale(o, &frame, &new);
                     }
+                }
+            }
+            DragKind::Resize(handle) if self.crop.is_some_and(|c| origs.first().is_some_and(|o| o.0 == c)) => {
+                let (id, orig) = origs[0];
+                let new = resize(&orig, handle, dx, dy, false, MIN_SIZE);
+                let orig_crop = self.drag.as_ref().and_then(|d| d.before.as_ref()).and_then(|b| b.pres.shape(self.slide, id)).and_then(|s| match s.kind {
+                    ShapeKind::Picture { crop, .. } => Some(crop),
+                    _ => None,
+                });
+                if let Some(c) = orig_crop {
+                    self.crop_drag(id, orig, c, handle, new);
                 }
             }
             DragKind::Resize(handle) => {
@@ -1287,6 +1313,10 @@ impl Editor {
                 }
                 _ => {}
             }
+        }
+        if self.crop.is_some() && matches!(key, "Escape" | "Enter") {
+            self.crop = None;
+            return true;
         }
         match key {
             "Backspace" | "Delete" => self.delete_selected(),

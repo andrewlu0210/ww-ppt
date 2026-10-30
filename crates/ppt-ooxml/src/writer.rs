@@ -561,7 +561,46 @@ impl SlideOut<'_> {
 
 fn shape_unchanged(shape: &Shape, src: &ShapeSource) -> bool {
     let p = &src.parsed;
-    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind && shape.group == p.group && shape.placeholder == p.placeholder
+    shape.xfrm == p.xfrm && shape.fill == p.fill && shape.line == p.line && shape.text == p.text && shape.kind == p.kind && shape.group == p.group && shape.placeholder == p.placeholder && shape.geometry == p.geometry && shape.shadow == p.shadow
+}
+
+fn shadow_xml(s: &ppt_model::Shadow) -> String {
+    format!(r#"<a:outerShdw blurRad="{}" dist="{}" dir="{}" algn="ctr" rotWithShape="0">{}</a:outerShdw>"#, s.blur.max(0), s.dist.max(0), (s.dir.rem_euclid(360.0) * 60_000.0).round() as i64, color_xml(s.color))
+}
+
+/// `a:effectLst` with the shadow replaced (other effects kept); `None` removes it.
+fn effect_lst_xml(src: &str, old: Option<Node>, shadow: Option<&ppt_model::Shadow>) -> String {
+    let others: Vec<Node> = old.map(|n| n.children().filter(|c| c.is_element() && c.tag_name().name() != "outerShdw").collect()).unwrap_or_default();
+    let mut kids: Vec<String> = others.iter().map(|c| src[c.range()].to_string()).collect();
+    if let Some(s) = shadow {
+        // Schema order: blur, fillOverlay, glow, innerShdw, outerShdw, prstShdw, reflection, softEdge.
+        let at = others.iter().take_while(|c| matches!(c.tag_name().name(), "blur" | "fillOverlay" | "glow" | "innerShdw")).count();
+        kids.insert(at, shadow_xml(s));
+    }
+    if kids.is_empty() { "<a:effectLst/>".to_string() } else { format!("<a:effectLst>{}</a:effectLst>", kids.concat()) }
+}
+
+/// `p:blipFill` with the picture's cropping (`a:srcRect`) replaced.
+fn blip_fill_with_crop(src: &str, n: Node, crop: &Crop) -> String {
+    let mut out = format!("{}>", open_tag(src, n));
+    let mut placed = false;
+    for c in n.children().filter(|c| c.is_element()) {
+        match c.tag_name().name() {
+            "srcRect" => {}
+            name => {
+                if !placed && name != "blip" {
+                    out.push_str(&src_rect_xml(crop));
+                    placed = true;
+                }
+                out.push_str(&src[c.range()]);
+            }
+        }
+    }
+    if !placed {
+        out.push_str(&src_rect_xml(crop));
+    }
+    out.push_str(&src[close_tag_start(src, n)..n.range().end]);
+    out
 }
 
 /// `p:ph` for a placeholder (`obj` is the default type and is left out).
@@ -639,12 +678,21 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
     let fill_changed = shape.fill != p.fill;
     let line_changed = shape.line != p.line;
     let text_changed = shape.text != p.text;
+    let geometry_changed = shape.geometry != p.geometry;
+    let shadow_changed = shape.shadow != p.shadow;
     let mut edits = Vec::new();
     match el.tag_name().name() {
         "sp" | "cxnSp" | "pic" => {
-            if xfrm_changed || fill_changed || line_changed {
+            if let (ShapeKind::Picture { crop, .. }, ShapeKind::Picture { crop: old, .. }) = (&shape.kind, &p.kind)
+                && crop != old
+                && let Some(bf) = child(el, "blipFill")
+            {
+                edits.push((bf.range(), blip_fill_with_crop(&wrapped, bf, crop)));
+            }
+            if xfrm_changed || fill_changed || line_changed || geometry_changed || shadow_changed {
                 let sp_pr = child(el, "spPr");
-                let new = rebuild_sp_pr(&wrapped, sp_pr, shape, xfrm_changed, fill_changed, line_changed);
+                let changes = SpPrChanges { xfrm: xfrm_changed, geometry: geometry_changed, fill: fill_changed, line: line_changed, shadow: shadow_changed };
+                let new = rebuild_sp_pr(&wrapped, sp_pr, shape, changes);
                 match sp_pr {
                     Some(n) => edits.push((n.range(), new)),
                     None => {
@@ -715,7 +763,18 @@ fn sp_pr_rank(name: &str) -> u8 {
     }
 }
 
-fn rebuild_sp_pr(src: &str, sp_pr: Option<Node>, shape: &Shape, xfrm: bool, fill: bool, line: bool) -> String {
+/// Which parts of `p:spPr` to rewrite.
+#[derive(Clone, Copy)]
+struct SpPrChanges {
+    xfrm: bool,
+    geometry: bool,
+    fill: bool,
+    line: bool,
+    shadow: bool,
+}
+
+fn rebuild_sp_pr(src: &str, sp_pr: Option<Node>, shape: &Shape, changes: SpPrChanges) -> String {
+    let old_effects = sp_pr.and_then(|n| child(n, "effectLst"));
     let mut kids: Vec<(u8, String)> = sp_pr
         .map(|n| n.children().filter(|c| c.is_element()).map(|c| (sp_pr_rank(c.tag_name().name()), src[c.range()].to_string())).collect())
         .unwrap_or_default();
@@ -724,14 +783,20 @@ fn rebuild_sp_pr(src: &str, sp_pr: Option<Node>, shape: &Shape, xfrm: bool, fill
         let at = kids.iter().position(|(r, _)| *r > rank).unwrap_or(kids.len());
         kids.insert(at, (rank, xml));
     };
-    if xfrm {
+    if changes.xfrm {
         set(0, xfrm_xml("a:xfrm", &shape.xfrm));
     }
-    if fill {
+    if changes.geometry {
+        set(1, geometry_xml(&shape.geometry));
+    }
+    if changes.fill {
         set(2, fill_xml(&shape.fill));
     }
-    if line {
+    if changes.line {
         set(3, line_xml(shape.line));
+    }
+    if changes.shadow {
+        set(4, effect_lst_xml(src, old_effects, shape.shadow.as_ref()));
     }
     let open = sp_pr.map(|n| open_tag(src, n)).unwrap_or_else(|| "<p:spPr".to_string());
     format!("{open}>{}</p:spPr>", kids.into_iter().map(|(_, x)| x).collect::<String>())
@@ -758,6 +823,9 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             if shape.line.is_some() {
                 sp_pr.push_str(&line_xml(shape.line));
             }
+            if let Some(sh) = &shape.shadow {
+                sp_pr.push_str(&format!("<a:effectLst>{}</a:effectLst>", shadow_xml(sh)));
+            }
             sp_pr.push_str("</p:spPr>");
             let c_nv_sp_pr = if text_box { r#"<p:cNvSpPr txBox="1"/>"# } else { "<p:cNvSpPr/>" };
             let tx = shape.text.as_ref().map(|t| new_tx_body_xml(t, out)).unwrap_or_default();
@@ -772,9 +840,11 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             let part = out.media.part_for(out.pres, key)?;
             let rid = out.rel_for(&format!("{REL_BASE}image"), &part, false);
             Some(format!(
-                r#"<p:pic><p:nvPicPr><p:cNvPr id="{id}" name="{name}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>{nv_pr}</p:nvPicPr><p:blipFill><a:blip r:embed="{rid}"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#,
+                r#"<p:pic><p:nvPicPr><p:cNvPr id="{id}" name="{name}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>{nv_pr}</p:nvPicPr><p:blipFill><a:blip r:embed="{rid}"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}{}{}</p:spPr></p:pic>"#,
                 src_rect_xml(crop),
-                xfrm_xml("a:xfrm", &shape.xfrm)
+                xfrm_xml("a:xfrm", &shape.xfrm),
+                geometry_xml(&shape.geometry),
+                shape.shadow.as_ref().map(|sh| format!("<a:effectLst>{}</a:effectLst>", shadow_xml(sh))).unwrap_or_default()
             ))
         }
         _ => None,

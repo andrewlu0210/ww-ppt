@@ -21,7 +21,7 @@ use ppt_render::vello::wgpu::{self, CurrentSurfaceTexture, SurfaceTarget};
 use ppt_render::vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene};
 use ppt_render::{
     DrawOptions, ImageCache, RenderCtx, SelectionOverlay, TextOverlay, draw_body_layout, draw_guides, draw_marquee, draw_selection,
-    draw_slide, draw_slide_animated, draw_text_overlay, image_size,
+    draw_shape, draw_slide, draw_slide_animated, draw_text_overlay, image_size,
 };
 use ppt_text::TextEngine;
 use wasm_bindgen::prelude::*;
@@ -86,6 +86,16 @@ struct Anim {
     start_ms: f64,
     duration_ms: f64,
 }
+
+/// Shadow presets: name, direction (degrees), distance and blur (EMU), as
+/// PowerPoint's outer shadows.
+const SHADOWS: [(&str, f64, i64, i64); 5] = [
+    ("bottomRight", 45.0, 38_100, 50_800),
+    ("bottom", 90.0, 38_100, 50_800),
+    ("right", 0.0, 38_100, 50_800),
+    ("bottomLeft", 135.0, 38_100, 50_800),
+    ("center", 0.0, 0, 63_500),
+];
 
 /// Key of a text for spelling results: `s<id>` for a shape, `c<id>:<row>:<col>` for a cell.
 fn spell_key(place: FindPlace) -> String {
@@ -361,6 +371,7 @@ impl App {
         }
 
         self.draw_spelling(view);
+        self.draw_crop_view(view);
 
         let to_dev = |(x, y): (f64, f64)| view * Point::new(x, y);
         let tol = self.tolerance();
@@ -790,6 +801,31 @@ impl App {
             .collect()
     }
 
+    /// Crop mode: the trimmed-away parts of the picture, dimmed, and the whole image's outline.
+    fn draw_crop_view(&mut self, view: Affine) {
+        let Some((id, full)) = self.editor.crop_view() else { return };
+        let pres = &self.editor.pres;
+        let Some(shape) = pres.shape(self.editor.slide, id) else { return };
+        let ppt_model::ShapeKind::Picture { media, crop } = &shape.kind else { return };
+        let (fw, fh) = (full.w as f64, full.h as f64);
+        let shown = Rect::new(crop.left * fw, crop.top * fh, crop.left * fw + shape.xfrm.w as f64, crop.top * fh + shape.xfrm.h as f64);
+        use ppt_render::vello::kurbo::Shape as _;
+        let mut ring = Rect::new(0.0, 0.0, fw, fh).to_path(0.1);
+        ring.extend(shown.to_path(0.1));
+        let tf = view * shape_affine(&full, false);
+        let ghost = ppt_model::Shape { xfrm: full, kind: ppt_model::ShapeKind::Picture { media: media.clone(), crop: ppt_model::Crop::default() }, line: None, shadow: None, geometry: ppt_model::Geometry::preset("rect"), ..shape.clone() };
+        self.scene.push_layer(ppt_render::vello::peniko::Fill::EvenOdd, ppt_render::vello::peniko::BlendMode::from(ppt_render::vello::peniko::Mix::Normal), 0.35, tf, &ring);
+        let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
+        draw_shape(&mut self.scene, &mut cx, pres, &ghost, view, &DrawOptions::default());
+        self.scene.pop_layer();
+        // The whole image's outline, dashed in device pixels.
+        let d = self.dpr;
+        let mut edge = Rect::new(0.0, 0.0, fw, fh).to_path(0.1);
+        edge.apply_affine(tf);
+        let outline = ppt_render::vello::kurbo::Stroke::new(d).with_dashes(0.0, [4.0 * d, 3.0 * d]);
+        self.scene.stroke(&outline, Affine::IDENTITY, PColor::from_rgba8(0x40, 0x40, 0x40, 255), None, &edge);
+    }
+
     /// Red wavy lines under misspelled words.
     fn draw_spelling(&mut self, view: Affine) {
         let d = self.dpr;
@@ -1102,6 +1138,65 @@ impl App {
     #[wasm_bindgen(js_name = addShape)]
     pub fn add_shape(&mut self, preset: &str) -> bool {
         let changed = self.editor.add_shape(&mut self.engine, preset);
+        self.touch(changed)
+    }
+
+    /// Moves and resizes the selection (EMU; rotation in degrees, single shapes only).
+    #[wasm_bindgen(js_name = setFrame)]
+    pub fn set_frame(&mut self, x: f64, y: f64, w: f64, h: f64, rot: f64) -> bool {
+        let to = ppt_model::Xfrm { rot: rot.rem_euclid(360.0), ..ppt_model::Xfrm::new(x.round() as i64, y.round() as i64, w.round() as i64, h.round() as i64) };
+        let changed = self.editor.set_selection_frame(to);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = rotateSelection)]
+    pub fn rotate_selection(&mut self, degrees: f64) -> bool {
+        let changed = self.editor.rotate_selection(degrees);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = flipSelection)]
+    pub fn flip_selection(&mut self, horizontal: bool) -> bool {
+        let changed = self.editor.flip_selection(horizontal);
+        self.touch(changed)
+    }
+
+    #[wasm_bindgen(js_name = changeShape)]
+    pub fn change_shape(&mut self, preset: &str) -> bool {
+        let changed = self.editor.change_shape(preset);
+        self.touch(changed)
+    }
+
+    /// Applies a shadow preset (`SHADOWS`) or "none".
+    #[wasm_bindgen(js_name = setShadow)]
+    pub fn set_shadow(&mut self, preset: &str) -> bool {
+        let shadow = SHADOWS.iter().find(|(name, ..)| *name == preset).map(|&(_, dir, dist, blur)| ppt_model::Shadow { color: Color { r: 0, g: 0, b: 0, a: 102 }, blur, dist, dir });
+        let changed = self.editor.set_shadow(shadow);
+        self.touch(changed)
+    }
+
+    /// Starts or ends crop mode on the selected picture.
+    #[wasm_bindgen(js_name = setCropMode)]
+    pub fn set_crop_mode(&mut self, on: bool) -> bool {
+        let changed = self.editor.set_crop_mode(on);
+        self.touch(changed)
+    }
+
+    /// Crops the selected picture (fractions trimmed from each side).
+    #[wasm_bindgen(js_name = setCrop)]
+    pub fn set_crop(&mut self, left: f64, top: f64, right: f64, bottom: f64) -> bool {
+        let changed = self.editor.set_crop(ppt_model::Crop { left, top, right, bottom });
+        self.touch(changed)
+    }
+
+    /// Removes the selected picture's cropping, rotation and flips, at the image's own proportions.
+    #[wasm_bindgen(js_name = resetPicture)]
+    pub fn reset_picture(&mut self) -> bool {
+        let pixels = self.editor.selected_shape().and_then(|s| match &s.kind {
+            ppt_model::ShapeKind::Picture { media: Some(m), .. } => self.editor.pres.media.get(m).and_then(|b| image_size(b)),
+            _ => None,
+        });
+        let changed = self.editor.reset_picture(pixels);
         self.touch(changed)
     }
 
@@ -1748,6 +1843,30 @@ impl App {
             set("align", align.into());
             set("bullet", f.bullet.into());
             set("numbering", f.numbering.clone().unwrap_or_default().into());
+        }
+        if let Some(f) = e.selection_frame() {
+            let o = Object::new();
+            for (k, v) in [("x", f.x as f64), ("y", f.y as f64), ("w", f.w as f64), ("h", f.h as f64), ("rot", f.rot)] {
+                let _ = Reflect::set(&o, &k.into(), &v.into());
+            }
+            let _ = Reflect::set(&o, &"single".into(), &e.selected_shape().is_some().into());
+            set("frame", o.into());
+        }
+        if let Some(shadow) = e.selection_shadow() {
+            let name = match shadow {
+                None => "none",
+                Some(s) => SHADOWS.iter().find(|(_, dir, dist, blur)| (s.dir - dir).abs() < 0.5 && s.dist == *dist && s.blur == *blur).map_or("custom", |p| p.0),
+            };
+            set("shadow", name.into());
+        }
+        set("canChangeShape", e.selected_shapes().iter().any(|s| matches!(s.kind, ppt_model::ShapeKind::Shape) && !s.geometry.is_line()).into());
+        if let Some(c) = e.selected_crop() {
+            let o = Object::new();
+            for (k, v) in [("left", c.left), ("top", c.top), ("right", c.right), ("bottom", c.bottom)] {
+                let _ = Reflect::set(&o, &k.into(), &v.into());
+            }
+            set("crop", o.into());
+            set("cropMode", e.crop.is_some().into());
         }
         match e.selection_fill() {
             Some(Some(c)) => set("fill", hex(c).into()),

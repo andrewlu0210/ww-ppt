@@ -655,3 +655,42 @@ fn strike_scripts_spacing_and_anchor_round_trip() {
     assert_eq!((at(1).baseline, at(2).baseline, at(3).spacing_pt, at(4).baseline), (0.3, -0.25, 2.5, 0.0));
     assert_eq!(body.anchor, ppt_model::Anchor::Bottom);
 }
+
+#[test]
+fn geometry_shadow_flip_and_crop_edits_round_trip() {
+    use ppt_model::{Crop, Geometry, Shadow};
+    let mut pres = sample();
+    let (si, pi) = (2, 3);
+    let shape = pres.slides[si].shapes.iter().position(|s| matches!(s.kind, ShapeKind::Shape) && s.fill.is_some() && !s.geometry.is_line()).unwrap();
+    let pic = pres.slides[pi].shapes.iter().position(|s| matches!(s.kind, ShapeKind::Picture { .. })).unwrap();
+    let shadow = Shadow { color: Color { r: 0, g: 0, b: 0, a: 102 }, blur: 50_800, dist: 38_100, dir: 45.0 };
+    {
+        let s = &mut pres.slides[si].shapes[shape];
+        s.geometry = Geometry::preset("ellipse");
+        s.shadow = Some(shadow);
+        s.xfrm.flip_h = true;
+        s.xfrm.rot = 15.0;
+    }
+    if let ShapeKind::Picture { crop, .. } = &mut pres.slides[pi].shapes[pic].kind {
+        *crop = Crop { left: 0.1, top: 0.2, right: 0.0, bottom: 0.05 };
+    }
+    let saved = save_pptx(&pres).unwrap();
+    let re = parse_pptx(&saved).unwrap();
+    let s = &re.slides[si].shapes[shape];
+    assert_eq!(s.geometry, Geometry::preset("ellipse"));
+    assert_eq!(s.shadow, Some(shadow));
+    assert!(s.xfrm.flip_h && (s.xfrm.rot - 15.0).abs() < 1e-6);
+    let ShapeKind::Picture { crop, .. } = &re.slides[pi].shapes[pic].kind else { panic!() };
+    assert_eq!(*crop, Crop { left: 0.1, top: 0.2, right: 0.0, bottom: 0.05 });
+    // Removing the shadow writes an explicit empty effect list; removing the crop drops srcRect.
+    let mut pres = re;
+    pres.slides[si].shapes[shape].shadow = None;
+    if let ShapeKind::Picture { crop, .. } = &mut pres.slides[pi].shapes[pic].kind {
+        *crop = Crop::default();
+    }
+    let saved = save_pptx(&pres).unwrap();
+    assert!(slide_xml(&saved, si + 1).contains("<a:effectLst/>"));
+    assert!(!slide_xml(&saved, pi + 1).contains("srcRect"));
+    let re = parse_pptx(&saved).unwrap();
+    assert_eq!(re.slides[si].shapes[shape].shadow, None);
+}
