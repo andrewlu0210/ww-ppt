@@ -1,6 +1,7 @@
 // Dev-only script driver (see src-tauri/src/automation.rs). Commands use CSS
 // pixels relative to the canvas, e.g. `click 400 300 2`, `drag 1 2 3 4`,
 // `text 你好`, `compose ㄋㄧˇ`, `commit 你`, `key Enter meta`, `shot name`.
+import { lastAnnouncement } from "./announce";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo } from "@tauri-apps/api/event";
 import { availableMonitors } from "@tauri-apps/api/window";
@@ -205,6 +206,16 @@ async function step(cmd: string, h: Hooks) {
         .find((b) => b.textContent === rest)
         ?.click();
       break;
+    case "spoken":
+      // The last screen reader announcement.
+      await log(`spoken ${lastAnnouncement}`);
+      break;
+    case "aria": {
+      // Accessible names of the elements matching a selector.
+      const els = Array.from(document.querySelectorAll<HTMLElement>(rest));
+      await log(`aria ${rest} n=${els.length} ${JSON.stringify(els.slice(0, 12).map((e) => `${e.tagName.toLowerCase()}${e.getAttribute("role") ? `[${e.getAttribute("role")}]` : ""} ${e.getAttribute("aria-label") ?? e.textContent?.trim().slice(0, 40)}`))}`);
+      break;
+    }
     case "focused": {
       // What has keyboard focus, e.g. `focused` → "BUTTON.rb-btn 色彩 ▾".
       const el = document.activeElement as HTMLElement | null;

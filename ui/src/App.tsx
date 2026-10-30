@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -39,6 +39,8 @@ import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 import type { AltTextInfo } from "./components/AltTextDialog";
 import { SelectionPane } from "./components/SelectionPane";
+import { A11yMirror } from "./components/A11yMirror";
+import { announce } from "./lib/announce";
 import type { BackgroundInfo, ColorSchemeInfo, FontSchemeInfo, ThemeInfo } from "./components/DesignTab";
 import { setThemePalette } from "./components/ColorPicker";
 
@@ -107,6 +109,38 @@ interface Doc {
 export function App() {
   const engineRef = useRef<Engine | null>(null);
   const [status, setStatus] = useState<Status>(EMPTY_STATUS);
+  // Slide names for the slide pane, the sorter and slide show announcements.
+  const slideLabelsRef = useRef<string[]>([]);
+  const slideLabels = useMemo(
+    () => (engineRef.current ? (engineRef.current.slideLabels() as string[]) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [status.revision, status.slideCount],
+  );
+  slideLabelsRef.current = slideLabels;
+  // What VoiceOver hears: slide changes, the selection, keyboard moves.
+  const spoken = useRef({ slide: -1, selection: "", frame: "" });
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || showingRef.current) return;
+    const prev = spoken.current;
+    const selection = engine.describeSelection();
+    const f = status.frame;
+    const frame = f ? `${f.x},${f.y},${f.w},${f.h},${f.rot}` : "";
+    const input = document.querySelector(".ime-input");
+    input?.setAttribute("aria-label", `投影片編輯區。${selection || engine.describeSlide()}`);
+    if (status.slideCount > 0 && status.slideIndex !== prev.slide) {
+      announce(engine.describeSlide());
+    } else if (selection !== prev.selection) {
+      announce(selection || (prev.selection ? "已取消選取" : ""));
+    } else if (f && frame !== prev.frame && prev.frame && performance.now() - lastKeyAt.current < 500) {
+      const cm = (emu: number) => (emu / 360_000).toFixed(2);
+      const [px, py, pw, ph, prot] = prev.frame.split(",").map(Number);
+      if (f.rot !== prot) announce(`旋轉 ${Math.round(f.rot)} 度`);
+      else if (f.w !== pw || f.h !== ph) announce(`寬 ${cm(f.w)}，高 ${cm(f.h)} 公分`);
+      else if (f.x !== px || f.y !== py) announce(`水平 ${cm(f.x)}，垂直 ${cm(f.y)} 公分`);
+    }
+    spoken.current = { slide: status.slideIndex, selection, frame };
+  }, [status]);
   const [doc, setDoc] = useState<Doc>({ name: "簡報1", path: null, savedRevision: 0 });
   const [error, setError] = useState<string | null>(null);
   const [fontsLoading, setFontsLoading] = useState(false);
@@ -128,6 +162,12 @@ export function App() {
   const [showMode, setShowMode] = useState<"slides" | "presenter" | null>(null);
   const showing = showMode !== null;
   const [showState, setShowState] = useState<ShowState | null>(null);
+  // In a show, each new slide is spoken (the end screen too).
+  const shownSlide = showState?.slide;
+  useEffect(() => {
+    if (shownSlide === undefined) return;
+    announce(shownSlide < 0 ? "放映結束，按 Esc 離開" : (slideLabelsRef.current[shownSlide] ?? `投影片 ${shownSlide + 1}`));
+  }, [shownSlide]);
   /** Whether the slides are on another display (the audience window is open). */
   const [audienceOpen, setAudienceOpen] = useState(false);
   const showTimer = useRef<ShowTimer>({ elapsed: 0, since: null });
@@ -146,6 +186,13 @@ export function App() {
   const [viewMode, setViewMode] = useState<"normal" | "sorter">("normal");
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
+  // Last key press, so keyboard moves of the selection can be spoken.
+  const lastKeyAt = useRef(0);
+  useEffect(() => {
+    const onKey = () => (lastKeyAt.current = performance.now());
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   useEffect(() => {
     try {
       localStorage.setItem(VIEW_KEY, JSON.stringify(viewPrefs));
@@ -611,12 +658,12 @@ export function App() {
           await exportPdf();
           break;
         case "undo":
-          engine.undo();
+          announce(engine.undo() ? "復原" : "沒有可以復原的動作");
           structural = true;
           await deckStyleChanged();
           break;
         case "redo":
-          engine.redo();
+          announce(engine.redo() ? "取消復原" : "沒有可以取消復原的動作");
           structural = true;
           await deckStyleChanged();
           break;
@@ -1053,6 +1100,7 @@ export function App() {
             thumbs={thumbs}
             transitions={status.transitionSlides}
             size={viewPrefs.sorterSize}
+            labels={slideLabels}
             onSelect={(i) => {
               engineRef.current?.setSlide(i);
               refresh();
@@ -1071,6 +1119,7 @@ export function App() {
           transitions={status.transitionSlides}
           current={status.slideIndex}
           thumbs={thumbs}
+          labels={slideLabels}
           onSelect={(i) => {
             engineRef.current?.setSlide(i);
             refresh();
@@ -1081,6 +1130,7 @@ export function App() {
           <div className={viewPrefs.ruler && !showing ? "canvas-area with-ruler" : "canvas-area"} onContextMenu={onCanvasContextMenu}>
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
             {viewPrefs.ruler && !showing && <Rulers engine={engineRef.current} slideSize={slideSize} />}
+            {!showing && viewMode === "normal" && <A11yMirror engine={engineRef.current} version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}|${status.zoom}|${viewPrefs.ruler}|${viewPrefs.pane}|${notesPrefs.open}`} />}
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
             {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}
             {showMode === "slides" && <SlideShow state={showState} command={showCommand} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}

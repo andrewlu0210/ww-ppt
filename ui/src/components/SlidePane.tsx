@@ -12,6 +12,8 @@ interface Props {
   transitions?: boolean[];
   onSelect: (index: number) => void;
   run: (c: Command) => void;
+  /** Accessible names ("投影片 2：標題"). */
+  labels?: string[];
 }
 
 interface Menu {
@@ -23,7 +25,7 @@ interface Menu {
 }
 
 /** Slide thumbnails: click to open, drag to reorder, right-click for slide commands. */
-export function SlidePane({ count, current, thumbs, transitions, onSelect, run }: Props) {
+export function SlidePane({ count, current, thumbs, transitions, onSelect, run, labels }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -138,7 +140,7 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run }
             }}
             onMouseDown={(e) => e.button === 0 && e.preventDefault()}
             aria-current={i === current}
-            aria-label={`投影片 ${i + 1}`}
+            aria-label={labels?.[i] ?? `投影片 ${i + 1}`}
           >
             <span className="slide-no">
               {i + 1}

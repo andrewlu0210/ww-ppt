@@ -3,6 +3,7 @@
 //! All pointer coordinates are in slide space (EMU). The host converts from
 //! screen coordinates and passes tolerances already scaled to EMU.
 
+mod a11y;
 mod access;
 mod anim;
 mod design;
@@ -29,6 +30,7 @@ use ppt_model::{
 };
 use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
 
+pub use a11y::{A11yItem, A11yParagraph, A11yRole, describe, slide_title};
 pub use access::PaneItem;
 pub use draw::ARROW_LINE;
 pub use find::{FindMatch, FindOptions, FindPlace, find_in};

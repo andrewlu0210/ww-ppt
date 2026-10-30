@@ -256,7 +256,8 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
 
   return (
     <div className="canvas-host" ref={containerRef}>
-      <canvas ref={canvasRef} />
+      {/* Read through the slide layer (A11yMirror) instead. */}
+      <canvas ref={canvasRef} aria-hidden="true" />
       <div ref={labelRef} className="guide-label" hidden />
       <textarea
         ref={inputRef}

@@ -1325,6 +1325,88 @@ impl App {
 
     // --- Accessibility ----------------------------------------------------------------
 
+    /// The current slide for screen readers: `{ description, items: [{ id, role, label,
+    /// altText, paragraphs: [{ text, level, bullet }], cells, rect: [x, y, w, h] (CSS px),
+    /// selected }] }` in reading order.
+    #[wasm_bindgen(js_name = a11ySlide)]
+    pub fn a11y_slide(&self) -> Object {
+        let view = self.view();
+        let items: Array = self
+            .editor
+            .a11y_items()
+            .into_iter()
+            .map(|i| {
+                let o = Object::new();
+                let role = match i.role {
+                    ppt_editor::A11yRole::Heading => "heading",
+                    ppt_editor::A11yRole::Text => "text",
+                    ppt_editor::A11yRole::Image => "image",
+                    ppt_editor::A11yRole::Table => "table",
+                    ppt_editor::A11yRole::Chart => "chart",
+                    ppt_editor::A11yRole::Shape => "shape",
+                };
+                let tf = view * shape_affine(&i.xfrm, false);
+                let r = tf.transform_rect_bbox(Rect::new(0.0, 0.0, i.xfrm.w.max(1) as f64, i.xfrm.h.max(1) as f64));
+                let rect: Array = [r.x0, r.y0, r.width(), r.height()].iter().map(|v| JsValue::from(v / self.dpr)).collect();
+                let paragraphs: Array = i
+                    .paragraphs
+                    .iter()
+                    .map(|p| {
+                        let po = Object::new();
+                        let _ = Reflect::set(&po, &"text".into(), &p.text.clone().into());
+                        let _ = Reflect::set(&po, &"level".into(), &p.level.into());
+                        let _ = Reflect::set(&po, &"bullet".into(), &p.bullet.into());
+                        JsValue::from(po)
+                    })
+                    .collect();
+                let cells: Array = i.cells.iter().map(|row| JsValue::from(row.iter().map(|c| JsValue::from(c.clone())).collect::<Array>())).collect();
+                let _ = Reflect::set(&o, &"id".into(), &i.id.0.into());
+                let _ = Reflect::set(&o, &"role".into(), &role.into());
+                let _ = Reflect::set(&o, &"label".into(), &i.label.into());
+                let _ = Reflect::set(&o, &"altText".into(), &i.alt_text.into());
+                let _ = Reflect::set(&o, &"paragraphs".into(), &paragraphs);
+                let _ = Reflect::set(&o, &"cells".into(), &cells);
+                let _ = Reflect::set(&o, &"rect".into(), &rect);
+                let _ = Reflect::set(&o, &"selected".into(), &i.selected.into());
+                JsValue::from(o)
+            })
+            .collect();
+        let o = Object::new();
+        let _ = Reflect::set(&o, &"description".into(), &self.editor.describe_slide().into());
+        let _ = Reflect::set(&o, &"items".into(), &items);
+        o
+    }
+
+    /// What is selected or edited, in one sentence ("" when nothing is).
+    #[wasm_bindgen(js_name = describeSelection)]
+    pub fn describe_selection(&self) -> String {
+        self.editor.describe_selection()
+    }
+
+    #[wasm_bindgen(js_name = describeSlide)]
+    pub fn describe_slide(&self) -> String {
+        self.editor.describe_slide()
+    }
+
+    /// Accessible names of all slides: "投影片 2：標題" (plus "，已隱藏").
+    #[wasm_bindgen(js_name = slideLabels)]
+    pub fn slide_labels(&self) -> Array {
+        self.editor
+            .pres
+            .slides
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let title = ppt_editor::slide_title(s);
+                let mut label = if title.is_empty() { format!("投影片 {}", i + 1) } else { format!("投影片 {}：{title}", i + 1) };
+                if s.hidden {
+                    label.push_str("，已隱藏");
+                }
+                JsValue::from(label)
+            })
+            .collect()
+    }
+
     /// Selection pane rows, top-most first:
     /// `[{ id, name, kind, depth, hidden, selected, altText, decorative }]`.
     #[wasm_bindgen(js_name = paneItems)]

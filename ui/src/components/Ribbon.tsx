@@ -60,7 +60,7 @@ const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 function Button(props: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean; large?: boolean; active?: boolean; iconOnly?: boolean }) {
   const cls = ["rb-btn", props.large && "large", props.active && "active", props.iconOnly && "icon-only"].filter(Boolean).join(" ");
   return (
-    <button className={cls} onClick={props.onClick} disabled={props.disabled} title={props.label} aria-pressed={props.active} onMouseDown={keepFocus}>
+    <button className={cls} onClick={props.onClick} disabled={props.disabled} title={props.label} aria-label={props.iconOnly ? props.label : undefined} aria-pressed={props.active} onMouseDown={keepFocus}>
       {props.icon}
       {!props.iconOnly && <span>{props.label}</span>}
     </button>
@@ -69,7 +69,7 @@ function Button(props: { icon: ReactNode; label: string; onClick: () => void; di
 
 function Group({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="rb-group">
+    <div className="rb-group" role="group" aria-label={label}>
       <div className="rb-items">{children}</div>
       <div className="rb-label">{label}</div>
     </div>
@@ -194,7 +194,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
           </button>
         ))}
       </div>
-      <div className="rb-body">
+      <div className="rb-body" role="tabpanel" aria-label={tab}>
         {tab === "常用" && (
           <>
             <Group label="剪貼簿">

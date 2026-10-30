@@ -2000,3 +2000,47 @@ input:focus-visible,
   border-radius: 4px;
   resize: vertical;
 }
+
+/* Screen reader only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The slide for screen readers: invisible elements over each object. */
+.a11y-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.canvas-area.with-ruler .a11y-layer {
+  top: 18px;
+  left: 18px;
+}
+
+.a11y-item {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: transparent;
+  font-size: 1px;
+  line-height: 1;
+  border-collapse: collapse;
+}
+
+.a11y-item * {
+  margin: 0;
+  padding: 0;
+  font-size: 1px;
+  list-style: none;
+}

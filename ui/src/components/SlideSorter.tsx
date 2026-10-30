@@ -13,10 +13,12 @@ interface Props {
   /** Double click or Enter: edit this slide in the normal view. */
   onOpen: (index: number) => void;
   run: (c: Command) => void;
+  /** Accessible names ("投影片 2：標題"). */
+  labels?: string[];
 }
 
 /** 投影片瀏覽: every slide in a grid; drag to reorder, Delete to remove. */
-export function SlideSorter({ count, current, thumbs, transitions, size, onSelect, onOpen, run }: Props) {
+export function SlideSorter({ count, current, thumbs, transitions, size, onSelect, onOpen, run, labels }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
@@ -98,6 +100,7 @@ export function SlideSorter({ count, current, thumbs, transitions, size, onSelec
           key={i}
           role="option"
           aria-selected={i === current}
+          aria-label={labels?.[i] ?? `投影片 ${i + 1}`}
           className={["sorter-item", i === current && "current", dragFrom !== null && dropAt === i && "drop-before", dragFrom !== null && dropAt === i + 1 && i === count - 1 && "drop-after"].filter(Boolean).join(" ")}
           draggable
           onDragStart={(e) => {
