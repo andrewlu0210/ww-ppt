@@ -32,6 +32,8 @@ import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
 import { AnimationBadges } from "./components/AnimationTab";
 import { FindBar, type FindBarHandle } from "./components/FindBar";
 import { SpellMenu, type SpellHit } from "./components/SpellMenu";
+import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
+import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
@@ -85,6 +87,7 @@ export function App() {
   const [linkRequest, setLinkRequest] = useState(0);
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
   const [animPresets, setAnimPresets] = useState<AnimationPreset[]>([]);
+  const [shapeIcons, setShapeIcons] = useState<Map<string, PresetIcon>>(new Map());
   const [ribbonTab, setRibbonTab] = useState("");
   const findRef = useRef<FindBarHandle>(null);
   /** Slide show in progress: the slides full screen, or the presenter view. */
@@ -300,6 +303,7 @@ export function App() {
       setLayoutNames(engine.layoutNames() as string[]);
       setTableStyles(engine.tableStyles() as TableStyleInfo[]);
       setAnimPresets(engine.animationPresets() as AnimationPreset[]);
+      setShapeIcons((icons) => (icons.size > 0 ? icons : new Map((engine.presetIcons(SHAPE_CATEGORIES.flatMap(([, names]) => names)) as PresetIcon[]).map((i) => [i.name, i]))));
       setLayoutThumbs([]);
       setThumbs(new Map());
       refresh();
@@ -664,6 +668,16 @@ export function App() {
         case "resetPicture":
           engine.resetPicture();
           break;
+        case "drawTool":
+          engine.setDrawTool(c.tool);
+          break;
+        case "headerFooter":
+          engine.setHeaderFooter(c.date, c.dateText, c.slideNumber, c.footer, c.footerText, c.skipTitle, c.all);
+          structural = c.all;
+          break;
+        case "insertSymbol":
+          engine.insertSymbol(c.text);
+          break;
         case "fontSize":
           engine.setFontSize(c.size);
           break;
@@ -865,7 +879,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} />
+      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null} />
       <main className="workspace">
         <SlidePane
           count={status.slideCount}

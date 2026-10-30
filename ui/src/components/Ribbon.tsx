@@ -8,6 +8,9 @@ import { TableDesignTab, TableLayoutTab } from "./TableTabs";
 import { TransitionTab } from "./TransitionTab";
 import { AnimationTab } from "./AnimationTab";
 import { PictureFormatTab, RotateMenu, ShadowMenu, SizeGroup } from "./FormatGroups";
+import { ShapeGallery, type PresetIcon } from "./ShapeGallery";
+import { HeaderFooterDialog, type HeaderFooterInfo } from "./HeaderFooterDialog";
+import { SymbolPicker } from "./SymbolPicker";
 import { LinkPicker } from "./LinkPicker";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
 import type { AnimationPreset, Status } from "../lib/status";
@@ -33,16 +36,6 @@ const TABLE_TABS = ["表格設計", "版面配置"] as const;
 const PICTURE_TAB = "圖片格式" as const;
 type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number] | typeof PICTURE_TAB;
 const isTableTab = (t: Tab) => (TABLE_TABS as readonly string[]).includes(t);
-
-const SHAPES: [string, string][] = [
-  ["rect", "矩形"],
-  ["roundRect", "圓角矩形"],
-  ["ellipse", "橢圓"],
-  ["triangle", "三角形"],
-  ["rightArrow", "向右箭號"],
-  ["star5", "星形"],
-  ["line", "直線"],
-];
 
 /** Numbering schemes offered in the gallery, with a sample. */
 const NUMBERINGS: [string, string][] = [
@@ -96,9 +89,12 @@ interface Props {
   animPresets: AnimationPreset[];
   /** Told which tab is showing (the canvas shows animation order on 動畫). */
   onTabChange: (tab: string) => void;
+  shapeIcons: Map<string, PresetIcon>;
+  /** The current slide's footer items, read when the dialog opens. */
+  loadHeaderFooter: () => HeaderFooterInfo | null;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -380,8 +376,24 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
             <Group label="影像">
               <Button large icon={icons.picture} label="圖片" onClick={() => run({ kind: "picture" })} />
             </Group>
+            <Group label="圖例">
+              <ShapeGallery
+                icons={shapeIcons}
+                active={status.drawTool}
+                onPick={(tool) => run({ kind: "drawTool", tool })}
+                button={(open, toggle) => <Button large active={open || !!status.drawTool} icon={icons.shapes} label="圖案" onClick={toggle} />}
+              />
+            </Group>
             <Group label="文字">
               <Button large icon={icons.textbox} label="文字方塊" onClick={() => run({ kind: "textBox" })} />
+              <div className="rb-col">
+                <HeaderFooterDialog
+                  load={loadHeaderFooter}
+                  onApply={(c) => run({ kind: "headerFooter", ...c })}
+                  button={(open, toggle) => <Button icon={icons.headerFooter} label="頁首及頁尾" active={open} onClick={toggle} />}
+                />
+                <SymbolPicker onPick={(text) => run({ kind: "insertSymbol", text })} button={(open, toggle) => <Button icon={icons.symbol} label="符號" active={open} onClick={toggle} />} />
+              </div>
             </Group>
             <Group label="連結">
               <LinkPicker
@@ -391,11 +403,6 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 onApply={(url) => run({ kind: "link", url })}
                 button={(open, toggle) => <Button large active={open} disabled={!text} icon={icons.link} label="連結 (⌘K)" onClick={toggle} />}
               />
-            </Group>
-            <Group label="圖例">
-              {SHAPES.map(([preset, label]) => (
-                <Button key={preset} icon={icons[preset]} label={label} onClick={() => run({ kind: "shape", preset })} />
-              ))}
             </Group>
           </>
         )}
@@ -428,33 +435,17 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               </div>
             </Group>
             <Group label="圖案">
-              <Popover
+              <ShapeGallery
+                icons={shapeIcons}
+                lines={false}
+                onPick={(preset) => run({ kind: "changeShape", preset })}
                 button={(open, toggle) => (
                   <button className={open ? "rb-btn active" : "rb-btn"} disabled={!status.canChangeShape} onMouseDown={keepFocus} onClick={toggle} title="變更圖案">
                     {icons.changeShape}
                     <span>變更圖案 ▾</span>
                   </button>
                 )}
-              >
-                {(close) => (
-                  <div className="menu-panel">
-                    {SHAPES.filter(([p]) => p !== "line").map(([preset, label]) => (
-                      <button
-                        key={preset}
-                        className="menu-item"
-                        onMouseDown={keepFocus}
-                        onClick={() => {
-                          run({ kind: "changeShape", preset });
-                          close();
-                        }}
-                      >
-                        <span className="menu-icon">{icons[preset]}</span>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </Popover>
+              />
               <ShadowMenu status={status} disabled={!shapes || status.shadow === undefined} run={run} />
             </Group>
             <Group label="排列">

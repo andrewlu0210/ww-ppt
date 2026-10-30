@@ -291,6 +291,7 @@ impl Parser<'_> {
         let phs = placeholders(root, &master.ctx);
         let mut shapes = Vec::new();
         let mut prototypes = Vec::new();
+        let mut footers = Vec::new();
         if let Some(tree) = path(root, &["cSld", "spTree"]) {
             let cx = ShapeCx { master: &master, ph_chain: vec![&master.phs], rels: &rels, source: None };
             self.sp_tree(tree, &cx, GroupTf::IDENTITY, false, &mut shapes);
@@ -299,6 +300,10 @@ impl Parser<'_> {
             for n in tree.children().filter(|n| n.is_element() && matches!(n.tag_name().name(), "sp" | "pic")) {
                 let Some(ph) = n.children().find_map(|nv| path(nv, &["nvPr", "ph"])) else { continue };
                 if matches!(ph.attribute("type"), Some("dt" | "ftr" | "sldNum" | "hdr")) {
+                    // Added by 頁首及頁尾, with the layout's own text (fields).
+                    if let Some(shape) = self.shape(n, &cx, GroupTf::IDENTITY) {
+                        footers.push(shape);
+                    }
                     continue;
                 }
                 if let Some(mut shape) = self.shape(n, &cx, GroupTf::IDENTITY) {
@@ -319,6 +324,7 @@ impl Parser<'_> {
         self.pres.layouts.push(ModelLayout {
             name: path(root, &["cSld"]).and_then(|c| c.attribute("name")).unwrap_or_default().to_string(),
             placeholders: prototypes,
+            footers,
             background_shapes,
             background: bg.or(master.bg).or(Some(Color::WHITE)),
             part: part.to_string(),
@@ -1047,6 +1053,9 @@ fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&
                             .collect();
                         let mut style = finalize(&rstyle);
                         style.link = child(c, "rPr").and_then(|r| child(r, "hlinkClick")).map(|h| hyperlink(h, rels, ctx));
+                        if c.tag_name().name() == "fld" {
+                            style.field = Some(Arc::new(ppt_model::Field { kind: c.attribute("type").unwrap_or_default().to_string(), id: c.attribute("id").unwrap_or_default().to_string() }));
+                        }
                         runs.push(Run { text, style });
                     }
                     // Soft line break inside a paragraph.
@@ -1115,6 +1124,7 @@ fn run_style(s: &LevelStyle, theme: &Theme) -> RunStyle {
         latin_font: theme.resolve_typeface(s.latin.as_deref().unwrap_or("+mn-lt")),
         ea_font: theme.resolve_typeface(s.ea.as_deref().unwrap_or("+mn-ea")),
         link: None,
+        field: None,
     }
 }
 

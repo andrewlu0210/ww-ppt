@@ -350,7 +350,7 @@ impl App {
         {
             let pres = &self.editor.pres;
             if let Some(slide) = pres.slides.get(self.editor.slide) {
-                let opts = DrawOptions { skip_text: self.editor.text.as_ref().map(|t| t.shape), skip_cell: self.editor.text.as_ref().and_then(|t| t.cell), editing: true, emu_per_px: 1.0 / s };
+                let opts = DrawOptions { skip_text: self.editor.text.as_ref().map(|t| t.shape), skip_cell: self.editor.text.as_ref().and_then(|t| t.cell), editing: true, emu_per_px: 1.0 / s, slide_number: None };
                 let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
                 draw_slide(&mut self.scene, &mut cx, pres, slide, view, &opts);
             }
@@ -595,7 +595,7 @@ impl App {
             CursorIcon::Default => "default",
             CursorIcon::Move => "move",
             CursorIcon::Text => "text",
-            CursorIcon::Rotate => "crosshair",
+            CursorIcon::Rotate | CursorIcon::Crosshair => "crosshair",
             CursorIcon::Resize(angle) => match ((angle + 22.5) / 45.0).floor() as i32 % 4 {
                 0 => "ew-resize",
                 1 => "nwse-resize",
@@ -1197,6 +1197,88 @@ impl App {
             _ => None,
         });
         let changed = self.editor.reset_picture(pixels);
+        self.touch(changed)
+    }
+
+    /// Picks the shape the next drag on the slide draws ("" cancels).
+    #[wasm_bindgen(js_name = setDrawTool)]
+    pub fn set_draw_tool(&mut self, tool: &str) {
+        self.editor.set_draw_tool(&mut self.engine, (!tool.is_empty()).then_some(tool));
+        self.dirty = true;
+    }
+
+    /// The picked drawing tool, or "".
+    #[wasm_bindgen(js_name = drawTool)]
+    pub fn draw_tool(&self) -> String {
+        self.editor.draw_tool.clone().unwrap_or_default()
+    }
+
+    /// Gallery icons for preset shapes: `[{ name, viewBox, paths: [{ d, fill, stroke }] }]`.
+    #[wasm_bindgen(js_name = presetIcons)]
+    pub fn preset_icons(&self, names: Vec<String>) -> Array {
+        use ppt_render::vello::kurbo::Shape as _;
+        names
+            .iter()
+            .map(|name| {
+                let preset = if name == ppt_editor::ARROW_LINE { "line" } else { name.as_str() };
+                let (w, h) = if preset == "line" { (20.0, 20.0) } else { (20.0, 16.0) };
+                let outlines = ppt_geometry::outlines(&ppt_model::Geometry::preset(preset), w, h);
+                let mut bounds = Rect::new(0.0, 0.0, w, h);
+                let paths = Array::new();
+                for o in &outlines {
+                    bounds = bounds.union(o.path.bounding_box());
+                    let p = Object::new();
+                    let _ = Reflect::set(&p, &"d".into(), &o.path.to_svg().into());
+                    let _ = Reflect::set(&p, &"fill".into(), &o.fill.into());
+                    let _ = Reflect::set(&p, &"stroke".into(), &o.stroke.into());
+                    paths.push(&p);
+                }
+                let pad = 1.5;
+                let o = Object::new();
+                let _ = Reflect::set(&o, &"name".into(), &name.as_str().into());
+                let _ = Reflect::set(&o, &"viewBox".into(), &format!("{} {} {} {}", bounds.x0 - pad, bounds.y0 - pad, bounds.width() + 2.0 * pad, bounds.height() + 2.0 * pad).into());
+                let _ = Reflect::set(&o, &"paths".into(), &paths);
+                JsValue::from(o)
+            })
+            .collect()
+    }
+
+    /// The current slide's footer items: `{ date: "none" | "auto" | "fixed", dateText, slideNumber, footer: string | null }`.
+    #[wasm_bindgen(js_name = headerFooter)]
+    pub fn header_footer(&self) -> Object {
+        let hf = self.editor.header_footer();
+        let o = Object::new();
+        let (mode, text) = match &hf.date {
+            None => ("none", String::new()),
+            Some(ppt_editor::DateText::Auto(t)) => ("auto", t.clone()),
+            Some(ppt_editor::DateText::Fixed(t)) => ("fixed", t.clone()),
+        };
+        let _ = Reflect::set(&o, &"date".into(), &mode.into());
+        let _ = Reflect::set(&o, &"dateText".into(), &text.into());
+        let _ = Reflect::set(&o, &"slideNumber".into(), &hf.slide_number.into());
+        let _ = Reflect::set(&o, &"footer".into(), &hf.footer.map_or(JsValue::NULL, JsValue::from));
+        o
+    }
+
+    /// Shows the date (`date_mode` "none", "auto" or "fixed"), slide number and
+    /// footer on the current slide, or on every slide with `all`.
+    #[wasm_bindgen(js_name = setHeaderFooter)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_header_footer(&mut self, date_mode: &str, date_text: &str, slide_number: bool, footer: bool, footer_text: &str, skip_title: bool, all: bool) -> bool {
+        let date = match date_mode {
+            "auto" => Some(ppt_editor::DateText::Auto(date_text.to_string())),
+            "fixed" => Some(ppt_editor::DateText::Fixed(date_text.to_string())),
+            _ => None,
+        };
+        let hf = ppt_editor::HeaderFooter { date, slide_number, footer: footer.then(|| footer_text.to_string()), skip_title };
+        let changed = self.editor.set_header_footer(&mut self.engine, &hf, all);
+        self.touch(changed)
+    }
+
+    /// Inserts `text` at the caret, or as a new text box when no text is being edited.
+    #[wasm_bindgen(js_name = insertSymbol)]
+    pub fn insert_symbol(&mut self, text: &str) -> bool {
+        let changed = if self.editor.is_editing_text() { self.editor.insert_text(&mut self.engine, text) } else { self.editor.paste_text_box(&mut self.engine, text) };
         self.touch(changed)
     }
 
@@ -1859,6 +1941,7 @@ impl App {
             };
             set("shadow", name.into());
         }
+        set("drawTool", e.draw_tool.clone().unwrap_or_default().into());
         set("canChangeShape", e.selected_shapes().iter().any(|s| matches!(s.kind, ppt_model::ShapeKind::Shape) && !s.geometry.is_line()).into());
         if let Some(c) = e.selected_crop() {
             let o = Object::new();

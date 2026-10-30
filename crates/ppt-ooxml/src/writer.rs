@@ -342,7 +342,12 @@ fn paragraph_xml(p: &Paragraph, d: &ParaDefaults, links: &mut Links) -> String {
             if i > 0 {
                 out.push_str(&format!("<a:br>{}</a:br>", rpr_xml("a:rPr", &run.style, &d.style, piece, links)));
             }
-            if !piece.is_empty() {
+            if let Some(f) = &run.style.field {
+                // A field keeps its type and id; an empty one still needs its element.
+                let id = if f.id.is_empty() { ppt_model::Field::new(&f.kind).id } else { f.id.clone() };
+                let ty = if f.kind.is_empty() { String::new() } else { format!(r#" type="{}""#, esc(&f.kind)) };
+                out.push_str(&format!(r#"<a:fld id="{}"{ty}>{}<a:t>{}</a:t></a:fld>"#, esc(&id), rpr_xml("a:rPr", &run.style, &d.style, piece, links), esc(piece)));
+            } else if !piece.is_empty() {
                 out.push_str(&format!("<a:r>{}<a:t>{}</a:t></a:r>", rpr_xml("a:rPr", &run.style, &d.style, piece, links), esc(piece)));
             }
         }

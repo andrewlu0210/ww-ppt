@@ -1111,3 +1111,54 @@ fn cropping_keeps_the_image_scale() {
     assert_eq!(xfrm(&e, id).h, (xfrm(&e, id).w as f64 / 2.0).round() as i64);
     assert!(e.crop.is_none());
 }
+
+#[test]
+fn header_and_footer_add_fields_and_skip_title_slides() {
+    let mut eng = engine();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    let content = (0..e.pres.layouts.len()).find(|&i| !e.pres.layouts[i].placeholders.iter().any(|s| s.placeholder.as_ref().is_some_and(|p| p.kind == "ctrTitle"))).unwrap();
+    assert!(e.add_slide(&mut eng, Some(content)));
+    let hf = HeaderFooter { date: Some(DateText::Fixed("2026/10/30".into())), slide_number: true, footer: Some("機密".into()), skip_title: true };
+    assert!(e.set_header_footer(&mut eng, &hf, true));
+    let kinds = |e: &Editor, i: usize| e.pres.slides[i].shapes.iter().filter_map(|s| s.placeholder.as_ref().map(|p| p.kind.clone())).filter(|k| matches!(k.as_str(), "dt" | "ftr" | "sldNum")).collect::<Vec<_>>();
+    assert!(kinds(&e, 0).is_empty(), "the title slide is skipped");
+    assert_eq!(kinds(&e, 1), vec!["dt", "ftr", "sldNum"]);
+    e.set_slide(&mut eng, 1);
+    assert_eq!(e.header_footer(), HeaderFooter { skip_title: false, ..hf.clone() });
+    assert!(!e.set_header_footer(&mut eng, &hf, true), "nothing to change");
+
+    // Saved: the slide number is a field, the footer plain text.
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    let xml = zip_part(&saved, "ppt/slides/slide2.xml");
+    assert!(xml.contains(r#"type="slidenum""#) && xml.contains("<a:t>2</a:t>") && xml.contains("<a:t>機密</a:t>"), "{xml}");
+    let re = ppt_ooxml::parse_pptx(&saved).unwrap();
+    let num = re.slides[1].shapes.iter().find(|s| s.placeholder.as_ref().is_some_and(|p| p.kind == "sldNum")).unwrap();
+    let run = &num.text.as_ref().unwrap().paragraphs[0].runs[0];
+    assert_eq!(run.style.field.as_ref().map(|f| f.kind.as_str()), Some("slidenum"));
+    // Turning them off removes them again.
+    assert!(e.set_header_footer(&mut eng, &HeaderFooter::default(), true));
+    assert!(kinds(&e, 1).is_empty());
+}
+
+#[test]
+fn shapes_are_drawn_by_dragging_or_clicking() {
+    let mut eng = engine();
+    let (mut e, _) = editor();
+    let n = e.pres.slides[0].shapes.len();
+    e.set_draw_tool(&mut eng, Some("star5"));
+    assert_eq!(e.hover_cursor(&ev(0.0, 0.0), &TOL), CursorIcon::Crosshair);
+    e.pointer_down(&mut eng, &ev(3.0 * IN as f64, 2.0 * IN as f64), &TOL);
+    e.pointer_move(&mut eng, &ev(IN as f64, 3.0 * IN as f64), &TOL);
+    e.pointer_up(&mut eng, &ev(IN as f64, 3.0 * IN as f64));
+    let s = e.pres.slides[0].shapes.last().unwrap();
+    assert_eq!((s.geometry.clone(), s.xfrm), (Geometry::preset("star5"), Xfrm::new(IN, 2 * IN, 2 * IN, IN)));
+    assert!(e.draw_tool.is_none(), "one shape per pick");
+    // A click places an arrow line at a default length.
+    e.set_draw_tool(&mut eng, Some(ARROW_LINE));
+    e.pointer_down(&mut eng, &ev(IN as f64, IN as f64), &TOL);
+    e.pointer_up(&mut eng, &ev(IN as f64, IN as f64));
+    let l = e.pres.slides[0].shapes.last().unwrap();
+    assert!(l.geometry.is_line() && l.xfrm.w == IN && l.line.unwrap().tail.kind == ppt_model::EndKind::Triangle);
+    assert!(e.undo(&mut eng) && e.undo(&mut eng));
+    assert_eq!(e.pres.slides[0].shapes.len(), n);
+}

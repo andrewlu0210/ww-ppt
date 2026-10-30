@@ -4,7 +4,9 @@
 //! screen coordinates and passes tolerances already scaled to EMU.
 
 mod anim;
+mod draw;
 mod find;
+mod footer;
 mod format;
 mod group;
 mod layout;
@@ -24,7 +26,9 @@ use ppt_model::{
 };
 use ppt_text::{BodyLayout, SINGLE_LINE_HEIGHT, TextEngine};
 
+pub use draw::ARROW_LINE;
 pub use find::{FindMatch, FindOptions, FindPlace, find_in};
+pub use footer::{DateText, HeaderFooter};
 pub use richedit::{Move, RichEdit};
 pub use spell::range_rects;
 pub use table::{BorderSet, CellRange};
@@ -75,6 +79,8 @@ pub enum CursorIcon {
     Rotate,
     /// Resize along this screen angle in degrees (0 = horizontal).
     Resize(f64),
+    /// Drawing a new shape.
+    Crosshair,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -179,6 +185,8 @@ enum DragKind {
     /// Dragging the border after table column / row `index`.
     TableCol(usize),
     TableRow(usize),
+    /// Drawing a new shape with the picked tool.
+    Draw(ShapeId),
 }
 
 struct Drag {
@@ -248,6 +256,10 @@ pub struct Editor {
     notes_undo: Option<usize>,
     /// The picture in crop mode: its handles trim it instead of resizing it.
     pub crop: Option<ShapeId>,
+    /// The shape the next drag draws (picked in the gallery).
+    pub draw_tool: Option<String>,
+    /// The tool of the shape being drawn.
+    draw_shape_tool: Option<String>,
 }
 
 /// A snap target: (position, extent start, extent end).
@@ -282,6 +294,8 @@ impl Editor {
             notes_undo: None,
             cell_range: None,
             crop: None,
+            draw_tool: None,
+            draw_shape_tool: None,
         }
     }
 
@@ -489,6 +503,9 @@ impl Editor {
     }
 
     pub fn hover_cursor(&self, ev: &PointerEvent, tol: &Tolerance) -> CursorIcon {
+        if self.draw_tool.is_some() {
+            return CursorIcon::Crosshair;
+        }
         if let Some(drag) = &self.drag {
             return match drag.kind {
                 DragKind::Move => CursorIcon::Move,
@@ -497,6 +514,7 @@ impl Editor {
                 DragKind::Marquee { .. } => CursorIcon::Default,
                 DragKind::Resize(h) => resize_cursor(h, &drag.origs.first().map(|o| o.1).unwrap_or_default()),
                 DragKind::CellSelect(_) => CursorIcon::Text,
+                DragKind::Draw(_) => CursorIcon::Crosshair,
                 DragKind::TableCol(_) => CursorIcon::Resize(0.0),
                 DragKind::TableRow(_) => CursorIcon::Resize(90.0),
             };
@@ -526,6 +544,11 @@ impl Editor {
 
     /// Returns true when the view needs to be redrawn.
     pub fn pointer_down(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> bool {
+        if self.draw_tool.is_some() {
+            self.end_text_edit(engine);
+            self.cell_range = None;
+            return self.begin_draw(ev);
+        }
         // Shift+click on another cell of the same table selects the block of cells in between.
         if ev.shift
             && let Some((id, from)) = self.range_origin()
@@ -716,6 +739,7 @@ impl Editor {
                     }
                 }
             }
+            DragKind::Draw(id) => self.draw_move(id, start, ev),
             DragKind::Resize(handle) if origs.len() > 1 => {
                 // A group: scale every member with the group's frame.
                 let Some(frame) = group::union_frame(origs.iter().map(|o| o.1)) else { return false };
@@ -774,6 +798,13 @@ impl Editor {
         let had_marquee = self.marquee.take().is_some();
         let pending = self.pending_enter.take();
         let Some(drag) = self.drag.take() else { return had_marquee };
+        if let DragKind::Draw(id) = drag.kind {
+            self.end_draw(id, drag.start, drag.moved);
+            if let Some(before) = drag.before {
+                self.push_undo(before);
+            }
+            return true;
+        }
         if !drag.moved
             && let Some((group, member)) = pending
         {
@@ -1313,6 +1344,10 @@ impl Editor {
                 }
                 _ => {}
             }
+        }
+        if self.draw_tool.is_some() && key == "Escape" {
+            self.draw_tool = None;
+            return true;
         }
         if self.crop.is_some() && matches!(key, "Escape" | "Enter") {
             self.crop = None;

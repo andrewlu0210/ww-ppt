@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use crate::{Paragraph, Run, RunStyle, TextBody};
+use crate::{Field, Paragraph, Run, RunStyle, TextBody};
 
 /// Flattened form used by the edit operations.
 struct Flat {
@@ -227,6 +227,19 @@ impl TextBody {
         self.unflatten(flat);
     }
 
+    /// The body with its slide number fields showing `number`, when it has any.
+    pub fn with_slide_number(&self, number: usize) -> Option<TextBody> {
+        let is_number = |r: &Run| r.style.field.as_ref().is_some_and(|f| f.kind == Field::SLIDE_NUMBER);
+        if !self.paragraphs.iter().flat_map(|p| &p.runs).any(is_number) {
+            return None;
+        }
+        let mut body = self.clone();
+        for r in body.paragraphs.iter_mut().flat_map(|p| p.runs.iter_mut()).filter(|r| is_number(r)) {
+            r.text = number.to_string();
+        }
+        Some(body)
+    }
+
     /// Moves to new inherited formatting (another layout's placeholder): every
     /// property still equal to what `old` provided takes `new`'s value.
     pub fn rebase(&mut self, old: &TextBody, new: &TextBody) {
@@ -280,8 +293,8 @@ impl TextBody {
                 // Include the paragraph mark when the range reaches the paragraph's end.
                 let end = if range.end >= seg.end { seg.end } else { e };
                 self.apply_style(s..end, |st| {
-                    let link = st.link.take();
-                    *st = RunStyle { link, ..base.clone() };
+                    let (link, field) = (st.link.take(), st.field.take());
+                    *st = RunStyle { link, field, ..base.clone() };
                 });
             }
         }

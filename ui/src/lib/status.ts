@@ -40,6 +40,8 @@ export interface Status {
   /** Shadow preset of the selected shape: a preset name, "none" or "custom". */
   shadow?: string;
   canChangeShape?: boolean;
+  /** The shape the next drag draws, "" when none. */
+  drawTool?: string;
   /** Cropping of the selected picture (fractions), present only for pictures. */
   crop?: { left: number; top: number; right: number; bottom: number };
   cropMode?: boolean;

@@ -357,6 +357,37 @@ pub struct RunStyle {
     pub ea_font: String,
     /// Hyperlink on the run (`a:hlinkClick`).
     pub link: Option<Arc<Link>>,
+    /// The run is a field (`a:fld`): its text is a cached value PowerPoint
+    /// recomputes, like the slide number.
+    pub field: Option<Arc<Field>>,
+}
+
+/// A text field (`a:fld`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Field {
+    /// `slidenum`, `datetime1`, ... (`type`).
+    pub kind: String,
+    /// The field's GUID (`id`), `{...}`.
+    pub id: String,
+}
+
+impl Field {
+    pub const SLIDE_NUMBER: &str = "slidenum";
+
+    pub fn new(kind: &str) -> Self {
+        // PowerPoint wants a GUID; any unique one will do.
+        // (No clock in WebAssembly: a counter through two rounds of splitmix64.)
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x05EE_D0FF_1E1D);
+        let mix = |mut z: u64| {
+            z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (a, b) = (mix(n), mix(n ^ 0xA5A5_A5A5_A5A5_A5A5));
+        Field { kind: kind.to_string(), id: format!("{{{:08X}-{:04X}-4{:03X}-8{:03X}-{:012X}}}", (a >> 32) as u32, (a >> 16) as u16, a as u16 & 0xFFF, (b >> 52) as u16 & 0xFFF, b & 0xFFFF_FFFF_FFFF) }
+    }
 }
 
 /// A hyperlink: a relationship of the slide plus how PowerPoint shows it.
@@ -407,6 +438,7 @@ impl Default for RunStyle {
             latin_font: "Calibri".to_string(),
             ea_font: String::new(),
             link: None,
+            field: None,
         }
     }
 }
@@ -773,6 +805,8 @@ pub struct Layout {
     pub name: String,
     /// Empty placeholder shapes with fully resolved position and text styles.
     pub placeholders: Vec<Shape>,
+    /// Date, footer and slide number placeholders, with the layout's text.
+    pub footers: Vec<Shape>,
     /// Layout and master decorations.
     pub background_shapes: Vec<Shape>,
     pub background: Option<Color>,

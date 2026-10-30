@@ -1403,3 +1403,131 @@ button {
   font-size: 11px;
   min-width: 2em;
 }
+
+/* Shape gallery. */
+.shape-gallery,
+.symbol-panel {
+  width: 360px;
+  max-height: 460px;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.shape-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+
+.shape-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1px;
+}
+
+.shape-item,
+.symbol-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #3b5f9a;
+  cursor: default;
+}
+
+.shape-item:hover,
+.symbol-item:hover {
+  border-color: #a9c1ea;
+  background: #eef3fb;
+}
+
+.shape-item.active {
+  border-color: #4a7fd6;
+  background: #dce8fb;
+}
+
+.symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1px;
+}
+
+.symbol-item {
+  font-size: 15px;
+  color: inherit;
+}
+
+/* Header and footer dialog. */
+.hf-dialog {
+  width: 300px;
+  padding: 12px 14px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hf-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.hf-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hf-row.sep {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.hf-indent {
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hf-text {
+  font: inherit;
+  width: 110px;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.hf-text.wide {
+  width: 220px;
+}
+
+.hf-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hf-buttons button {
+  font: inherit;
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+}
+
+.hf-buttons button.primary {
+  background: #4a7fd6;
+  border-color: #4a7fd6;
+  color: #fff;
+}

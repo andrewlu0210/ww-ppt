@@ -253,10 +253,18 @@ pub struct DrawOptions {
     pub editing: bool,
     /// Slide units (EMU) per device pixel, for hairlines and dashes.
     pub emu_per_px: f64,
+    /// Number shown by slide number fields (set by [`draw_slide`]).
+    pub slide_number: Option<usize>,
+}
+
+/// The 1-based position of `slide` in the deck, when it is one of its slides.
+pub fn slide_number(pres: &Presentation, slide: &Slide) -> Option<usize> {
+    pres.slides.iter().position(|s| std::ptr::eq(s, slide)).map(|i| i + 1)
 }
 
 /// Draws the whole slide.
 pub fn draw_slide(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentation, slide: &Slide, view: Affine, opts: &DrawOptions) {
+    let opts = &DrawOptions { slide_number: slide_number(pres, slide).or(opts.slide_number), ..*opts };
     let page = Rect::new(0.0, 0.0, pres.slide_width as f64, pres.slide_height as f64);
     scene.fill(Fill::NonZero, view, color(slide.background.unwrap_or(Color::WHITE)), None, &page);
     scene.push_clip_layer(Fill::NonZero, view, &page);
@@ -365,7 +373,8 @@ pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
     let Some(body) = &shape.text else { return };
     if !body.is_empty() {
         if with_text {
-            draw_body(scene, cx.engine, body, &TextFrame::of(*xf, &shape.geometry), view);
+            let numbered = opts.slide_number.and_then(|n| body.with_slide_number(n));
+            draw_body(scene, cx.engine, numbered.as_ref().unwrap_or(body), &TextFrame::of(*xf, &shape.geometry), view);
         }
         return;
     }

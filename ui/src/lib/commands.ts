@@ -47,6 +47,9 @@ export type Command =
   | { kind: "cropMode"; on: boolean }
   | { kind: "crop"; left: number; top: number; right: number; bottom: number }
   | { kind: "resetPicture" }
+  | { kind: "drawTool"; tool: string }
+  | { kind: "headerFooter"; date: "none" | "auto" | "fixed"; dateText: string; slideNumber: boolean; footer: boolean; footerText: string; skipTitle: boolean; all: boolean }
+  | { kind: "insertSymbol"; text: string }
   | { kind: "fontSize"; size: number }
   | { kind: "fontStep"; up: boolean }
   | { kind: "fontFamily"; family: string }

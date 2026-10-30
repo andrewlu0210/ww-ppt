@@ -176,7 +176,9 @@ impl RichEdit {
             return p.clone();
         }
         let r = self.range();
-        if r.is_empty() { self.body.style_at(r.start) } else { self.body.styles_in(r.clone()).into_iter().next().unwrap_or_else(|| self.body.style_at(r.start)) }
+        let style = if r.is_empty() { self.body.style_at(r.start) } else { self.body.styles_in(r.clone()).into_iter().next().unwrap_or_else(|| self.body.style_at(r.start)) };
+        // Typed text next to a field is plain text.
+        RunStyle { field: None, ..style }
     }
 
     /// Paragraph containing the selection start.
