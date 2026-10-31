@@ -1,6 +1,6 @@
-import { t } from "../i18n";
+import { lang, t } from "../i18n";
 import { useEffect, useRef } from "react";
-import init, { createApp, type App } from "../wasm/ppt_wasm";
+import init, { createApp, setLanguage, type App } from "../wasm/ppt_wasm";
 import { SHAPES_MARKER } from "../lib/commands";
 import { setWasmMemory } from "../lib/perf";
 
@@ -73,6 +73,7 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
         return;
       }
       setWasmMemory((await init()).memory);
+      setLanguage(lang);
       const { dpr } = sizeCanvas();
       let app: App;
       try {

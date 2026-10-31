@@ -189,6 +189,13 @@ fn template() -> Presentation {
     ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).expect("built-in template parses")
 }
 
+/// Sets the interface language (`zh-Hant`, `zh-Hans` or `en`) for placeholder
+/// prompts and new decks. Call before `createApp`.
+#[wasm_bindgen(js_name = setLanguage)]
+pub fn set_language(code: &str) {
+    ppt_model::set_lang(ppt_model::Lang::from_code(code));
+}
+
 /// Creates the app on a canvas. Fails when WebGPU is unavailable.
 #[wasm_bindgen(js_name = createApp)]
 pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsValue> {

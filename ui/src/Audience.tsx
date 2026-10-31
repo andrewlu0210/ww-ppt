@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import init, { createApp, type App as Engine } from "./wasm/ppt_wasm";
+import init, { createApp, setLanguage, type App as Engine } from "./wasm/ppt_wasm";
+import { lang } from "./i18n";
 import { SlideShow } from "./components/SlideShow";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import type { ShowCommand, ShowState } from "./lib/show";
@@ -23,6 +24,7 @@ export function Audience() {
     const cleanups: (() => void)[] = [];
     (async () => {
       await init();
+      setLanguage(lang);
       const size = () => {
         const dpr = window.devicePixelRatio || 1;
         canvas.width = Math.max(1, Math.round(window.innerWidth * dpr));

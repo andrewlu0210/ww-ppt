@@ -7,6 +7,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 pub use bullet::{Bullet, BulletKind};
+pub use lang::{Lang, lang, set_lang};
 pub use table::Table;
 pub use transition::{Transition, TransitionKind};
 
@@ -14,6 +15,7 @@ pub mod anim;
 pub mod bullet;
 pub mod chart;
 pub mod diagram;
+pub mod lang;
 pub mod media;
 pub mod table;
 pub mod transition;
@@ -598,10 +600,11 @@ pub struct Placeholder {
 impl Placeholder {
     /// Hint shown in an empty placeholder while editing (never printed).
     pub fn prompt(&self) -> Option<&'static str> {
+        let l = lang();
         match self.kind.as_str() {
-            "title" | "ctrTitle" => Some("按一下以新增標題"),
-            "subTitle" => Some("按一下以新增副標題"),
-            "body" | "obj" => Some("按一下以新增文字"),
+            "title" | "ctrTitle" => Some(l.pick("按一下以新增標題", "单击此处添加标题", "Click to add title")),
+            "subTitle" => Some(l.pick("按一下以新增副標題", "单击此处添加副标题", "Click to add subtitle")),
+            "body" | "obj" => Some(l.pick("按一下以新增文字", "单击此处添加文本", "Click to add text")),
             _ => None,
         }
     }

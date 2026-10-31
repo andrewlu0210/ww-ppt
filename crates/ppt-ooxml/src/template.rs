@@ -5,12 +5,97 @@
 
 use std::io::{Cursor, Write};
 
+use ppt_model::{Lang, lang};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 const NS: &str = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#;
 const XML_HEAD: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#;
 const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+/// Names and texts the template writes, as each PowerPoint language edition does.
+struct Words {
+    lang: &'static str,
+    title_ph: &'static str,
+    text_ph: &'static str,
+    date_ph: &'static str,
+    footer_ph: &'static str,
+    number_ph: &'static str,
+    title: &'static str,
+    subtitle: &'static str,
+    content_ph: &'static str,
+    edit_title: &'static str,
+    edit_text: &'static str,
+    edit_subtitle: &'static str,
+    layouts: [&'static str; 6],
+    theme: &'static str,
+    doc_title: &'static str,
+    format: &'static str,
+}
+
+fn words() -> Words {
+    match lang() {
+        Lang::ZhHant => Words {
+            lang: "zh-TW",
+            title_ph: "標題版面配置區",
+            text_ph: "文字版面配置區",
+            date_ph: "日期版面配置區",
+            footer_ph: "頁尾版面配置區",
+            number_ph: "投影片編號版面配置區",
+            title: "標題",
+            subtitle: "副標題",
+            content_ph: "內容版面配置區",
+            edit_title: "按一下以編輯母片標題樣式",
+            edit_text: "按一下以編輯母片文字樣式",
+            edit_subtitle: "按一下以編輯母片子標題樣式",
+            layouts: ["標題投影片", "標題及內容", "區段標題", "兩項物件", "只有標題", "空白"],
+            theme: "Office 佈景主題",
+            doc_title: "簡報",
+            format: "寬螢幕",
+        },
+        Lang::ZhHans => Words {
+            lang: "zh-CN",
+            title_ph: "标题占位符",
+            text_ph: "文本占位符",
+            date_ph: "日期占位符",
+            footer_ph: "页脚占位符",
+            number_ph: "幻灯片编号占位符",
+            title: "标题",
+            subtitle: "副标题",
+            content_ph: "内容占位符",
+            edit_title: "单击此处编辑母版标题样式",
+            edit_text: "单击此处编辑母版文本样式",
+            edit_subtitle: "单击此处编辑母版副标题样式",
+            layouts: ["标题幻灯片", "标题和内容", "节标题", "两栏内容", "仅标题", "空白"],
+            theme: "Office 主题",
+            doc_title: "演示文稿",
+            format: "宽屏",
+        },
+        Lang::En => Words {
+            lang: "en-US",
+            title_ph: "Title Placeholder",
+            text_ph: "Text Placeholder",
+            date_ph: "Date Placeholder",
+            footer_ph: "Footer Placeholder",
+            number_ph: "Slide Number Placeholder",
+            title: "Title",
+            subtitle: "Subtitle",
+            content_ph: "Content Placeholder",
+            edit_title: "Click to edit Master title style",
+            edit_text: "Click to edit Master text styles",
+            edit_subtitle: "Click to edit Master subtitle style",
+            layouts: ["Title Slide", "Title and Content", "Section Header", "Two Content", "Title Only", "Blank"],
+            theme: "Office Theme",
+            doc_title: "Presentation",
+            format: "Widescreen",
+        },
+    }
+}
+
+/// A numbered shape name, e.g. "Title 1".
+fn named(name: &str, n: u32) -> String {
+    format!("{name} {n}")
+}
 
 fn rels(entries: &[(&str, &str, &str)]) -> String {
     let body: String = entries.iter().map(|(id, kind, target)| format!(r#"<Relationship Id="{id}" Type="{REL}/{kind}" Target="{target}"/>"#)).collect();
@@ -23,14 +108,16 @@ fn xfrm(x: i64, y: i64, w: i64, h: i64) -> String {
 
 /// A placeholder shape. `geom` is `Some((x, y, w, h))` to override the inherited position.
 fn ph(id: u32, name: &str, ph: &str, geom: Option<(i64, i64, i64, i64)>, body_pr: &str, lst: &str, text: &str) -> String {
+    let tag = words().lang;
+    let alt = if lang() == Lang::En { "zh-TW" } else { "en-US" };
     let sp_pr = match geom {
         Some((x, y, w, h)) => format!(r#"<p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>"#, xfrm(x, y, w, h)),
         None => "<p:spPr/>".to_string(),
     };
     let paragraph = if text.is_empty() {
-        r#"<a:p><a:endParaRPr lang="zh-TW" altLang="en-US"/></a:p>"#.to_string()
+        format!(r#"<a:p><a:endParaRPr lang="{tag}" altLang="{alt}"/></a:p>"#)
     } else {
-        format!(r#"<a:p><a:r><a:rPr lang="zh-TW" altLang="en-US"/><a:t>{text}</a:t></a:r></a:p>"#)
+        format!(r#"<a:p><a:r><a:rPr lang="{tag}" altLang="{alt}"/><a:t>{text}</a:t></a:r></a:p>"#)
     };
     format!(
         r#"<p:sp><p:nvSpPr><p:cNvPr id="{id}" name="{name}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr>{ph}</p:nvPr></p:nvSpPr>{sp_pr}<p:txBody>{body_pr}<a:lstStyle>{lst}</a:lstStyle>{paragraph}</p:txBody></p:sp>"#
@@ -44,10 +131,11 @@ fn sp_tree(shapes: &str) -> String {
 }
 
 fn footers() -> String {
+    let w = words();
     [
-        ph(4, "日期版面配置區 3", r#"<p:ph type="dt" sz="half" idx="10"/>"#, None, "<a:bodyPr/>", "", ""),
-        ph(5, "頁尾版面配置區 4", r#"<p:ph type="ftr" sz="quarter" idx="11"/>"#, None, "<a:bodyPr/>", "", ""),
-        ph(6, "投影片編號版面配置區 5", r#"<p:ph type="sldNum" sz="quarter" idx="12"/>"#, None, "<a:bodyPr/>", "", ""),
+        ph(4, &named(w.date_ph, 3), r#"<p:ph type="dt" sz="half" idx="10"/>"#, None, "<a:bodyPr/>", "", ""),
+        ph(5, &named(w.footer_ph, 4), r#"<p:ph type="ftr" sz="quarter" idx="11"/>"#, None, "<a:bodyPr/>", "", ""),
+        ph(6, &named(w.number_ph, 5), r#"<p:ph type="sldNum" sz="quarter" idx="12"/>"#, None, "<a:bodyPr/>", "", ""),
     ]
     .concat()
 }
@@ -74,7 +162,8 @@ fn theme() -> String {
     let solid = |inner: &str| format!("<a:solidFill>{inner}</a:solidFill>");
     let ph_clr = r#"<a:schemeClr val="phClr"/>"#;
     format!(
-        r#"{XML_HEAD}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office 佈景主題"><a:themeElements><a:clrScheme name="Office">{colors}</a:clrScheme><a:fontScheme name="Office"><a:majorFont>{}</a:majorFont><a:minorFont>{}</a:minorFont></a:fontScheme><a:fmtScheme name="Office"><a:fillStyleLst>{}{}{}</a:fillStyleLst><a:lnStyleLst><a:ln w="6350" cap="flat" cmpd="sng" algn="ctr">{}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln><a:ln w="12700" cap="flat" cmpd="sng" algn="ctr">{}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln><a:ln w="19050" cap="flat" cmpd="sng" algn="ctr">{}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>{}{}{}</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>"#,
+        r#"{XML_HEAD}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="{}"><a:themeElements><a:clrScheme name="Office">{colors}</a:clrScheme><a:fontScheme name="Office"><a:majorFont>{}</a:majorFont><a:minorFont>{}</a:minorFont></a:fontScheme><a:fmtScheme name="Office"><a:fillStyleLst>{}{}{}</a:fillStyleLst><a:lnStyleLst><a:ln w="6350" cap="flat" cmpd="sng" algn="ctr">{}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln><a:ln w="12700" cap="flat" cmpd="sng" algn="ctr">{}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln><a:ln w="19050" cap="flat" cmpd="sng" algn="ctr">{}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>{}{}{}</a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>"#,
+        words().theme,
         font("Calibri Light"),
         font("Calibri"),
         solid(ph_clr),
@@ -90,23 +179,24 @@ fn theme() -> String {
 }
 
 fn master() -> String {
+    let w = words();
     let title = ph(
         2,
-        "標題版面配置區 1",
+        &named(w.title_ph, 1),
         r#"<p:ph type="title"/>"#,
         Some((838_200, 365_125, 10_515_600, 1_325_563)),
         r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0" anchor="ctr"><a:normAutofit/></a:bodyPr>"#,
         "",
-        "按一下以編輯母片標題樣式",
+        w.edit_title,
     );
     let body = ph(
         3,
-        "文字版面配置區 2",
+        &named(w.text_ph, 2),
         r#"<p:ph type="body" idx="1"/>"#,
         Some((838_200, 1_825_625, 10_515_600, 4_351_338)),
         r#"<a:bodyPr vert="horz" lIns="91440" tIns="45720" rIns="91440" bIns="45720" rtlCol="0"><a:normAutofit/></a:bodyPr>"#,
         "",
-        "按一下以編輯母片文字樣式",
+        w.edit_text,
     );
     let footer = |id: u32, name: &str, ph_xml: &str, x: i64, w: i64, algn: &str| {
         ph(
@@ -122,9 +212,9 @@ fn master() -> String {
     let shapes = [
         title,
         body,
-        footer(4, "日期版面配置區 3", r#"<p:ph type="dt" sz="half" idx="2"/>"#, 838_200, 2_743_200, "l"),
-        footer(5, "頁尾版面配置區 4", r#"<p:ph type="ftr" sz="quarter" idx="3"/>"#, 4_038_600, 4_114_800, "ctr"),
-        footer(6, "投影片編號版面配置區 5", r#"<p:ph type="sldNum" sz="quarter" idx="4"/>"#, 8_610_600, 2_743_200, "r"),
+        footer(4, &named(w.date_ph, 3), r#"<p:ph type="dt" sz="half" idx="2"/>"#, 838_200, 2_743_200, "l"),
+        footer(5, &named(w.footer_ph, 4), r#"<p:ph type="ftr" sz="quarter" idx="3"/>"#, 4_038_600, 4_114_800, "ctr"),
+        footer(6, &named(w.number_ph, 5), r#"<p:ph type="sldNum" sz="quarter" idx="4"/>"#, 8_610_600, 2_743_200, "r"),
     ]
     .concat();
     let body_lvl = |lvl: u32, mar: i64, sz: u32| {
@@ -136,8 +226,9 @@ fn master() -> String {
     let body_style = [body_lvl(1, 228_600, 2800), body_lvl(2, 685_800, 2400), body_lvl(3, 1_143_000, 2000), body_lvl(4, 1_600_200, 1800), body_lvl(5, 2_057_400, 1800)].concat();
     let ids: String = (1..=6).map(|i| format!(r#"<p:sldLayoutId id="{}" r:id="rId{i}"/>"#, 2_147_483_648u64 + i as u64)).collect();
     format!(
-        r#"{XML_HEAD}<p:sldMaster {NS}><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>{}</p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst>{ids}</p:sldLayoutIdLst><p:txStyles><p:titleStyle><a:lvl1pPr algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPct val="0"/></a:spcBef><a:buNone/><a:defRPr sz="4400" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mj-lt"/><a:ea typeface="+mj-ea"/><a:cs typeface="+mj-cs"/></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle>{body_style}</p:bodyStyle><p:otherStyle><a:defPPr><a:defRPr lang="zh-TW"/></a:defPPr><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1800" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>"#,
-        sp_tree(&shapes)
+        r#"{XML_HEAD}<p:sldMaster {NS}><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>{}</p:cSld><p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><p:sldLayoutIdLst>{ids}</p:sldLayoutIdLst><p:txStyles><p:titleStyle><a:lvl1pPr algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:lnSpc><a:spcPct val="90000"/></a:lnSpc><a:spcBef><a:spcPct val="0"/></a:spcBef><a:buNone/><a:defRPr sz="4400" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mj-lt"/><a:ea typeface="+mj-ea"/><a:cs typeface="+mj-cs"/></a:defRPr></a:lvl1pPr></p:titleStyle><p:bodyStyle>{body_style}</p:bodyStyle><p:otherStyle><a:defPPr><a:defRPr lang="{}"/></a:defPPr><a:lvl1pPr marL="0" algn="l" defTabSz="914400" rtl="0" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="1800" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:otherStyle></p:txStyles></p:sldMaster>"#,
+        sp_tree(&shapes),
+        w.lang
     )
 }
 
@@ -149,62 +240,65 @@ fn layout(name: &str, kind: &str, shapes: &str) -> String {
 }
 
 fn layouts() -> Vec<String> {
-    let title = || ph(2, "標題 1", r#"<p:ph type="title"/>"#, None, "<a:bodyPr/>", "", "按一下以編輯母片標題樣式");
+    let w = words();
+    let [l_title, l_content, l_section, l_two, l_title_only, l_blank] = w.layouts;
+    let title = || ph(2, &named(w.title, 1), r#"<p:ph type="title"/>"#, None, "<a:bodyPr/>", "", w.edit_title);
     let no_bullet = |sz: u32| format!(r#"<a:lvl1pPr marL="0" indent="0" algn="ctr"><a:buNone/><a:defRPr sz="{sz}"/></a:lvl1pPr>"#);
     vec![
         layout(
-            "標題投影片",
+            l_title,
             "title",
             &[
-                ph(2, "標題 1", r#"<p:ph type="ctrTitle"/>"#, Some((1_524_000, 1_122_363, 9_144_000, 2_387_600)), r#"<a:bodyPr anchor="b"/>"#, r#"<a:lvl1pPr algn="ctr"><a:defRPr sz="6000"/></a:lvl1pPr>"#, "按一下以編輯母片標題樣式"),
-                ph(3, "副標題 2", r#"<p:ph type="subTitle" idx="1"/>"#, Some((1_524_000, 3_602_038, 9_144_000, 1_655_762)), "<a:bodyPr/>", &no_bullet(2400), "按一下以編輯母片子標題樣式"),
+                ph(2, &named(w.title, 1), r#"<p:ph type="ctrTitle"/>"#, Some((1_524_000, 1_122_363, 9_144_000, 2_387_600)), r#"<a:bodyPr anchor="b"/>"#, r#"<a:lvl1pPr algn="ctr"><a:defRPr sz="6000"/></a:lvl1pPr>"#, w.edit_title),
+                ph(3, &named(w.subtitle, 2), r#"<p:ph type="subTitle" idx="1"/>"#, Some((1_524_000, 3_602_038, 9_144_000, 1_655_762)), "<a:bodyPr/>", &no_bullet(2400), w.edit_subtitle),
                 footers(),
             ]
             .concat(),
         ),
         layout(
-            "標題及內容",
+            l_content,
             "obj",
-            &[title(), ph(3, "內容版面配置區 2", r#"<p:ph idx="1"/>"#, None, "<a:bodyPr/>", "", "按一下以編輯母片文字樣式"), footers()].concat(),
+            &[title(), ph(3, &named(w.content_ph, 2), r#"<p:ph idx="1"/>"#, None, "<a:bodyPr/>", "", w.edit_text), footers()].concat(),
         ),
         layout(
-            "區段標題",
+            l_section,
             "secHead",
             &[
-                ph(2, "標題 1", r#"<p:ph type="title"/>"#, Some((831_850, 1_709_738, 10_515_600, 2_852_737)), r#"<a:bodyPr anchor="b"/>"#, r#"<a:lvl1pPr><a:defRPr sz="6000"/></a:lvl1pPr>"#, "按一下以編輯母片標題樣式"),
+                ph(2, &named(w.title, 1), r#"<p:ph type="title"/>"#, Some((831_850, 1_709_738, 10_515_600, 2_852_737)), r#"<a:bodyPr anchor="b"/>"#, r#"<a:lvl1pPr><a:defRPr sz="6000"/></a:lvl1pPr>"#, w.edit_title),
                 ph(
                     3,
-                    "文字版面配置區 2",
+                    &named(w.text_ph, 2),
                     r#"<p:ph type="body" idx="1"/>"#,
                     Some((831_850, 4_589_463, 10_515_600, 1_500_187)),
                     "<a:bodyPr/>",
                     r#"<a:lvl1pPr marL="0" indent="0"><a:buNone/><a:defRPr sz="2400"><a:solidFill><a:schemeClr val="tx1"><a:tint val="75000"/></a:schemeClr></a:solidFill></a:defRPr></a:lvl1pPr>"#,
-                    "按一下以編輯母片文字樣式",
+                    w.edit_text,
                 ),
                 footers(),
             ]
             .concat(),
         ),
         layout(
-            "兩項物件",
+            l_two,
             "twoObj",
             &[
                 title(),
-                ph(3, "內容版面配置區 2", r#"<p:ph sz="half" idx="1"/>"#, Some((838_200, 1_825_625, 5_181_600, 4_351_338)), "<a:bodyPr/>", "", "按一下以編輯母片文字樣式"),
-                ph(4, "內容版面配置區 3", r#"<p:ph sz="half" idx="2"/>"#, Some((6_172_800, 1_825_625, 5_181_600, 4_351_338)), "<a:bodyPr/>", "", "按一下以編輯母片文字樣式"),
+                ph(3, &named(w.content_ph, 2), r#"<p:ph sz="half" idx="1"/>"#, Some((838_200, 1_825_625, 5_181_600, 4_351_338)), "<a:bodyPr/>", "", w.edit_text),
+                ph(4, &named(w.content_ph, 3), r#"<p:ph sz="half" idx="2"/>"#, Some((6_172_800, 1_825_625, 5_181_600, 4_351_338)), "<a:bodyPr/>", "", w.edit_text),
                 footers(),
             ]
             .concat(),
         ),
-        layout("只有標題", "titleOnly", &[title(), footers()].concat()),
-        layout("空白", "blank", &footers()),
+        layout(l_title_only, "titleOnly", &[title(), footers()].concat()),
+        layout(l_blank, "blank", &footers()),
     ]
 }
 
 fn first_slide() -> String {
+    let w = words();
     let shapes = [
-        ph(2, "標題 1", r#"<p:ph type="ctrTitle"/>"#, None, "<a:bodyPr/>", "", ""),
-        ph(3, "副標題 2", r#"<p:ph type="subTitle" idx="1"/>"#, None, "<a:bodyPr/>", "", ""),
+        ph(2, &named(w.title, 1), r#"<p:ph type="ctrTitle"/>"#, None, "<a:bodyPr/>", "", ""),
+        ph(3, &named(w.subtitle, 2), r#"<p:ph type="subTitle" idx="1"/>"#, None, "<a:bodyPr/>", "", ""),
     ]
     .concat();
     format!(r#"{XML_HEAD}<p:sld {NS}><p:cSld>{}</p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"#, sp_tree(&shapes))
@@ -219,7 +313,8 @@ fn presentation() -> String {
     };
     let levels: String = (1..=9).map(lvl).collect();
     format!(
-        r#"{XML_HEAD}<p:presentation {NS} saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle><a:defPPr><a:defRPr lang="zh-TW"/></a:defPPr>{levels}</p:defaultTextStyle></p:presentation>"#
+        r#"{XML_HEAD}<p:presentation {NS} saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle><a:defPPr><a:defRPr lang="{}"/></a:defPPr>{levels}</p:defaultTextStyle></p:presentation>"#,
+        words().lang
     )
 }
 
@@ -262,11 +357,11 @@ pub fn template_package() -> Vec<u8> {
         ),
         (
             "docProps/core.xml".into(),
-            format!(r#"{XML_HEAD}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>簡報</dc:title><dc:creator>Want-Point</dc:creator></cp:coreProperties>"#),
+            format!(r#"{XML_HEAD}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{}</dc:title><dc:creator>Want-Point</dc:creator></cp:coreProperties>"#, words().doc_title),
         ),
         (
             "docProps/app.xml".into(),
-            format!(r#"{XML_HEAD}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Want-Point</Application><PresentationFormat>寬螢幕</PresentationFormat></Properties>"#),
+            format!(r#"{XML_HEAD}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Want-Point</Application><PresentationFormat>{}</PresentationFormat></Properties>"#, words().format),
         ),
         ("ppt/presentation.xml".into(), presentation()),
         (
