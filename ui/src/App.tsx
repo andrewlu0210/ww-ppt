@@ -55,6 +55,7 @@ import { announce } from "./lib/announce";
 import type { BackgroundInfo, ColorSchemeInfo, FontSchemeInfo, ThemeInfo } from "./components/DesignTab";
 import { setThemePalette } from "./components/ColorPicker";
 import { applyAppearance, cssColor, loadAppearance } from "./lib/appearance";
+import { t } from "./i18n";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
@@ -1382,7 +1383,7 @@ export function App() {
         </span>
         <span className="doc-name" data-tauri-drag-region>
           {doc.name}
-          {dirty && <span className="dirty-dot" title="有未儲存的變更" />}
+          {dirty && <span className="dirty-dot" title={t("title.unsaved")} />}
         </span>
       </header>
       <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}

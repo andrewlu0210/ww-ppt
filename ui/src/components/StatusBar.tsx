@@ -1,5 +1,6 @@
 import type { Status } from "../lib/status";
 import type { Command } from "../lib/commands";
+import { t } from "../i18n";
 
 interface Props {
   status: Status;
@@ -21,29 +22,27 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoo
   );
   return (
     <footer className="status-bar">
-      <span>
-        投影片 {status.slideCount ? status.slideIndex + 1 : 0} / {status.slideCount}
-      </span>
-      {status.editingText && <span>編輯文字</span>}
-      {!status.editingText && status.selectionName && <span>已選取：{status.selectionName}</span>}
-      {fontsLoading && <span>正在載入字型…</span>}
-      <button className="a11y-status" onClick={() => run({ kind: "checker", open: true })} onMouseDown={(e) => e.preventDefault()} title="檢查協助工具">
-        協助工具：{a11yIssues === 0 ? "良好" : `${a11yIssues} 個問題`}
+      <span>{t("status.slide", { current: status.slideCount ? status.slideIndex + 1 : 0, total: status.slideCount })}</span>
+      {status.editingText && <span>{t("status.editingText")}</span>}
+      {!status.editingText && status.selectionName && <span>{t("status.selected", { name: status.selectionName })}</span>}
+      {fontsLoading && <span>{t("status.loadingFonts")}</span>}
+      <button className="a11y-status" onClick={() => run({ kind: "checker", open: true })} onMouseDown={(e) => e.preventDefault()} title={t("status.checkAccessibility")}>
+        {a11yIssues === 0 ? t("status.a11yGood") : t("status.a11yIssues", { count: a11yIssues })}
       </button>
       <span className="spacer" />
       <span className="muted">WebGPU · vello · {status.frameMs.toFixed(1)} ms</span>
-      <button className={notesOpen ? "toggle on" : "toggle"} onClick={() => run({ kind: "toggleNotes" })} onMouseDown={(e) => e.preventDefault()} aria-pressed={notesOpen} title="顯示或隱藏備忘稿">
-        備忘稿
+      <button className={notesOpen ? "toggle on" : "toggle"} onClick={() => run({ kind: "toggleNotes" })} onMouseDown={(e) => e.preventDefault()} aria-pressed={notesOpen} title={t("status.toggleNotes")}>
+        {t("status.notes")}
       </button>
-      {view("normal", "標準")}
-      {view("sorter", "投影片瀏覽")}
-      <button onClick={() => run({ kind: "zoom", factor: 0.8 })} onMouseDown={(e) => e.preventDefault()} aria-label="縮小">
+      {view("normal", t("status.normal"))}
+      {view("sorter", t("status.sorter"))}
+      <button onClick={() => run({ kind: "zoom", factor: 0.8 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomOut")}>
         −
       </button>
-      <button className="zoom-value" onClick={() => run({ kind: "zoom", factor: "fit" })} onMouseDown={(e) => e.preventDefault()} title="符合視窗">
+      <button className="zoom-value" onClick={() => run({ kind: "zoom", factor: "fit" })} onMouseDown={(e) => e.preventDefault()} title={t("status.fit")}>
         {Math.round((viewMode === "sorter" ? sorterZoom : status.zoom) * 100)}%
       </button>
-      <button onClick={() => run({ kind: "zoom", factor: 1.25 })} onMouseDown={(e) => e.preventDefault()} aria-label="放大">
+      <button onClick={() => run({ kind: "zoom", factor: 1.25 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomIn")}>
         +
       </button>
     </footer>

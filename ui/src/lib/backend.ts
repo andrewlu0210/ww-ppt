@@ -1,4 +1,5 @@
 // Thin wrappers over the native Tauri commands and dialogs.
+import { locale, t } from "../i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { message, open, save } from "@tauri-apps/plugin-dialog";
@@ -39,16 +40,16 @@ export function startupFiles(): Promise<string[]> {
 }
 
 export async function pickPptx(): Promise<string | null> {
-  const picked = await open({ multiple: false, directory: false, filters: [{ name: "PowerPoint 簡報", extensions: ["pptx"] }] });
+  const picked = await open({ multiple: false, directory: false, filters: [{ name: t("file.pptxFilter"), extensions: ["pptx"] }] });
   return typeof picked === "string" ? picked : null;
 }
 
 export async function pickImage(): Promise<string | null> {
-  const picked = await open({ multiple: false, directory: false, filters: [{ name: "圖片", extensions: ["png", "jpg", "jpeg", "gif"] }] });
+  const picked = await open({ multiple: false, directory: false, filters: [{ name: t("file.imageFilter"), extensions: ["png", "jpg", "jpeg", "gif"] }] });
   return typeof picked === "string" ? picked : null;
 }
 
-const SAVE_FILTERS = { pptx: "PowerPoint 簡報", pdf: "PDF 文件", mp4: "MPEG-4 視訊" };
+const SAVE_FILTERS = { pptx: t("file.pptxFilter"), pdf: t("file.pdfFilter"), mp4: t("file.mp4Filter") };
 
 export async function pickSavePath(defaultName: string, ext: keyof typeof SAVE_FILTERS = "pptx"): Promise<string | null> {
   const path = await save({ defaultPath: `${defaultName}.${ext}`, filters: [{ name: SAVE_FILTERS[ext], extensions: [ext] }] });
@@ -56,17 +57,18 @@ export async function pickSavePath(defaultName: string, ext: keyof typeof SAVE_F
   return path.toLowerCase().endsWith(`.${ext}`) ? path : `${path}.${ext}`;
 }
 
-/** The app's display name: "旺-Point" on a Chinese system, matching the native menu. */
-export const APP_NAME = navigator.language.toLowerCase().startsWith("zh") ? "旺-Point" : "Want-Point";
+/** The app's display name in the interface language ("旺-Point" in Chinese). */
+export const APP_NAME = t("appName");
 
 /** "save" | "discard" | "cancel" for a document with unsaved changes. */
 export async function askSaveChanges(name: string): Promise<"save" | "discard" | "cancel"> {
-  const result = await message(`要儲存「${name}」的變更嗎？`, {
+  const [save, dontSave] = [t("save.save"), t("save.dontSave")];
+  const result = await message(t("save.ask", { name }), {
     title: APP_NAME,
     kind: "warning",
-    buttons: { yes: "儲存", no: "不要儲存", cancel: "取消" },
+    buttons: { yes: save, no: dontSave, cancel: t("save.cancel") },
   });
-  return result === "儲存" ? "save" : result === "不要儲存" ? "discard" : "cancel";
+  return result === save ? "save" : result === dontSave ? "discard" : "cancel";
 }
 
 export function showError(text: string): Promise<unknown> {
@@ -152,11 +154,12 @@ export async function recoveryRead(id: string): Promise<Uint8Array> {
 
 /** Offers an autosaved copy: "recover", "discard" or "later" (kept for next time). */
 export async function askRecover(info: RecoveryInfo): Promise<"recover" | "discard" | "later"> {
-  const when = new Date(info.savedAt).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  const result = await message(`${APP_NAME} 上次沒有正常結束。要復原「${info.name}」嗎？\n\n自動儲存的版本：${when}`, {
-    title: "復原文件",
+  const when = new Date(info.savedAt).toLocaleString(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const [recover, discard] = [t("recover.recover"), t("recover.discard")];
+  const result = await message(t("recover.ask", { app: APP_NAME, name: info.name, when }), {
+    title: t("recover.title"),
     kind: "warning",
-    buttons: { yes: "復原", no: "捨棄", cancel: "稍後再說" },
+    buttons: { yes: recover, no: discard, cancel: t("recover.later") },
   });
-  return result === "復原" ? "recover" : result === "捨棄" ? "discard" : "later";
+  return result === recover ? "recover" : result === discard ? "discard" : "later";
 }
