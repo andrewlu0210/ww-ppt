@@ -48,7 +48,7 @@ pub fn export_video(app: AppHandle, state: State<'_, VideoExport>, request: Requ
     };
     let InvokeBody::Raw(bytes) = request.body() else { return Err("expected raw body".into()) };
     if state.running.swap(true, Ordering::SeqCst) {
-        return Err("已經在匯出視訊".into());
+        return Err(ppt_model::tr("已經在匯出視訊", "已在导出视频", "A video export is already running", &[]));
     }
     let pres = match ppt_ooxml::parse_pptx(bytes) {
         Ok(p) => p,

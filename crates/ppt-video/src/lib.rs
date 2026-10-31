@@ -46,7 +46,7 @@ fn render(r: &mut SlideRenderer, pres: &Presentation, shot: &Shot, width: u32, h
 pub fn export(pres: &Presentation, opts: &VideoOptions, path: &Path, progress: &mut dyn FnMut(usize, usize) -> bool) -> Result<bool, String> {
     let shots = frames(pres, opts);
     if shots.is_empty() {
-        return Err("沒有可匯出的投影片".into());
+        return Err(ppt_model::tr("沒有可匯出的投影片", "没有可导出的幻灯片", "No slides to export", &[]));
     }
     let (width, height) = opts.size(pres);
     let mut r = SlideRenderer::new()?;

@@ -38,7 +38,7 @@ impl Editor {
                 let members: Vec<_> = shapes.iter().filter(|m| m.group == Some(g)).collect();
                 out.push(PaneItem {
                     id: g,
-                    name: format!("群組 {}", out.iter().filter(|i| i.kind == "group").count() + 1),
+                    name: format!("{} {}", ppt_model::lang().pick("群組", "组合", "Group"), out.iter().filter(|i| i.kind == "group").count() + 1),
                     kind: "group",
                     depth: 0,
                     hidden: members.iter().all(|m| m.access.hidden),

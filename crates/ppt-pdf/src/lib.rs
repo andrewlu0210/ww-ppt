@@ -132,7 +132,7 @@ pub fn export_pdf(pres: &Presentation, cx: &mut RenderCtx, opts: PdfOptions) -> 
         // A PDF needs a page: an empty one when every slide is hidden.
         doc.start_page_with(settings()?).finish();
     }
-    let title = pres.slides.iter().find_map(title_of).unwrap_or_else(|| "簡報".to_string());
+    let title = pres.slides.iter().find_map(title_of).unwrap_or_else(|| ppt_model::lang().pick("簡報", "演示文稿", "Presentation").to_string());
     doc.set_metadata(Metadata::new().language(LANG.to_string()).title(title));
     doc.set_tag_tree(tree);
     doc.finish().map_err(|e| format!("{e:?}"))

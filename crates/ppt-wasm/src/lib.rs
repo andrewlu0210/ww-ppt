@@ -13,7 +13,7 @@ use ppt_editor::show::{Blank, Screen, SlideShow};
 use ppt_model::anim::{PRESETS, Player, SlideStage, Trigger, effect_elements};
 use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, FindMatch, FindOptions, FindPlace, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
-use ppt_model::{Align, Background, Color, EMU_PER_PT, Gradient, GradientKind, Paint, Presentation};
+use ppt_model::{Align, Background, Color, EMU_PER_PT, Gradient, GradientKind, Paint, Presentation, tr};
 use ppt_ooxml::design;
 use ppt_render::vello::kurbo::{Affine, Point, Rect, Vec2};
 use ppt_render::vello::peniko::Color as PColor;
@@ -614,7 +614,7 @@ impl App {
     pub fn load_pptx(&mut self, bytes: Vec<u8>) -> Result<(), JsValue> {
         let pres = ppt_ooxml::parse_pptx_owned(bytes).map_err(js_err)?;
         if pres.slides.is_empty() {
-            return Err(JsValue::from_str("簡報中沒有投影片"));
+            return Err(JsValue::from_str(&tr("簡報中沒有投影片", "演示文稿中没有幻灯片", "The presentation has no slides", &[])));
         }
         self.reset_document(pres);
         Ok(())
@@ -1493,9 +1493,13 @@ impl App {
             .enumerate()
             .map(|(i, s)| {
                 let title = ppt_editor::slide_title(s);
-                let mut label = if title.is_empty() { format!("投影片 {}", i + 1) } else { format!("投影片 {}：{title}", i + 1) };
+                let mut label = if title.is_empty() {
+                    tr("投影片 {}", "幻灯片 {}", "Slide {}", &[&(i + 1)])
+                } else {
+                    tr("投影片 {}：{}", "幻灯片 {}：{}", "Slide {}: {}", &[&(i + 1), &title])
+                };
                 if s.hidden {
-                    label.push_str("，已隱藏");
+                    label.push_str(&tr("，已隱藏", "，已隐藏", ", hidden", &[]));
                 }
                 JsValue::from(label)
             })
@@ -1745,7 +1749,7 @@ impl App {
             .map(|cs| {
                 let o = Object::new();
                 let _ = Reflect::set(&o, &"name".into(), &cs.name.into());
-                let _ = Reflect::set(&o, &"label".into(), &cs.label.into());
+                let _ = Reflect::set(&o, &"label".into(), &cs.label().into());
                 let colors: Array = cs.colors.iter().map(|v| JsValue::from(format!("#{v:06X}"))).collect();
                 let _ = Reflect::set(&o, &"colors".into(), &colors);
                 JsValue::from(o)
@@ -1795,7 +1799,7 @@ impl App {
     pub fn set_slide_size(&mut self, width: f64, height: f64, fit: &str) -> Result<bool, JsValue> {
         let (w, h) = (width.round() as i64, height.round() as i64);
         if !(914_400 / 2..=51_206_400).contains(&w) || !(914_400 / 2..=51_206_400).contains(&h) {
-            return Err(JsValue::from_str("投影片大小必須介於 1.27 到 142.24 公分之間"));
+            return Err(JsValue::from_str(&tr("投影片大小必須介於 1.27 到 142.24 公分之間", "幻灯片大小必须介于 1.27 到 142.24 厘米之间", "Slide size must be between 0.5 and 56 inches", &[])));
         }
         if (w, h) == (self.editor.pres.slide_width, self.editor.pres.slide_height) {
             return Ok(false);

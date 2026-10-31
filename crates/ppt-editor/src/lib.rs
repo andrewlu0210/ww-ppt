@@ -1720,7 +1720,7 @@ impl Editor {
         let (w, h) = (4 * EMU_PER_INCH as i64, (0.6 * EMU_PER_INCH) as i64);
         let xfrm = Xfrm::new((self.pres.slide_width - w) / 2, (self.pres.slide_height - h) / 2, w, h);
         let id = self.pres.alloc_id();
-        let mut shape = Shape::new(id, format!("文字方塊 {}", id.0), xfrm);
+        let mut shape = Shape::new(id, format!("{} {}", ppt_model::lang().pick("文字方塊", "文本框", "TextBox"), id.0), xfrm);
         let mut body = TextBody { auto_grow: true, defaults: self.pres.text_defaults.clone(), ..Default::default() };
         body.paragraphs[0].end_style = self.pres.default_run_style();
         shape.text = Some(body);
@@ -1767,7 +1767,7 @@ impl Editor {
         let xfrm = Xfrm::new(((sw - w) / 2.0) as i64, ((sh - h) / 2.0) as i64, w as i64, h as i64);
         self.pres.media.insert(key.clone(), bytes);
         let id = self.pres.alloc_id();
-        let mut shape = Shape::new(id, format!("圖片 {}", id.0), xfrm);
+        let mut shape = Shape::new(id, format!("{} {}", ppt_model::lang().pick("圖片", "图片", "Picture"), id.0), xfrm);
         shape.kind = ShapeKind::Picture { media: Some(key), crop: Default::default() };
         self.pres.slides[self.slide].shapes.push(shape);
         self.selection = vec![id];

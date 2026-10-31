@@ -7,6 +7,7 @@ mod spell;
 mod video;
 
 use ppt_fonts::{FontService, ResolvedFont};
+use ppt_model::{Lang, lang, set_lang, tr};
 use tauri::ipc::Response;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use std::sync::Mutex;
@@ -128,20 +129,27 @@ fn on_open_urls(app: &tauri::AppHandle, urls: &[tauri::Url]) {
     }
 }
 
-/// The app's display name: "旺-Point" when the system's first language is Chinese.
-fn app_name() -> &'static str {
+/// The interface language, chosen from the system's preferred languages the
+/// same way the frontend chooses (`ui/src/i18n`).
+fn detect_lang() -> Lang {
     #[cfg(target_os = "macos")]
     {
-        let langs = objc2_foundation::NSLocale::preferredLanguages();
-        if langs.firstObject().is_some_and(|l| l.to_string().starts_with("zh")) {
-            return "旺-Point";
-        }
+        let langs: Vec<String> = objc2_foundation::NSLocale::preferredLanguages().iter().map(|l| l.to_string()).collect();
+        Lang::detect(langs.iter().map(String::as_str))
     }
-    "Want-Point"
+    #[cfg(not(target_os = "macos"))]
+    Lang::En
+}
+
+/// The app's display name: "旺-Point" in Chinese, "Want-Point" in English.
+fn app_name() -> &'static str {
+    lang().pick("旺-Point", "旺-Point", "Want-Point")
 }
 
 fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let name = app_name();
+    let l = lang();
+    let m = |zh_hant: &'static str, zh_hans: &'static str, en: &'static str| l.pick(zh_hant, zh_hans, en);
     let item = |id: &str, text: &str, accel: Option<&str>| {
         let b = MenuItemBuilder::with_id(id, text);
         match accel {
@@ -151,77 +159,79 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
     };
     let about = AboutMetadata { name: Some(name.into()), ..Default::default() };
     let app_menu = SubmenuBuilder::new(app, name)
-        .item(&PredefinedMenuItem::about(app, Some(&format!("關於 {name}")), Some(about))?)
+        .item(&PredefinedMenuItem::about(app, Some(&tr("關於 {}", "关于 {}", "About {}", &[&name])), Some(about))?)
         .separator()
-        .item(&PredefinedMenuItem::hide(app, Some(&format!("隱藏 {name}")))?)
-        .item(&PredefinedMenuItem::hide_others(app, Some("隱藏其他"))?)
+        .item(&PredefinedMenuItem::hide(app, Some(&tr("隱藏 {}", "隐藏 {}", "Hide {}", &[&name])))?)
+        .item(&PredefinedMenuItem::hide_others(app, Some(m("隱藏其他", "隐藏其他", "Hide Others")))?)
         .separator()
-        .item(&PredefinedMenuItem::quit(app, Some(&format!("結束 {name}")))?)
+        .item(&PredefinedMenuItem::quit(app, Some(&tr("結束 {}", "退出 {}", "Quit {}", &[&name])))?)
         .build()?;
-    let file = SubmenuBuilder::new(app, "檔案")
-        .item(&item("new", "新增簡報", Some("CmdOrCtrl+N"))?)
-        .item(&item("open", "開啟…", Some("CmdOrCtrl+O"))?)
+    let file = SubmenuBuilder::new(app, m("檔案", "文件", "File"))
+        .item(&item("new", m("新增簡報", "新建演示文稿", "New Presentation"), Some("CmdOrCtrl+N"))?)
+        .item(&item("open", m("開啟…", "打开…", "Open…"), Some("CmdOrCtrl+O"))?)
         .separator()
-        .item(&item("save", "儲存", Some("CmdOrCtrl+S"))?)
-        .item(&item("save_as", "另存新檔…", Some("CmdOrCtrl+Shift+S"))?)
+        .item(&item("save", m("儲存", "保存", "Save"), Some("CmdOrCtrl+S"))?)
+        .item(&item("save_as", m("另存新檔…", "另存为…", "Save As…"), Some("CmdOrCtrl+Shift+S"))?)
         .separator()
-        .item(&item("export_pdf", "匯出為 PDF…", Some("CmdOrCtrl+Shift+E"))?)
-        .item(&item("export_video", "匯出為視訊…", None)?)
+        .item(&item("export_pdf", m("匯出為 PDF…", "导出为 PDF…", "Export as PDF…"), Some("CmdOrCtrl+Shift+E"))?)
+        .item(&item("export_video", m("匯出為視訊…", "导出为视频…", "Export as Video…"), None)?)
         .separator()
-        .item(&PredefinedMenuItem::close_window(app, Some("關閉視窗"))?)
+        .item(&PredefinedMenuItem::close_window(app, Some(m("關閉視窗", "关闭窗口", "Close Window")))?)
         .build()?;
     // Undo/redo/select-all go to the editor core instead of WebKit's own handlers.
     // Cut/copy/paste stay predefined so the webview receives clipboard events.
-    let edit = SubmenuBuilder::new(app, "編輯")
-        .item(&item("undo", "復原", Some("CmdOrCtrl+Z"))?)
-        .item(&item("redo", "取消復原", Some("CmdOrCtrl+Shift+Z"))?)
+    let edit = SubmenuBuilder::new(app, m("編輯", "编辑", "Edit"))
+        .item(&item("undo", m("復原", "撤销", "Undo"), Some("CmdOrCtrl+Z"))?)
+        .item(&item("redo", m("取消復原", "重做", "Redo"), Some("CmdOrCtrl+Shift+Z"))?)
         .separator()
-        .item(&PredefinedMenuItem::cut(app, Some("剪下"))?)
-        .item(&PredefinedMenuItem::copy(app, Some("拷貝"))?)
-        .item(&PredefinedMenuItem::paste(app, Some("貼上"))?)
-        .item(&item("select_all", "全選", Some("CmdOrCtrl+A"))?)
+        .item(&PredefinedMenuItem::cut(app, Some(m("剪下", "剪切", "Cut")))?)
+        .item(&PredefinedMenuItem::copy(app, Some(m("拷貝", "拷贝", "Copy")))?)
+        .item(&PredefinedMenuItem::paste(app, Some(m("貼上", "粘贴", "Paste")))?)
+        .item(&item("select_all", m("全選", "全选", "Select All"), Some("CmdOrCtrl+A"))?)
         .separator()
-        .item(&item("find", "尋找…", Some("CmdOrCtrl+F"))?)
-        .item(&item("replace", "取代…", Some("CmdOrCtrl+Alt+F"))?)
-        .item(&item("find_next", "尋找下一個", Some("CmdOrCtrl+G"))?)
-        .item(&item("find_previous", "尋找上一個", Some("CmdOrCtrl+Shift+G"))?)
+        .item(&item("find", m("尋找…", "查找…", "Find…"), Some("CmdOrCtrl+F"))?)
+        .item(&item("replace", m("取代…", "替换…", "Replace…"), Some("CmdOrCtrl+Alt+F"))?)
+        .item(&item("find_next", m("尋找下一個", "查找下一个", "Find Next"), Some("CmdOrCtrl+G"))?)
+        .item(&item("find_previous", m("尋找上一個", "查找上一个", "Find Previous"), Some("CmdOrCtrl+Shift+G"))?)
         .build()?;
-    let insert = SubmenuBuilder::new(app, "插入")
-        .item(&item("new_slide", "新增投影片", Some("CmdOrCtrl+Shift+N"))?)
-        .item(&item("duplicate_slide", "複製投影片", None)?)
+    let insert = SubmenuBuilder::new(app, m("插入", "插入", "Insert"))
+        .item(&item("new_slide", m("新增投影片", "新建幻灯片", "New Slide"), Some("CmdOrCtrl+Shift+N"))?)
+        .item(&item("duplicate_slide", m("複製投影片", "复制幻灯片", "Duplicate Slide"), None)?)
         .separator()
-        .item(&item("insert_picture", "圖片…", None)?)
-        .item(&item("insert_text_box", "文字方塊", None)?)
-        .item(&item("insert_rect", "矩形", None)?)
-        .item(&item("insert_ellipse", "橢圓", None)?)
+        .item(&item("insert_picture", m("圖片…", "图片…", "Picture…"), None)?)
+        .item(&item("insert_text_box", m("文字方塊", "文本框", "Text Box"), None)?)
+        .item(&item("insert_rect", m("矩形", "矩形", "Rectangle"), None)?)
+        .item(&item("insert_ellipse", m("橢圓", "椭圆", "Oval"), None)?)
         .separator()
-        .item(&item("insert_link", "超連結…", Some("CmdOrCtrl+K"))?)
+        .item(&item("insert_link", m("超連結…", "超链接…", "Hyperlink…"), Some("CmdOrCtrl+K"))?)
         .build()?;
-    let arrange = SubmenuBuilder::new(app, "排列")
-        .item(&item("group", "組成群組", Some("CmdOrCtrl+Alt+G"))?)
-        .item(&item("ungroup", "取消群組", Some("CmdOrCtrl+Alt+Shift+G"))?)
+    let arrange = SubmenuBuilder::new(app, m("排列", "排列", "Arrange"))
+        .item(&item("group", m("組成群組", "组合", "Group"), Some("CmdOrCtrl+Alt+G"))?)
+        .item(&item("ungroup", m("取消群組", "取消组合", "Ungroup"), Some("CmdOrCtrl+Alt+Shift+G"))?)
         .build()?;
-    let view = SubmenuBuilder::new(app, "檢視")
-        .item(&item("zoom_in", "放大", Some("CmdOrCtrl+="))?)
-        .item(&item("zoom_out", "縮小", Some("CmdOrCtrl+-"))?)
-        .item(&item("zoom_fit", "符合視窗大小", Some("CmdOrCtrl+0"))?)
+    let view = SubmenuBuilder::new(app, m("檢視", "视图", "View"))
+        .item(&item("zoom_in", m("放大", "放大", "Zoom In"), Some("CmdOrCtrl+="))?)
+        .item(&item("zoom_out", m("縮小", "缩小", "Zoom Out"), Some("CmdOrCtrl+-"))?)
+        .item(&item("zoom_fit", m("符合視窗大小", "适应窗口大小", "Fit to Window"), Some("CmdOrCtrl+0"))?)
         .separator()
-        .item(&item("toggle_notes", "備忘稿", None)?)
+        .item(&item("toggle_notes", m("備忘稿", "备注", "Notes"), None)?)
         .build()?;
-    let show = SubmenuBuilder::new(app, "投影片放映")
-        .item(&item("show_from_beginning", "從頭播放", Some("CmdOrCtrl+Shift+Enter"))?)
-        .item(&item("show_from_current", "從目前的投影片播放", Some("CmdOrCtrl+Enter"))?)
-        .item(&item("show_presenter", "簡報者檢視", Some("Alt+Enter"))?)
+    let show = SubmenuBuilder::new(app, m("投影片放映", "幻灯片放映", "Slide Show"))
+        .item(&item("show_from_beginning", m("從頭播放", "从头开始", "Play from Start"), Some("CmdOrCtrl+Shift+Enter"))?)
+        .item(&item("show_from_current", m("從目前的投影片播放", "从当前幻灯片开始", "Play from Current Slide"), Some("CmdOrCtrl+Enter"))?)
+        .item(&item("show_presenter", m("簡報者檢視", "演示者视图", "Presenter View"), Some("Alt+Enter"))?)
         .build()?;
-    let window = SubmenuBuilder::new(app, "視窗")
-        .item(&PredefinedMenuItem::minimize(app, Some("縮到最小"))?)
-        .item(&PredefinedMenuItem::fullscreen(app, Some("進入全螢幕"))?)
+    let window = SubmenuBuilder::new(app, m("視窗", "窗口", "Window"))
+        .item(&PredefinedMenuItem::minimize(app, Some(m("縮到最小", "最小化", "Minimize")))?)
+        .item(&PredefinedMenuItem::fullscreen(app, Some(m("進入全螢幕", "进入全屏幕", "Enter Full Screen")))?)
         .build()?;
     MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &insert, &arrange, &view, &show, &window]).build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before anything that names things in the interface language (menus, new decks, errors).
+    set_lang(detect_lang());
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(FontService::new())

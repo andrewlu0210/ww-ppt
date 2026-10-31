@@ -1,7 +1,7 @@
 //! What screen readers get: the current slide as a list of described objects
 //! in reading order, and short sentences to announce.
 
-use ppt_model::{Shape, ShapeId, ShapeKind, Slide, Xfrm};
+use ppt_model::{Shape, ShapeId, ShapeKind, Slide, Xfrm, lang, plural, tr};
 
 use crate::Editor;
 
@@ -41,18 +41,24 @@ pub struct A11yItem {
 
 /// What kind of object `s` is, in words.
 fn kind_word(s: &Shape) -> &'static str {
+    let l = lang();
     match &s.kind {
-        ShapeKind::Picture { .. } => "圖片",
-        ShapeKind::Table(_) => "表格",
-        ShapeKind::Chart(_) => "圖表",
+        ShapeKind::Picture { .. } => l.pick("圖片", "图片", "Picture"),
+        ShapeKind::Table(_) => l.pick("表格", "表格", "Table"),
+        ShapeKind::Chart(_) => l.pick("圖表", "图表", "Chart"),
         ShapeKind::Diagram { .. } => "SmartArt",
-        ShapeKind::Opaque { .. } => "物件",
-        ShapeKind::Shape if s.geometry.is_line() => "線條",
-        ShapeKind::Shape if s.placeholder.as_ref().is_some_and(|p| matches!(p.kind.as_str(), "title" | "ctrTitle")) => "標題",
-        ShapeKind::Shape if s.placeholder.is_some() => "文字版面配置區",
-        ShapeKind::Shape if s.fill.is_none() && s.line.is_none() && s.text.is_some() => "文字方塊",
-        ShapeKind::Shape => "圖案",
+        ShapeKind::Opaque { .. } => l.pick("物件", "对象", "Object"),
+        ShapeKind::Shape if s.geometry.is_line() => l.pick("線條", "线条", "Line"),
+        ShapeKind::Shape if s.placeholder.as_ref().is_some_and(|p| matches!(p.kind.as_str(), "title" | "ctrTitle")) => l.pick("標題", "标题", "Title"),
+        ShapeKind::Shape if s.placeholder.is_some() => l.pick("文字版面配置區", "文本占位符", "Text Placeholder"),
+        ShapeKind::Shape if s.fill.is_none() && s.line.is_none() && s.text.is_some() => l.pick("文字方塊", "文本框", "Text Box"),
+        ShapeKind::Shape => l.pick("圖案", "形状", "Shape"),
     }
+}
+
+/// Kind and name, e.g. "圖片「標誌」" / "Picture “Logo”".
+fn labeled(s: &Shape) -> String {
+    tr("{}「{}」", "{}“{}”", "{} “{}”", &[&kind_word(s), &s.name])
 }
 
 fn plain(s: &Shape) -> String {
@@ -72,17 +78,17 @@ pub fn slide_title(slide: &Slide) -> String {
 
 /// One line about a shape, e.g. "圖案「Oval 3」，替代文字：…，文字：Ellipse".
 pub fn describe(s: &Shape) -> String {
-    let mut out = format!("{}「{}」", kind_word(s), s.name);
+    let mut out = labeled(s);
     if s.access.decorative {
-        out.push_str("，裝飾用");
+        out.push_str(&tr("，裝飾用", "，装饰性", ", decorative", &[]));
     } else if !s.access.alt_text.is_empty() {
-        out.push_str(&format!("，替代文字：{}", s.access.alt_text));
+        out.push_str(&tr("，替代文字：{}", "，替换文字：{}", ", alt text: {}", &[&s.access.alt_text]));
     }
     let text = plain(s).replace('\n', " ");
     if !text.is_empty() {
         let short: String = text.chars().take(80).collect();
         let more = if text.chars().count() > 80 { "…" } else { "" };
-        out.push_str(&format!("，文字：{short}{more}"));
+        out.push_str(&tr("，文字：{}{}", "，文本：{}{}", ", text: {}{}", &[&short, &more]));
     }
     out
 }
@@ -125,7 +131,7 @@ impl Editor {
                 A11yItem {
                     id: s.id,
                     role,
-                    label: format!("{}「{}」", kind_word(s), s.name),
+                    label: labeled(s),
                     alt_text,
                     paragraphs,
                     cells,
@@ -138,17 +144,17 @@ impl Editor {
 
     /// "投影片 3／4：標題" (plus whether it is hidden), for slide changes.
     pub fn describe_slide(&self) -> String {
-        let Some(slide) = self.pres.slides.get(self.slide) else { return "沒有投影片".to_string() };
-        let mut out = format!("投影片 {}／{}", self.slide + 1, self.pres.slides.len());
+        let Some(slide) = self.pres.slides.get(self.slide) else { return tr("沒有投影片", "没有幻灯片", "No slides", &[]) };
+        let mut out = tr("投影片 {}／{}", "幻灯片 {}/{}", "Slide {} of {}", &[&(self.slide + 1), &self.pres.slides.len()]);
         let title = slide_title(slide);
         if !title.is_empty() {
-            out.push_str(&format!("：{title}"));
+            out.push_str(&tr("：{}", "：{}", ": {}", &[&title]));
         }
         if slide.hidden {
-            out.push_str("，已隱藏");
+            out.push_str(&tr("，已隱藏", "，已隐藏", ", hidden", &[]));
         }
         let n = slide.shapes.iter().filter(|s| !s.access.hidden && !matches!(s.kind, ShapeKind::Opaque { .. })).count();
-        out.push_str(&format!("，{n} 個物件"));
+        out.push_str(&tr("，{} 個物件", "，{} 个对象", plural(n, ", {} object", ", {} objects"), &[&n]));
         out
     }
 
@@ -157,15 +163,16 @@ impl Editor {
         if let Some(edit) = &self.text
             && let Some(s) = self.pres.shape(self.slide, edit.shape)
         {
-            return format!("編輯文字：{}「{}」", kind_word(s), s.name);
+            return tr("編輯文字：{}", "编辑文本：{}", "Editing text: {}", &[&labeled(s)]);
         }
         if let Some(g) = self.selection_group() {
-            return format!("已選取 群組，{} 個物件", self.members(g).len());
+            let n = self.members(g).len();
+            return tr("已選取 群組，{} 個物件", "已选择 组合，{} 个对象", plural(n, "Selected group, {} object", "Selected group, {} objects"), &[&n]);
         }
         match self.selected_shapes().as_slice() {
             [] => String::new(),
-            [s] => format!("已選取 {}", describe(s)),
-            many => format!("已選取 {} 個物件", many.len()),
+            [s] => tr("已選取 {}", "已选择 {}", "Selected {}", &[&describe(s)]),
+            many => tr("已選取 {} 個物件", "已选择 {} 个对象", "Selected {} objects", &[&many.len()]),
         }
     }
 }

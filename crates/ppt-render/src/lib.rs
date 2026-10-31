@@ -387,7 +387,7 @@ pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
         let mut body = TextBody { anchor: ppt_model::Anchor::Middle, ..Default::default() };
         body.paragraphs[0].align = ppt_model::Align::Center;
         body.paragraphs[0].end_style = ppt_model::RunStyle { size_pt: 14.0, color: Color::rgb(0x80, 0x80, 0x80), ..pres.default_run_style() };
-        body.set_plain_text(&format!("{label}（尚未支援編輯）"));
+        body.set_plain_text(&ppt_model::tr("{}（尚未支援編輯）", "{}（尚不支持编辑）", "{} (editing not supported yet)", &[label]));
         draw_body(scene, cx.engine, &body, &TextFrame::plain(*xf), view);
         return;
     }

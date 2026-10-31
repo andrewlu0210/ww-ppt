@@ -19,6 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 libc = "0.2"
 ppt-fonts.workspace = true
+ppt-model.workspace = true
 ppt-ooxml.workspace = true
 ppt-video.workspace = true
 

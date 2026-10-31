@@ -1101,8 +1101,9 @@ fn group_xml(members: &[Shape], out: &mut SlideOut) -> String {
         out.written.insert(g, id);
     }
     let inner: String = members.iter().map(|s| shape_xml(s, out)).collect();
+    let group = ppt_model::lang().pick("群組", "组合", "Group");
     format!(
-        r#"<p:grpSp><p:nvGrpSpPr><p:cNvPr id="{id}" name="群組 {id}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="{x0}" y="{y0}"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="{x0}" y="{y0}"/><a:chExt cx="{w}" cy="{h}"/></a:xfrm></p:grpSpPr>{inner}</p:grpSp>"#
+        r#"<p:grpSp><p:nvGrpSpPr><p:cNvPr id="{id}" name="{group} {id}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="{x0}" y="{y0}"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="{x0}" y="{y0}"/><a:chExt cx="{w}" cy="{h}"/></a:xfrm></p:grpSpPr>{inner}</p:grpSp>"#
     )
 }
 

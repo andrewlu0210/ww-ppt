@@ -1,7 +1,7 @@
 //! 檢查協助工具: problems that make the deck hard to use with assistive
 //! technology, like PowerPoint's accessibility checker.
 
-use ppt_model::{Background, Color, Paint, Shape, ShapeId, ShapeKind, Slide};
+use ppt_model::{Background, Color, Paint, Shape, ShapeId, ShapeKind, Slide, lang, tr};
 
 use crate::Editor;
 use crate::a11y::slide_title;
@@ -110,23 +110,24 @@ impl Editor {
         for (i, slide) in self.pres.slides.iter().enumerate() {
             let push = |out: &mut Vec<Issue>, shape: Option<ShapeId>, severity, kind, message: String| out.push(Issue { slide: i, shape, severity, kind, message });
             if titles[i].is_empty() {
-                push(&mut out, None, Severity::Error, IssueKind::MissingTitle, format!("投影片 {}", i + 1));
+                push(&mut out, None, Severity::Error, IssueKind::MissingTitle, tr("投影片 {}", "幻灯片 {}", "Slide {}", &[&(i + 1)]));
             } else if let Some(first) = titles[..i].iter().position(|t| *t == titles[i]) {
-                push(&mut out, None, Severity::Warning, IssueKind::DuplicateTitle, format!("投影片 {}：「{}」與投影片 {} 相同", i + 1, titles[i], first + 1));
+                push(&mut out, None, Severity::Warning, IssueKind::DuplicateTitle, tr("投影片 {}：「{}」與投影片 {} 相同", "幻灯片 {}：“{}”与幻灯片 {} 相同", "Slide {}: “{}” is the same as slide {}", &[&(i + 1), &titles[i], &(first + 1)]));
             }
             let bg = self.pres.slide_background(slide);
             for (k, s) in slide.shapes.iter().enumerate().filter(|(_, s)| !s.access.hidden) {
-                let named = |what: &str| format!("{what}「{}」", s.name);
+                let named = |what: &str| tr("{}「{}」", "{}“{}”", "{} “{}”", &[&what, &s.name]);
+                let l = lang();
                 match &s.kind {
                     ShapeKind::Picture { .. } | ShapeKind::Chart(_) | ShapeKind::Diagram { .. } if s.access.alt_text.trim().is_empty() && !s.access.decorative => {
                         let what = match s.kind {
-                            ShapeKind::Picture { .. } => "圖片",
-                            ShapeKind::Chart(_) => "圖表",
+                            ShapeKind::Picture { .. } => l.pick("圖片", "图片", "Picture"),
+                            ShapeKind::Chart(_) => l.pick("圖表", "图表", "Chart"),
                             _ => "SmartArt",
                         };
                         push(&mut out, Some(s.id), Severity::Error, IssueKind::MissingAltText, named(what));
                     }
-                    ShapeKind::Table(t) if !t.flags.first_row => push(&mut out, Some(s.id), Severity::Warning, IssueKind::NoHeaderRow, named("表格")),
+                    ShapeKind::Table(t) if !t.flags.first_row => push(&mut out, Some(s.id), Severity::Warning, IssueKind::NoHeaderRow, named(l.pick("表格", "表格", "Table"))),
                     _ => {}
                 }
                 // Table and SmartArt text sits on their own cell and shape fills.
@@ -146,7 +147,7 @@ impl Editor {
                         .filter(|(ratio, need)| ratio < need)
                         .min_by(|a, b| a.0.total_cmp(&b.0));
                     if let Some((ratio, _)) = worst {
-                        push(&mut out, Some(s.id), Severity::Warning, IssueKind::LowContrast, format!("{}，對比 {ratio:.1}:1", named("文字")));
+                        push(&mut out, Some(s.id), Severity::Warning, IssueKind::LowContrast, tr("{}，對比 {}:1", "{}，对比度 {}:1", "{}, contrast {}:1", &[&named(l.pick("文字", "文本", "Text")), &format!("{ratio:.1}")]));
                     }
                 }
             }
@@ -168,7 +169,7 @@ fn reading_order_issue(slide: &Slide, index: usize) -> Option<String> {
     }
     let is_title = |s: &Shape| s.placeholder.as_ref().is_some_and(|p| matches!(p.kind.as_str(), "title" | "ctrTitle"));
     if readable.iter().position(|s| is_title(s)).is_some_and(|p| p > 0) {
-        return Some(format!("投影片 {}：標題不是第一個被讀出的物件", index + 1));
+        return Some(tr("投影片 {}：標題不是第一個被讀出的物件", "幻灯片 {}：标题不是第一个被读取的对象", "Slide {}: the title is not the first object read", &[&(index + 1)]));
     }
     // Rows by top edge (within a fifth of the shorter shape's height), then left to right.
     let mut visual = readable.clone();
@@ -177,7 +178,7 @@ fn reading_order_issue(slide: &Slide, index: usize) -> Option<String> {
         if (a.xfrm.y - b.xfrm.y).abs() <= tol { a.xfrm.x.cmp(&b.xfrm.x) } else { a.xfrm.y.cmp(&b.xfrm.y) }
     });
     let same = visual.iter().zip(&readable).all(|(a, b)| a.id == b.id);
-    (!same).then(|| format!("投影片 {}：閱讀順序和畫面上的位置不一致", index + 1))
+    (!same).then(|| tr("投影片 {}：閱讀順序和畫面上的位置不一致", "幻灯片 {}：阅读顺序与屏幕上的位置不一致", "Slide {}: reading order differs from the layout on screen", &[&(index + 1)]))
 }
 
 #[cfg(test)]

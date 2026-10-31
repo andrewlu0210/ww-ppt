@@ -521,14 +521,15 @@ impl Parser<'_> {
                         out.push(shape);
                         continue;
                     }
+                    let l = ppt_model::lang();
                     let label = if uri.ends_with("/table") {
-                        "表格"
+                        l.pick("表格", "表格", "Table")
                     } else if uri.ends_with("/chart") {
-                        "圖表"
+                        l.pick("圖表", "图表", "Chart")
                     } else if uri.ends_with("/diagram") {
                         "SmartArt"
                     } else {
-                        "物件"
+                        l.pick("物件", "对象", "Object")
                     };
                     let mut shape = self.opaque(n, cx, group, label);
                     if uri.ends_with("/chart")
@@ -612,7 +613,7 @@ impl Parser<'_> {
     fn table_frame(&mut self, n: Node, cx: &ShapeCx, group: GroupTf) -> Option<Shape> {
         let tbl = path(n, &["graphic", "graphicData", "tbl"])?;
         let xfrm = group.apply(child(n, "xfrm").and_then(parse_xfrm)?);
-        let name = path(n, &["nvGraphicFramePr", "cNvPr"]).and_then(|c| c.attribute("name")).unwrap_or("表格").to_string();
+        let name = path(n, &["nvGraphicFramePr", "cNvPr"]).and_then(|c| c.attribute("name")).unwrap_or(ppt_model::lang().pick("表格", "表格", "Table")).to_string();
         let style = table::style_id(tbl).and_then(|id| self.table_style(cx.master, &id));
         let mut shape = Shape::new(self.pres.alloc_id(), name, xfrm);
         shape.kind = ShapeKind::Table(Box::new(table::table(tbl, cx.master, style, cx.rels)));

@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 pub use bullet::{Bullet, BulletKind};
-pub use lang::{Lang, lang, set_lang};
+pub use lang::{Lang, lang, plural, set_lang, tr};
 pub use table::Table;
 pub use transition::{Transition, TransitionKind};
 

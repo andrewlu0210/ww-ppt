@@ -445,7 +445,7 @@ impl Editor {
         let h = NEW_ROW_HEIGHT * rows as i64;
         let xfrm = Xfrm::new((self.pres.slide_width - col_w * cols as i64) / 2, (self.pres.slide_height - h) / 2, col_w * cols as i64, h);
         let id = self.pres.alloc_id();
-        let mut shape = Shape::new(id, format!("表格 {}", id.0), xfrm);
+        let mut shape = Shape::new(id, format!("{} {}", ppt_model::lang().pick("表格", "表格", "Table"), id.0), xfrm);
         shape.kind = ShapeKind::Table(Box::new(table));
         self.pres.slides[self.slide].shapes.push(shape);
         self.layout_table(engine, id);
