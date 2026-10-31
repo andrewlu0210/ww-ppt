@@ -32,9 +32,10 @@ uv run --no-project --with python-pptx python scripts/make_sample_pptx.py sample
 ## 打包與試用
 
 ```sh
-npm run wasm
-npm run tauri build    # → target/release/bundle/macos/Want-Point.app 與 bundle/dmg/*.dmg
+npm run tauri build    # 含 WASM 編譯 → target/release/bundle/macos/Want-Point.app 與 bundle/dmg/*.dmg
 ```
+
+打包時整個 `.app` 會做 ad-hoc 簽章（`tauri.conf.json` 的 `signingIdentity: "-"`），少了它，別人下載後 macOS 會說 App「已損毀」而無法開啟。最低系統版本設為 macOS 26。
 
 目前沒有 Developer ID 簽章與 Apple 公證，自己這台 Mac 打包出來的 App 可以直接開。透過網路、AirDrop 或通訊軟體傳給別人時，macOS 會擋下第一次開啟（「無法驗證開發者」或「Apple 無法檢查是否含有惡意軟體」），請對方用下列任一方式開啟：
 

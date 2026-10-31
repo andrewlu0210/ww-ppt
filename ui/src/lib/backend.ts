@@ -73,6 +73,12 @@ export function showError(text: string): Promise<unknown> {
   return message(text, { title: APP_NAME, kind: "error" });
 }
 
+/** Files macOS asks to open while the app is running (Finder, Open With, Dock). */
+export function onOpenFiles(handler: (paths: string[]) => void): Promise<UnlistenFn> {
+  if (!inTauri) return Promise.resolve(() => {});
+  return listen<string[]>("open-files", (e) => handler(e.payload));
+}
+
 export function onMenu(handler: (id: string) => void): Promise<UnlistenFn> {
   if (!inTauri) return Promise.resolve(() => {});
   return listen<string>("menu", (e) => handler(e.payload));

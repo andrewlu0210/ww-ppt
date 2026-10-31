@@ -9,7 +9,8 @@ mod video;
 use ppt_fonts::{FontService, ResolvedFont};
 use tauri::ipc::Response;
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{Emitter, Manager, State};
+use std::sync::Mutex;
+use tauri::{Emitter, Manager, RunEvent, State};
 
 /// Returns file contents as raw bytes (no JSON/base64 round trip).
 #[tauri::command]
@@ -83,10 +84,48 @@ fn resolve_font(fonts: State<'_, FontService>, family: String) -> Option<Resolve
     fonts.resolve(&family)
 }
 
-/// Paths passed on the command line (e.g. `open -a ww-ppt deck.pptx` in dev).
+/// Files macOS asked us to open (Finder double-click, Open With, dropping on
+/// the Dock icon). Held until the frontend is ready; after that each request
+/// is sent as an `open-files` event.
+#[derive(Default)]
+struct OpenRequests {
+    ready: bool,
+    pending: Vec<String>,
+}
+
+fn is_pptx(path: &str) -> bool {
+    path.to_lowercase().ends_with(".pptx")
+}
+
+/// Paths passed on the command line (e.g. `npm run tauri dev -- -- -- deck.pptx`)
+/// plus any open requests that arrived before the frontend was ready.
 #[tauri::command]
-fn startup_files() -> Vec<String> {
-    std::env::args().skip(1).filter(|a| a.to_lowercase().ends_with(".pptx")).collect()
+fn startup_files(requests: State<'_, Mutex<OpenRequests>>) -> Vec<String> {
+    let mut requests = requests.lock().unwrap();
+    requests.ready = true;
+    std::env::args().skip(1).filter(|a| is_pptx(a)).chain(requests.pending.drain(..)).collect()
+}
+
+fn on_open_urls(app: &tauri::AppHandle, urls: &[tauri::Url]) {
+    let paths: Vec<String> = urls
+        .iter()
+        .filter_map(|u| u.to_file_path().ok())
+        .filter_map(|p| p.to_str().map(str::to_owned))
+        .filter(|p| is_pptx(p))
+        .collect();
+    if paths.is_empty() {
+        return;
+    }
+    let state = app.state::<Mutex<OpenRequests>>();
+    let mut requests = state.lock().unwrap();
+    if requests.ready {
+        let _ = app.emit("open-files", paths);
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.set_focus();
+        }
+    } else {
+        requests.pending.extend(paths);
+    }
 }
 
 /// The app's display name: "旺-Point" when the system's first language is Chinese.
@@ -187,6 +226,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(FontService::new())
         .manage(ShowDeck::default())
+        .manage(Mutex::new(OpenRequests::default()))
         .manage(video::VideoExport::default())
         .setup(|app| {
             let menu = build_menu(app)?;
@@ -224,6 +264,11 @@ pub fn run() {
             automation::automation_log,
             automation::automation_write
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Want-Point");
+        .build(tauri::generate_context!())
+        .expect("error while building Want-Point")
+        .run(|app, event| {
+            if let RunEvent::Opened { urls } = &event {
+                on_open_urls(app, urls);
+            }
+        });
 }

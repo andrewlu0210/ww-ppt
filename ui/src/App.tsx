@@ -19,6 +19,7 @@ import {
   inTauri,
   listFonts,
   onMenu,
+  onOpenFiles,
   pickImage,
   pickPptx,
   pickSavePath,
@@ -1298,6 +1299,15 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [run]);
+
+  // Files opened from Finder while running replace the current deck, like File > Open.
+  useEffect(() => {
+    const unlisten = onOpenFiles(async ([path]) => {
+      if (showingRef.current || !path) return;
+      if (await confirmDiscard()) await openPath(path);
+    });
+    return () => void unlisten.then((f) => f());
+  }, [confirmDiscard, openPath]);
 
   // Unsaved changes: window title marker and a prompt before closing.
   useEffect(() => {

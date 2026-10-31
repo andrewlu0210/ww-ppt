@@ -158,9 +158,9 @@ ww-ppt/
 
 ### 1. 試用版打包與驗證
 
-- [ ] **打包**：用 `tauri build` 產生 `.app` 與 `.dmg`，確認中文系統的 Finder／Dock／選單列顯示「旺-Point」。
-- [ ] **`.pptx` 檔案關聯**：`tauri.conf.json` 已宣告 `fileAssociations`；打包後確認 Finder 點兩下能用 Want-Point 開啟。
-- [ ] **冷啟動時間量測（基準）**：用打包版量，目標 < 1 秒（見「五、效能目標」），記下數字當之後比較的基準。
+- [x] **打包**：`npm run tauri build` 產生 `.app`（24.6 MB）與 `.dmg`（11.2 MB）。整個 bundle 做 ad-hoc 簽章、最低系統 macOS 26；Info.plist 加 `LSHasLocalizedDisplayName`，中文系統的 Finder、選單列、程序名稱都顯示「旺-Point」。
+- [x] **`.pptx` 檔案關聯**：補上 UTI `org.openxmlformats.presentationml.presentation`；處理 macOS 的開檔事件（`RunEvent::Opened`），App 未啟動或已開啟時都能從 Finder／「打開檔案的應用程式」開檔。系統預設仍是 PowerPoint，要預設用 Want-Point 需在 Finder「取得資訊」裡改。
+- [x] **啟動時間量測（基準）**：打包版從 `open` 到編輯器就緒約 630–690 ms（2026-10-31，macOS 27.0.1，6 次）。新版本第一次啟動因系統安全掃描約 3.6 秒，之後恢復正常。未清除磁碟快取，重開機後的真正冷啟動尚未量。
 - [ ] **朋友試用**：照 README 的步驟在另一台 Mac 開啟，確認流程可行。
 
 ### 2. 介面外觀（淺色、深色、跟隨系統）
