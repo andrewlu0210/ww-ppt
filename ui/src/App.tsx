@@ -31,6 +31,7 @@ import {
   recoveryRead,
   recoveryWrite,
   writeFile,
+  APP_NAME,
 } from "./lib/backend";
 import { startAutomation } from "./lib/automation";
 import { cyclePanes } from "./lib/keyboard";
@@ -1301,7 +1302,7 @@ export function App() {
   // Unsaved changes: window title marker and a prompt before closing.
   useEffect(() => {
     if (!inTauri) return;
-    void getCurrentWindow().setTitle(`${dirty ? "● " : ""}${doc.name} - ww-ppt`);
+    void getCurrentWindow().setTitle(`${dirty ? "● " : ""}${doc.name} - ${APP_NAME}`);
   }, [dirty, doc.name]);
   useEffect(() => {
     if (!inTauri) return;
@@ -1359,7 +1360,7 @@ export function App() {
     <div className="app">
       <header className="title-bar" data-tauri-drag-region>
         <span className="app-name" data-tauri-drag-region>
-          ww-ppt
+          {APP_NAME}
         </span>
         <span className="doc-name" data-tauri-drag-region>
           {doc.name}

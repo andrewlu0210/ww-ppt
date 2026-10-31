@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ww-ppt",
+  "productName": "Want-Point",
   "version": "0.1.0",
   "identifier": "com.ww.ppt",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ww-ppt",
+        "title": "Want-Point",
         "width": 1280,
         "height": 820,
         "minWidth": 900,
@@ -32,6 +32,13 @@
     "targets": ["app", "dmg"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.png"],
     "category": "Productivity",
+    "macOS": {
+      "files": {
+        "Resources/en.lproj/InfoPlist.strings": "./macos/en.lproj/InfoPlist.strings",
+        "Resources/zh-Hant.lproj/InfoPlist.strings": "./macos/zh-Hant.lproj/InfoPlist.strings",
+        "Resources/zh-Hans.lproj/InfoPlist.strings": "./macos/zh-Hans.lproj/InfoPlist.strings"
+      }
+    },
     "fileAssociations": [
       {
         "ext": ["pptx"],

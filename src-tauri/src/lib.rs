@@ -1,4 +1,4 @@
-//! Native side of ww-ppt: file and font access plus macOS integration.
+//! Native side of Want-Point: file and font access plus macOS integration.
 //! The editor itself runs in the webview (see `crates/ppt-wasm`).
 
 mod automation;
@@ -8,7 +8,7 @@ mod video;
 
 use ppt_fonts::{FontService, ResolvedFont};
 use tauri::ipc::Response;
-use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager, State};
 
 /// Returns file contents as raw bytes (no JSON/base64 round trip).
@@ -89,7 +89,20 @@ fn startup_files() -> Vec<String> {
     std::env::args().skip(1).filter(|a| a.to_lowercase().ends_with(".pptx")).collect()
 }
 
+/// The app's display name: "旺-Point" when the system's first language is Chinese.
+fn app_name() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        let langs = objc2_foundation::NSLocale::preferredLanguages();
+        if langs.firstObject().is_some_and(|l| l.to_string().starts_with("zh")) {
+            return "旺-Point";
+        }
+    }
+    "Want-Point"
+}
+
 fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    let name = app_name();
     let item = |id: &str, text: &str, accel: Option<&str>| {
         let b = MenuItemBuilder::with_id(id, text);
         match accel {
@@ -97,13 +110,14 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
             None => b.build(app),
         }
     };
-    let app_menu = SubmenuBuilder::new(app, "ww-ppt")
-        .item(&PredefinedMenuItem::about(app, Some("關於 ww-ppt"), None)?)
+    let about = AboutMetadata { name: Some(name.into()), ..Default::default() };
+    let app_menu = SubmenuBuilder::new(app, name)
+        .item(&PredefinedMenuItem::about(app, Some(&format!("關於 {name}")), Some(about))?)
         .separator()
-        .item(&PredefinedMenuItem::hide(app, Some("隱藏 ww-ppt"))?)
+        .item(&PredefinedMenuItem::hide(app, Some(&format!("隱藏 {name}")))?)
         .item(&PredefinedMenuItem::hide_others(app, Some("隱藏其他"))?)
         .separator()
-        .item(&PredefinedMenuItem::quit(app, Some("結束 ww-ppt"))?)
+        .item(&PredefinedMenuItem::quit(app, Some(&format!("結束 {name}")))?)
         .build()?;
     let file = SubmenuBuilder::new(app, "檔案")
         .item(&item("new", "新增簡報", Some("CmdOrCtrl+N"))?)
@@ -211,5 +225,5 @@ pub fn run() {
             automation::automation_write
         ])
         .run(tauri::generate_context!())
-        .expect("error while running ww-ppt");
+        .expect("error while running Want-Point");
 }

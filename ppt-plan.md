@@ -160,3 +160,12 @@ ww-ppt/
 - [ ] **Developer ID 簽章與公證**：需要 Apple Developer 帳號與 Developer ID Application 憑證；簽章後送 notarization 並 staple，別人下載後才不會被 macOS 擋下。
 - [ ] **`.pptx` 檔案關聯**：在 `tauri.conf.json` 宣告 `.pptx` 的 UTI／文件類型，讓 Finder 點兩下可用 ww-ppt 開啟。
 - [ ] **冷啟動時間量測**：用正式打包的版本量，目標 < 1 秒（見「五、效能目標」）。
+
+多語系（繁體中文、简体中文、English）：
+
+- [ ] **翻譯架構**：前端導入翻譯套件（例如 i18next），依系統語言選語系，找不到對應語系時退回 English；`APP_NAME` 改由同一套機制決定。
+- [ ] **抽出字串**：把 `ui/src` 與 `src-tauri/src` 裡寫死的中文（Ribbon、對話框、錯誤訊息等）改成翻譯鍵，補齊三種語言的翻譯。
+- [ ] **原生選單**：Rust 端的選單文字依語系切換，沿用 `app_name()` 的語言判斷。
+- [ ] **日期與時間格式**：頁首頁尾日期、簡報者檢視時鐘不再寫死 `zh-TW`，改跟系統語系。
+- [ ] **新簡報預設文字**：「標題 1」、「簡報1」、預設提示文字等依語系產生。
+- [ ] **App 名稱**：已完成。Finder／Dock 用 `src-tauri/macos/*.lproj/InfoPlist.strings`，中文為「旺-Point」，英文為「Want-Point」。

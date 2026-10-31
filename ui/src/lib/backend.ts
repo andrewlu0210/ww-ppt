@@ -56,10 +56,13 @@ export async function pickSavePath(defaultName: string, ext: keyof typeof SAVE_F
   return path.toLowerCase().endsWith(`.${ext}`) ? path : `${path}.${ext}`;
 }
 
+/** The app's display name: "旺-Point" on a Chinese system, matching the native menu. */
+export const APP_NAME = navigator.language.toLowerCase().startsWith("zh") ? "旺-Point" : "Want-Point";
+
 /** "save" | "discard" | "cancel" for a document with unsaved changes. */
 export async function askSaveChanges(name: string): Promise<"save" | "discard" | "cancel"> {
   const result = await message(`要儲存「${name}」的變更嗎？`, {
-    title: "ww-ppt",
+    title: APP_NAME,
     kind: "warning",
     buttons: { yes: "儲存", no: "不要儲存", cancel: "取消" },
   });
@@ -67,7 +70,7 @@ export async function askSaveChanges(name: string): Promise<"save" | "discard" |
 }
 
 export function showError(text: string): Promise<unknown> {
-  return message(text, { title: "ww-ppt", kind: "error" });
+  return message(text, { title: APP_NAME, kind: "error" });
 }
 
 export function onMenu(handler: (id: string) => void): Promise<UnlistenFn> {
@@ -144,7 +147,7 @@ export async function recoveryRead(id: string): Promise<Uint8Array> {
 /** Offers an autosaved copy: "recover", "discard" or "later" (kept for next time). */
 export async function askRecover(info: RecoveryInfo): Promise<"recover" | "discard" | "later"> {
   const when = new Date(info.savedAt).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  const result = await message(`ww-ppt 上次沒有正常結束。要復原「${info.name}」嗎？\n\n自動儲存的版本：${when}`, {
+  const result = await message(`${APP_NAME} 上次沒有正常結束。要復原「${info.name}」嗎？\n\n自動儲存的版本：${when}`, {
     title: "復原文件",
     kind: "warning",
     buttons: { yes: "復原", no: "捨棄", cancel: "稍後再說" },

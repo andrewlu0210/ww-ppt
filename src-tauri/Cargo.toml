@@ -3,7 +3,7 @@ name = "ww-ppt"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ww-ppt presentation editor"
+description = "Want-Point presentation editor"
 
 [lib]
 name = "ww_ppt_lib"
@@ -23,5 +23,5 @@ ppt-ooxml.workspace = true
 ppt-video.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSRange", "NSArray"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSRange", "NSArray", "NSLocale"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSSpellChecker"] }

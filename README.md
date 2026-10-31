@@ -1,4 +1,4 @@
-# ww-ppt
+# Want-Point（旺-Point）
 
 用 Rust + Tauri v2 開發的 macOS 簡報 App，目標是做到和 Microsoft PowerPoint 一樣的操作體驗。架構和階段規劃見 [ppt-plan.md](ppt-plan.md)。
 

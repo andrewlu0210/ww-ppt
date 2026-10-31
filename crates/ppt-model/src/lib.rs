@@ -1,4 +1,4 @@
-//! Document model for ww-ppt.
+//! Document model for Want-Point.
 //!
 //! All slide geometry is stored in EMU (English Metric Units, 914400 per inch),
 //! the native unit of OOXML. Font sizes are stored in points.
@@ -936,7 +936,7 @@ impl Presentation {
         let style = RunStyle { size_pt: 44.0, ..pres.default_run_style() };
         body.paragraphs[0].align = Align::Center;
         body.paragraphs[0].end_style = style;
-        body.set_plain_text("ww-ppt：按兩下即可編輯文字");
+        body.set_plain_text("旺-Point：按兩下即可編輯文字");
         title.text = Some(body);
         slide.shapes.push(title);
         pres.slides.push(slide);

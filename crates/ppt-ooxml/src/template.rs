@@ -262,11 +262,11 @@ pub fn template_package() -> Vec<u8> {
         ),
         (
             "docProps/core.xml".into(),
-            format!(r#"{XML_HEAD}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>簡報</dc:title><dc:creator>ww-ppt</dc:creator></cp:coreProperties>"#),
+            format!(r#"{XML_HEAD}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>簡報</dc:title><dc:creator>Want-Point</dc:creator></cp:coreProperties>"#),
         ),
         (
             "docProps/app.xml".into(),
-            format!(r#"{XML_HEAD}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>ww-ppt</Application><PresentationFormat>寬螢幕</PresentationFormat></Properties>"#),
+            format!(r#"{XML_HEAD}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Want-Point</Application><PresentationFormat>寬螢幕</PresentationFormat></Properties>"#),
         ),
         ("ppt/presentation.xml".into(), presentation()),
         (
