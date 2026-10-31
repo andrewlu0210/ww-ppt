@@ -81,6 +81,8 @@ pub struct App {
     spelling: HashMap<String, (String, Vec<std::ops::Range<usize>>)>,
     /// Gridlines are shown (a viewing preference, not saved with the deck).
     show_grid: bool,
+    /// Behind the slide; see `setWorkspaceColor`.
+    workspace: PColor,
 }
 
 /// A running transition: both slides pre-encoded in slide space.
@@ -227,6 +229,7 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         preview_start_ms: None,
         spelling: HashMap::new(),
         show_grid: false,
+        workspace: WORKSPACE,
     })
 }
 
@@ -1576,6 +1579,15 @@ impl App {
         o
     }
 
+    /// The workspace color behind the slide (`#rrggbb`), following the interface appearance.
+    #[wasm_bindgen(js_name = setWorkspaceColor)]
+    pub fn set_workspace_color(&mut self, color: &str) {
+        if let Some(c) = parse_hex(color) {
+            self.workspace = ppt_render::color(c);
+            self.dirty = true;
+        }
+    }
+
     #[wasm_bindgen(js_name = setShowGrid)]
     pub fn set_show_grid(&mut self, show: bool) {
         self.show_grid = show;
@@ -2571,7 +2583,7 @@ impl App {
         self.last_scene_ms = now_ms() - start;
         let gpu = &mut self.gpu;
         let dev = &gpu.cx.devices[gpu.surface.dev_id];
-        let params = RenderParams { base_color: if self.show.is_some() { PColor::BLACK } else { WORKSPACE }, width: self.width, height: self.height, antialiasing_method: AaConfig::Area };
+        let params = RenderParams { base_color: if self.show.is_some() { PColor::BLACK } else { self.workspace }, width: self.width, height: self.height, antialiasing_method: AaConfig::Area };
         gpu.renderer.render_to_texture(&dev.device, &dev.queue, &self.scene, &gpu.surface.target_view, &params).map_err(js_err)?;
         let texture = match gpu.surface.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => t,

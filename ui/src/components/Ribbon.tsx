@@ -1,3 +1,4 @@
+import type { Appearance } from "../lib/appearance";
 import { useEffect, useState, type ReactNode } from "react";
 import { icons } from "./icons";
 import { ColorPicker } from "./ColorPicker";
@@ -111,9 +112,10 @@ interface Props {
   textPaneOpen: boolean;
   /** The selected object's alternative text, read when the dialog opens. */
   loadAltText: () => AltTextInfo | null;
+  appearance: Appearance;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -638,6 +640,16 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               </div>
               <GridMenu status={status} run={run} />
               <Button icon={icons.notes} label="備忘稿" active={notesOpen} onClick={() => run({ kind: "toggleNotes" })} />
+            </Group>
+            <Group label="外觀">
+              <label className="rb-field">
+                介面
+                <select value={appearance} onChange={(e) => run({ kind: "appearance", value: e.target.value as Appearance })} onMouseDown={(e) => e.stopPropagation()}>
+                  <option value="system">跟隨系統</option>
+                  <option value="light">淺色</option>
+                  <option value="dark">深色</option>
+                </select>
+              </label>
             </Group>
             <Group label="縮放">
               <Button icon={icons.zoomIn} label="放大" onClick={() => run({ kind: "zoom", factor: 1.25 })} />

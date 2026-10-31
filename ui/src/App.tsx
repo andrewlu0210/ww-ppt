@@ -54,6 +54,7 @@ import { A11yMirror } from "./components/A11yMirror";
 import { announce } from "./lib/announce";
 import type { BackgroundInfo, ColorSchemeInfo, FontSchemeInfo, ThemeInfo } from "./components/DesignTab";
 import { setThemePalette } from "./components/ColorPicker";
+import { applyAppearance, cssColor, loadAppearance } from "./lib/appearance";
 
 const THUMB_WIDTH = 320;
 const NOTES_KEY = "ww-ppt.notes";
@@ -246,6 +247,8 @@ export function App() {
     }
     engineRef.current?.setShowGrid(viewPrefs.grid);
   }, [viewPrefs]);
+  const [appearance, setAppearance] = useState(loadAppearance);
+  useEffect(() => applyAppearance(appearance, () => engineRef.current?.setWorkspaceColor(cssColor("--workspace"))), [appearance]);
   const [spellOn, setSpellOn] = useState(loadSpellPref);
   const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; hit: SpellHit; guesses: string[] | null } | null>(null);
   /** Misspellings by checked text, so unchanged texts aren't sent again. */
@@ -854,6 +857,10 @@ export function App() {
         if (c.mode === "normal") focusCanvas();
         return;
       }
+      if (c.kind === "appearance") {
+        setAppearance(c.value);
+        return;
+      }
       if (c.kind === "toggleRuler") {
         setViewPrefs((p) => ({ ...p, ruler: !p.ruler }));
         return;
@@ -1352,6 +1359,7 @@ export function App() {
     async (engine: Engine) => {
       engineRef.current = engine;
       engine.setFallbackFonts([...FALLBACK_FAMILIES, EMOJI_FAMILY]);
+      engine.setWorkspaceColor(cssColor("--workspace"));
       engine.setShowGrid(loadViewPrefs().grid);
       if (!inTauri) setError("目前在瀏覽器中執行：沒有原生字型與檔案存取，請用 npm run tauri dev 啟動。");
       void listFonts().then(setFonts);
@@ -1385,6 +1393,7 @@ export function App() {
         loadBackground={() => (engineRef.current?.background() as BackgroundInfo | undefined) ?? null}
         viewMode={viewMode}
         rulerOn={viewPrefs.ruler}
+        appearance={appearance}
         paneOpen={viewPrefs.pane}
         checkerOpen={viewPrefs.checker}
         textPaneOpen={diagramShown}

@@ -1,3 +1,5 @@
+import type { Appearance } from "./appearance";
+
 // Every user command, dispatched by App.tsx to the engine.
 export type Command =
   | { kind: "open" }
@@ -89,6 +91,7 @@ export type Command =
   | { kind: "toggleNotes" }
   | { kind: "viewMode"; mode: "normal" | "sorter" }
   | { kind: "toggleRuler" }
+  | { kind: "appearance"; value: Appearance }
   | { kind: "selectionPane"; open?: boolean }
   | { kind: "textPane"; open?: boolean }
   | { kind: "smartArt"; command: "addAfter" | "addBefore" | "addChild" | "delete" | "promote" | "demote" | "moveUp" | "moveDown" }

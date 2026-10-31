@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { App } from "../wasm/ppt_wasm";
+import { cssColor, resolvedAppearance } from "../lib/appearance";
 
 /** Ruler thickness in CSS pixels. */
 export const RULER_SIZE = 18;
@@ -23,7 +24,7 @@ export function Rulers({ engine, slideSize }: { engine: App | null; slideSize: [
       const h = top.current;
       const v = left.current;
       if (!h || !v) return;
-      const key = `${info.join(",")}|${h.clientWidth}x${v.clientHeight}|${slideSize}`;
+      const key = `${info.join(",")}|${h.clientWidth}x${v.clientHeight}|${slideSize}|${resolvedAppearance()}`;
       if (key === lastKey) return;
       lastKey = key;
       const [sx, sy, sw, shh] = info;
@@ -59,12 +60,12 @@ function draw(canvas: HTMLCanvasElement, horizontal: boolean, start: number, len
   }
   const pxPerEmu = length / extent;
   const toPx = (emu: number) => start + emu * pxPerEmu;
-  ctx.fillStyle = "#e9e9e9";
+  ctx.fillStyle = cssColor("--ruler-bg");
   ctx.fillRect(0, 0, along, RULER_SIZE);
-  ctx.fillStyle = "#fbfbfb";
+  ctx.fillStyle = cssColor("--ruler-slide");
   ctx.fillRect(start, 2, length, RULER_SIZE - 4);
   if (band) {
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = cssColor("--ruler-band");
     ctx.fillRect(toPx(band[0]), 2, toPx(band[1]) - toPx(band[0]), RULER_SIZE - 4);
     ctx.fillStyle = "#4a7fd6";
     ctx.fillRect(toPx(band[0]) - 0.5, 2, 1, RULER_SIZE - 4);
@@ -77,8 +78,8 @@ function draw(canvas: HTMLCanvasElement, horizontal: boolean, start: number, len
   const center = extent / 2;
   const first = Math.floor(-center / EMU_PER_CM) - 1;
   const last = Math.ceil(center / EMU_PER_CM) + 1;
-  ctx.strokeStyle = "#8a8a8a";
-  ctx.fillStyle = "#555";
+  ctx.strokeStyle = cssColor("--ruler-tick");
+  ctx.fillStyle = cssColor("--ruler-text");
   ctx.font = "9px -apple-system, Helvetica, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
