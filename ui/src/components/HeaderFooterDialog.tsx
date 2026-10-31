@@ -1,3 +1,4 @@
+import { locale, t } from "../i18n";
 import { useState } from "react";
 import { Popover } from "./Popover";
 import type { ReactNode } from "react";
@@ -20,7 +21,7 @@ export interface HeaderFooterChoice {
   all: boolean;
 }
 
-const today = () => new Date().toLocaleDateString("zh-TW", { year: "numeric", month: "2-digit", day: "2-digit" });
+const today = () => new Date().toLocaleDateString(locale, { year: "numeric", month: "2-digit", day: "2-digit" });
 
 function Form({ initial, onApply, close }: { initial: HeaderFooterInfo; onApply: (c: HeaderFooterChoice) => void; close: () => void }) {
   const [dateOn, setDateOn] = useState(initial.date !== "none");
@@ -35,43 +36,43 @@ function Form({ initial, onApply, close }: { initial: HeaderFooterInfo; onApply:
     close();
   };
   return (
-    <div className="hf-dialog" role="dialog" aria-label="頁首及頁尾">
-      <div className="hf-title">投影片包含</div>
+    <div className="hf-dialog" role="dialog" aria-label={t("ribbon.headerFooter")}>
+      <div className="hf-title">{t("hf.include")}</div>
       <label className="hf-row">
         <input type="checkbox" checked={dateOn} onChange={(e) => setDateOn(e.target.checked)} />
-        日期及時間
+        {t("hf.dateTime")}
       </label>
       <div className="hf-indent">
         <label className="hf-row">
           <input type="radio" disabled={!dateOn} checked={auto} onChange={() => setAuto(true)} />
-          自動更新（{today()}）
+          {t("hf.autoUpdate", { date: today() })}
         </label>
         <label className="hf-row">
           <input type="radio" disabled={!dateOn} checked={!auto} onChange={() => setAuto(false)} />
-          固定
+          {t("hf.fixed")}
           <input className="hf-text" disabled={!dateOn || auto} value={fixed} onChange={(e) => setFixed(e.target.value)} />
         </label>
       </div>
       <label className="hf-row">
         <input type="checkbox" checked={number} onChange={(e) => setNumber(e.target.checked)} />
-        投影片編號
+        {t("hf.slideNumber")}
       </label>
       <label className="hf-row">
         <input type="checkbox" checked={footerOn} onChange={(e) => setFooterOn(e.target.checked)} />
-        頁尾
+        {t("hf.footer")}
       </label>
       <div className="hf-indent">
-        <input className="hf-text wide" disabled={!footerOn} value={footer} placeholder="頁尾文字" onChange={(e) => setFooter(e.target.value)} />
+        <input className="hf-text wide" disabled={!footerOn} value={footer} placeholder={t("hf.footerText")} onChange={(e) => setFooter(e.target.value)} />
       </div>
       <label className="hf-row sep">
         <input type="checkbox" checked={skipTitle} onChange={(e) => setSkipTitle(e.target.checked)} />
-        標題投影片中不顯示
+        {t("hf.notOnTitle")}
       </label>
       <div className="hf-buttons">
-        <button onClick={close}>取消</button>
-        <button onClick={() => apply(false)}>套用</button>
+        <button onClick={close}>{t("save.cancel")}</button>
+        <button onClick={() => apply(false)}>{t("hf.apply")}</button>
         <button className="primary" onClick={() => apply(true)}>
-          全部套用
+          {t("trans.applyAll")}
         </button>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useState, type ReactNode } from "react";
 import type { Command } from "../lib/commands";
 import type { Status } from "../lib/status";
@@ -60,25 +61,25 @@ export function SizeGroup({ status, run }: { status: Status; run: (c: Command) =
     run({ kind: "setFrame", ...next });
   };
   return (
-    <Group label="大小與位置">
+    <Group label={t("format.sizePosition")}>
       <div className="rb-col">
-        <NumberField label="高度" unit="公分" step={0.1} value={cm(f?.h)} disabled={!f} onCommit={(v) => set({ h: Math.max(1, v * EMU_PER_CM) })} />
-        <NumberField label="寬度" unit="公分" step={0.1} value={cm(f?.w)} disabled={!f} onCommit={(v) => set({ w: Math.max(1, v * EMU_PER_CM) })} />
-        <NumberField label="旋轉" unit="°" step={1} value={f?.single ? f.rot : undefined} disabled={!f?.single} onCommit={(v) => set({ rot: v })} />
+        <NumberField label={t("design.height")} unit={t("design.cmUnit")} step={0.1} value={cm(f?.h)} disabled={!f} onCommit={(v) => set({ h: Math.max(1, v * EMU_PER_CM) })} />
+        <NumberField label={t("design.width")} unit={t("design.cmUnit")} step={0.1} value={cm(f?.w)} disabled={!f} onCommit={(v) => set({ w: Math.max(1, v * EMU_PER_CM) })} />
+        <NumberField label={t("format.rotation")} unit="°" step={1} value={f?.single ? f.rot : undefined} disabled={!f?.single} onCommit={(v) => set({ rot: v })} />
       </div>
       <div className="rb-col">
-        <NumberField label="水平" unit="公分" step={0.1} value={cm(f?.x)} disabled={!f} onCommit={(v) => set({ x: v * EMU_PER_CM })} />
-        <NumberField label="垂直" unit="公分" step={0.1} value={cm(f?.y)} disabled={!f} onCommit={(v) => set({ y: v * EMU_PER_CM })} />
+        <NumberField label={t("format.horizontal")} unit={t("design.cmUnit")} step={0.1} value={cm(f?.x)} disabled={!f} onCommit={(v) => set({ x: v * EMU_PER_CM })} />
+        <NumberField label={t("format.vertical")} unit={t("design.cmUnit")} step={0.1} value={cm(f?.y)} disabled={!f} onCommit={(v) => set({ y: v * EMU_PER_CM })} />
       </div>
     </Group>
   );
 }
 
 const ROTATIONS: [string, string, Command][] = [
-  ["rotateRight", "向右旋轉 90°", { kind: "rotate", degrees: 90 }],
-  ["rotateLeft", "向左旋轉 90°", { kind: "rotate", degrees: -90 }],
-  ["flipV", "垂直翻轉", { kind: "flip", horizontal: false }],
-  ["flipH", "水平翻轉", { kind: "flip", horizontal: true }],
+  ["rotateRight", t("format.rotateRight"), { kind: "rotate", degrees: 90 }],
+  ["rotateLeft", t("format.rotateLeft"), { kind: "rotate", degrees: -90 }],
+  ["flipV", t("format.flipVertical"), { kind: "flip", horizontal: false }],
+  ["flipH", t("format.flipHorizontal"), { kind: "flip", horizontal: true }],
 ];
 
 /** Rotate and flip menu. */
@@ -86,9 +87,9 @@ export function RotateMenu({ disabled, run }: { disabled: boolean; run: (c: Comm
   return (
     <Popover
       button={(open, toggle) => (
-        <button className={open ? "rb-btn active" : "rb-btn"} disabled={disabled} onMouseDown={keepFocus} onClick={toggle} title="旋轉或翻轉">
+        <button className={open ? "rb-btn active" : "rb-btn"} disabled={disabled} onMouseDown={keepFocus} onClick={toggle} title={t("format.rotateOrFlip")}>
           {icons.rotateRight}
-          <span>旋轉 ▾</span>
+          <span>{t("format.rotateMenu")}</span>
         </button>
       )}
     >
@@ -115,12 +116,12 @@ export function RotateMenu({ disabled, run }: { disabled: boolean; run: (c: Comm
 }
 
 const SHADOWS: [string, string][] = [
-  ["none", "無陰影"],
-  ["bottomRight", "右下方位移"],
-  ["bottom", "下方位移"],
-  ["right", "右方位移"],
-  ["bottomLeft", "左下方位移"],
-  ["center", "置中（柔邊）"],
+  ["none", t("format.noShadow")],
+  ["bottomRight", t("format.offsetBottomRight")],
+  ["bottom", t("format.offsetBottom")],
+  ["right", t("format.offsetRight")],
+  ["bottomLeft", t("format.offsetBottomLeft")],
+  ["center", t("format.offsetCenter")],
 ];
 
 /** Shadow presets (outer shadows). */
@@ -128,9 +129,9 @@ export function ShadowMenu({ status, disabled, run }: { status: Status; disabled
   return (
     <Popover
       button={(open, toggle) => (
-        <button className={open ? "rb-btn active" : "rb-btn"} disabled={disabled} onMouseDown={keepFocus} onClick={toggle} title="圖案效果：陰影">
+        <button className={open ? "rb-btn active" : "rb-btn"} disabled={disabled} onMouseDown={keepFocus} onClick={toggle} title={t("format.shadowTip")}>
           {icons.shadow}
-          <span>陰影 ▾</span>
+          <span>{t("format.shadowMenu")}</span>
         </button>
       )}
     >
@@ -166,24 +167,24 @@ export function PictureFormatTab({ status, run }: { status: Status; run: (c: Com
   };
   return (
     <>
-      <Group label="調整">
-        <button className="rb-btn large" disabled={!c} onMouseDown={keepFocus} onClick={() => run({ kind: "resetPicture" })} title="移除裁剪、旋轉和翻轉，回到圖片原本的比例">
+      <Group label={t("format.adjust")}>
+        <button className="rb-btn large" disabled={!c} onMouseDown={keepFocus} onClick={() => run({ kind: "resetPicture" })} title={t("format.resetPictureTip")}>
           {icons.resetPicture}
-          <span>重設圖片</span>
+          <span>{t("format.resetPicture")}</span>
         </button>
       </Group>
-      <Group label="大小">
-        <button className={status.cropMode ? "rb-btn large active" : "rb-btn large"} aria-pressed={!!status.cropMode} disabled={!c} onMouseDown={keepFocus} onClick={() => run({ kind: "cropMode", on: !status.cropMode })} title="拖曳控點裁剪圖片；按 Enter 或 Esc 結束">
+      <Group label={t("format.size")}>
+        <button className={status.cropMode ? "rb-btn large active" : "rb-btn large"} aria-pressed={!!status.cropMode} disabled={!c} onMouseDown={keepFocus} onClick={() => run({ kind: "cropMode", on: !status.cropMode })} title={t("format.cropTip")}>
           {icons.crop}
-          <span>裁剪</span>
+          <span>{t("format.crop")}</span>
         </button>
         <div className="rb-col">
-          <NumberField label="左" unit="%" step={1} value={pct(c?.left)} disabled={!c} onCommit={(v) => set("left", v)} />
-          <NumberField label="右" unit="%" step={1} value={pct(c?.right)} disabled={!c} onCommit={(v) => set("right", v)} />
+          <NumberField label={t("format.left")} unit="%" step={1} value={pct(c?.left)} disabled={!c} onCommit={(v) => set("left", v)} />
+          <NumberField label={t("format.right")} unit="%" step={1} value={pct(c?.right)} disabled={!c} onCommit={(v) => set("right", v)} />
         </div>
         <div className="rb-col">
-          <NumberField label="上" unit="%" step={1} value={pct(c?.top)} disabled={!c} onCommit={(v) => set("top", v)} />
-          <NumberField label="下" unit="%" step={1} value={pct(c?.bottom)} disabled={!c} onCommit={(v) => set("bottom", v)} />
+          <NumberField label={t("format.top")} unit="%" step={1} value={pct(c?.top)} disabled={!c} onCommit={(v) => set("top", v)} />
+          <NumberField label={t("format.bottom")} unit="%" step={1} value={pct(c?.bottom)} disabled={!c} onCommit={(v) => set("bottom", v)} />
         </div>
       </Group>
     </>

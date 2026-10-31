@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useState, type ReactNode } from "react";
 import { Popover } from "./Popover";
 import type { Command } from "../lib/commands";
@@ -11,17 +12,17 @@ function Form({ initial, run, close }: { initial: AltTextInfo; run: (c: Command)
   const [text, setText] = useState(initial.text);
   const [decorative, setDecorative] = useState(initial.decorative);
   return (
-    <div className="hf-dialog alt-dialog" role="dialog" aria-label="替代文字">
-      <div className="hf-title">替代文字</div>
-      <div className="hf-note">用一兩句話描述這個物件和它的內容，讓看不到的人透過螢幕閱讀器了解。</div>
-      <textarea className="alt-text" rows={4} value={text} disabled={decorative} placeholder="例如：2024 年各季營收長條圖，第四季最高" onChange={(e) => setText(e.target.value)} />
+    <div className="hf-dialog alt-dialog" role="dialog" aria-label={t("ribbon.altText")}>
+      <div className="hf-title">{t("ribbon.altText")}</div>
+      <div className="hf-note">{t("alt.help")}</div>
+      <textarea className="alt-text" rows={4} value={text} disabled={decorative} placeholder={t("alt.example")} onChange={(e) => setText(e.target.value)} />
       <label className="hf-row">
         <input type="checkbox" checked={decorative} onChange={(e) => setDecorative(e.target.checked)} />
-        標示為裝飾用
+        {t("checker.markDecorative")}
       </label>
-      <div className="hf-note">裝飾用的物件（例如框線、背景花紋）會被螢幕閱讀器略過。</div>
+      <div className="hf-note">{t("alt.decorativeHelp")}</div>
       <div className="hf-buttons">
-        <button onClick={close}>取消</button>
+        <button onClick={close}>{t("save.cancel")}</button>
         <button
           className="primary"
           onClick={() => {
@@ -29,7 +30,7 @@ function Form({ initial, run, close }: { initial: AltTextInfo; run: (c: Command)
             close();
           }}
         >
-          確定
+          {t("common.ok")}
         </button>
       </div>
     </div>

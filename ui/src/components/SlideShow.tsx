@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { showKeyCommand, type ShowCommand, type ShowState } from "../lib/show";
 
@@ -69,9 +70,9 @@ export function SlideShow({ state, command, onToggleView }: Props) {
       onWheel={onWheel}
       onContextMenu={(e) => e.preventDefault()}
       onBlur={() => window.setTimeout(() => ref.current?.focus({ preventScroll: true }), 0)}
-      aria-label="投影片放映"
+      aria-label={t("tab.slideShow")}
     >
-      {state?.slide === -1 && !state.blank && <div className="show-end">投影片放映結束，按一下以結束。</div>}
+      {state?.slide === -1 && !state.blank && <div className="show-end">{t("show.ended")}</div>}
     </div>
   );
 }

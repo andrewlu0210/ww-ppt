@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useState } from "react";
 import type { App } from "../wasm/ppt_wasm";
 import type { Command } from "../lib/commands";
@@ -14,28 +15,28 @@ export interface A11yIssue {
 }
 
 const SEVERITIES: [A11yIssue["severity"], string][] = [
-  ["error", "錯誤"],
-  ["warning", "警告"],
-  ["tip", "提示"],
+  ["error", t("checker.error")],
+  ["warning", t("checker.warning")],
+  ["tip", t("checker.tip")],
 ];
 
 const KIND_TITLES: Record<A11yIssue["kind"], string> = {
-  altText: "缺少替代文字",
-  title: "缺少投影片標題",
-  duplicateTitle: "投影片標題重複",
-  contrast: "文字對比不足",
-  headerRow: "表格沒有標題列",
-  readingOrder: "請檢查閱讀順序",
+  altText: t("checker.altText"),
+  title: t("checker.title"),
+  duplicateTitle: t("checker.duplicateTitle"),
+  contrast: t("checker.contrast"),
+  headerRow: t("checker.headerRow"),
+  readingOrder: t("checker.readingOrder"),
 };
 
 /** Why each issue matters and how to fix it. */
 const KIND_HELP: Record<A11yIssue["kind"], string> = {
-  altText: "螢幕閱讀器無法描述這個物件。請寫一兩句描述，或標示為裝飾用。",
-  title: "沒有標題時，使用螢幕閱讀器的人難以找到和分辨投影片。請在標題版面配置區輸入標題。",
-  duplicateTitle: "相同的標題讓人分不出投影片。請讓每張投影片的標題不同。",
-  contrast: "文字和背景的顏色太接近，視力不佳的人不易閱讀（一般文字需要 4.5:1，大字需要 3:1）。",
-  headerRow: "標題列讓螢幕閱讀器能說明每一欄的意思。",
-  readingOrder: "螢幕閱讀器依選取窗格由下往上的順序朗讀。請在選取窗格確認順序。",
+  altText: t("checker.altTextWhy"),
+  title: t("checker.titleWhy"),
+  duplicateTitle: t("checker.duplicateTitleWhy"),
+  contrast: t("checker.contrastWhy"),
+  headerRow: t("checker.headerRowWhy"),
+  readingOrder: t("checker.readingOrderWhy"),
 };
 
 interface Props {
@@ -58,12 +59,12 @@ function AltTextFix({ engine, issue, onDone }: { engine: App; issue: A11yIssue; 
   };
   return (
     <div className="check-fix">
-      <textarea rows={2} value={text} placeholder="描述這個物件" aria-label="替代文字" onChange={(e) => setText(e.target.value)} />
+      <textarea rows={2} value={text} placeholder={t("checker.describe")} aria-label={t("ribbon.altText")} onChange={(e) => setText(e.target.value)} />
       <div className="check-fix-buttons">
         <button disabled={!text.trim()} onClick={() => apply(false)}>
-          加入替代文字
+          {t("checker.addAltText")}
         </button>
-        <button onClick={() => apply(true)}>標示為裝飾用</button>
+        <button onClick={() => apply(true)}>{t("checker.markDecorative")}</button>
       </div>
     </div>
   );
@@ -83,10 +84,10 @@ export function CheckerPane({ engine, issues, run, onChange, onClose }: Props) {
   };
   const key = (i: A11yIssue) => `${i.slide}:${i.shape}:${i.kind}`;
   return (
-    <aside className="checker-pane" aria-label="協助工具">
+    <aside className="checker-pane" aria-label={t("group.accessibility")}>
       <div className="pane-head">
-        <span className="pane-title">協助工具</span>
-        <button className="pane-close" onClick={onClose} aria-label="關閉協助工具" title="關閉">
+        <span className="pane-title">{t("group.accessibility")}</span>
+        <button className="pane-close" onClick={onClose} aria-label={t("checker.close")} title={t("common.close")}>
           ×
         </button>
       </div>
@@ -102,14 +103,14 @@ export function CheckerPane({ engine, issues, run, onChange, onClose }: Props) {
           }
         }}
       >
-        {issues.length === 0 && <div className="check-ok">沒有發現協助工具問題，使用身心障礙的人應該不難閱讀這份簡報。</div>}
+        {issues.length === 0 && <div className="check-ok">{t("checker.allGood")}</div>}
         {SEVERITIES.map(([sev, label]) => {
           const list = issues.filter((i) => i.severity === sev);
           if (list.length === 0) return null;
           return (
-            <section key={sev} className={`check-group ${sev}`} aria-label={`${label}，${list.length} 項`}>
+            <section key={sev} className={`check-group ${sev}`} aria-label={t("checker.groupAria", { label, count: list.length })}>
               <h3>
-                {label}（{list.length}）
+                {t("checker.groupCount", { label, count: list.length })}
               </h3>
               <ul>
                 {list.map((i) => {
@@ -139,10 +140,10 @@ export function CheckerPane({ engine, issues, run, onChange, onClose }: Props) {
                                 run({ kind: "tableFlag", flag: "firstRow", on: true });
                               }}
                             >
-                              開啟標題列
+                              {t("checker.turnOnHeaderRow")}
                             </button>
                           )}
-                          {i.kind === "readingOrder" && <button onClick={() => run({ kind: "selectionPane", open: true })}>開啟選取窗格</button>}
+                          {i.kind === "readingOrder" && <button onClick={() => run({ kind: "selectionPane", open: true })}>{t("checker.openSelectionPane")}</button>}
                           {(i.kind === "title" || i.kind === "duplicateTitle" || i.kind === "contrast") && (
                             <button
                               onClick={() => {
@@ -150,7 +151,7 @@ export function CheckerPane({ engine, issues, run, onChange, onClose }: Props) {
                                 focusCanvas();
                               }}
                             >
-                              前往投影片
+                              {t("checker.goToSlide")}
                             </button>
                           )}
                         </div>

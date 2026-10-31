@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useState } from "react";
 import { Thumb } from "./Thumb";
 import type { Command } from "../lib/commands";
@@ -112,7 +113,7 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
   };
 
   return (
-    <nav className="slide-pane" aria-label="投影片" onDragOver={(e) => e.preventDefault()} onDrop={() => finishDrop(dropAt ?? count)} onKeyDown={onKey}>
+    <nav className="slide-pane" aria-label={t("group.slides")} onDragOver={(e) => e.preventDefault()} onDrop={() => finishDrop(dropAt ?? count)} onKeyDown={onKey}>
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="slide-slot">
           {dropAt === i && dragFrom !== null && <div className="drop-line" />}
@@ -140,12 +141,12 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
             }}
             onMouseDown={(e) => e.button === 0 && e.preventDefault()}
             aria-current={i === current}
-            aria-label={labels?.[i] ?? `投影片 ${i + 1}`}
+            aria-label={labels?.[i] ?? t("slide.label", { n: i + 1 })}
           >
             <span className="slide-no">
               {i + 1}
               {transitions?.[i] && (
-                <span className="slide-mark" title="有轉場">
+                <span className="slide-mark" title={t("slide.hasTransition")}>
                   ★
                 </span>
               )}
@@ -173,14 +174,14 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
         >
           {(
             [
-              ["新增投影片", { kind: "newSlide" }],
-              ["複製投影片", { kind: "duplicateSlide", index: menu.index }],
-              ["刪除投影片", { kind: "deleteSlide", index: menu.index }],
+              [t("ribbon.newSlide"), { kind: "newSlide" }],
+              [t("slide.duplicate"), { kind: "duplicateSlide", index: menu.index }],
+              [t("slide.delete"), { kind: "deleteSlide", index: menu.index }],
             ] as [string, Command][]
           ).map(([label, cmd]) => (
             <button
               key={label}
-              disabled={label === "刪除投影片" && count <= 1}
+              disabled={label === t("slide.delete") && count <= 1}
               role="menuitem"
               onClick={() => {
                 run(cmd);

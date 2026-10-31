@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
@@ -40,7 +41,7 @@ export function LinkPicker(props: { current?: string; disabled?: boolean; reques
       {open && (
         <div className="popover link-panel">
           <label className="rb-field">
-            網址
+            {t("link.address")}
             <input
               ref={input}
               className="link-input"
@@ -54,9 +55,9 @@ export function LinkPicker(props: { current?: string; disabled?: boolean; reques
             />
           </label>
           <div className="link-actions">
-            {props.current && <button onClick={() => apply("")}>移除連結</button>}
+            {props.current && <button onClick={() => apply("")}>{t("link.remove")}</button>}
             <button className="primary" disabled={!url.trim()} onClick={() => apply(url.trim())}>
-              確定
+              {t("common.ok")}
             </button>
           </div>
         </div>

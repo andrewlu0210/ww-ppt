@@ -1,68 +1,69 @@
+import { t } from "../i18n";
 import type { ReactNode } from "react";
 import type { Command } from "../lib/commands";
 import type { Status, TransitionInfo } from "../lib/status";
 
 /** Transition types in gallery order, with PowerPoint's default durations (ms). */
 const TYPES: { id: string; label: string; ms: number; icon: ReactNode }[] = [
-  { id: "none", label: "無", ms: 0, icon: <path d="M6 6l12 12" /> },
-  { id: "cut", label: "切換", ms: 100, icon: <path d="M12 4v16" /> },
-  { id: "fade", label: "淡出", ms: 700, icon: <rect x="6" y="7" width="12" height="10" strokeDasharray="2 2" /> },
-  { id: "push", label: "推入", ms: 1000, icon: <path d="M12 18V7M8.5 10.5 12 7l3.5 3.5" /> },
-  { id: "wipe", label: "擦去", ms: 1000, icon: <path d="M17 6v12M7 12h8M12 9l3 3-3 3" /> },
-  { id: "cover", label: "覆蓋", ms: 1000, icon: <path d="M10 8h9v9h-9zM5 6h9" /> },
-  { id: "pull", label: "揭露", ms: 1000, icon: <path d="M5 8h9v9H5zM10 6h9" /> },
-  { id: "split", label: "分割", ms: 1500, icon: <path d="M12 5v14M9 12H5M15 12h4M7 10l-2 2 2 2M17 10l2 2-2 2" /> },
-  { id: "dissolve", label: "溶解", ms: 700, icon: <path d="M7 7h2v2H7zM12 9h2v2h-2zM9 13h2v2H9zM15 14h2v2h-2zM16 7h1v1h-1z" /> },
-  { id: "randomBar", label: "隨機線條", ms: 1000, icon: <path d="M7 6v12M9.5 6v12M14 6v12M17 6v12" /> },
-  { id: "zoom", label: "縮放", ms: 500, icon: <path d="M9 9h6v6H9zM5 5l3 3M19 5l-3 3M5 19l3-3M19 19l-3-3" /> },
-  { id: "circle", label: "圓形", ms: 1000, icon: <circle cx="12" cy="12" r="6" /> },
+  { id: "none", label: t("trans.none"), ms: 0, icon: <path d="M6 6l12 12" /> },
+  { id: "cut", label: t("trans.cut"), ms: 100, icon: <path d="M12 4v16" /> },
+  { id: "fade", label: t("trans.fade"), ms: 700, icon: <rect x="6" y="7" width="12" height="10" strokeDasharray="2 2" /> },
+  { id: "push", label: t("trans.push"), ms: 1000, icon: <path d="M12 18V7M8.5 10.5 12 7l3.5 3.5" /> },
+  { id: "wipe", label: t("trans.wipe"), ms: 1000, icon: <path d="M17 6v12M7 12h8M12 9l3 3-3 3" /> },
+  { id: "cover", label: t("trans.cover"), ms: 1000, icon: <path d="M10 8h9v9h-9zM5 6h9" /> },
+  { id: "pull", label: t("trans.uncover"), ms: 1000, icon: <path d="M5 8h9v9H5zM10 6h9" /> },
+  { id: "split", label: t("trans.split"), ms: 1500, icon: <path d="M12 5v14M9 12H5M15 12h4M7 10l-2 2 2 2M17 10l2 2-2 2" /> },
+  { id: "dissolve", label: t("trans.dissolve"), ms: 700, icon: <path d="M7 7h2v2H7zM12 9h2v2h-2zM9 13h2v2H9zM15 14h2v2h-2zM16 7h1v1h-1z" /> },
+  { id: "randomBar", label: t("trans.randomBars"), ms: 1000, icon: <path d="M7 6v12M9.5 6v12M14 6v12M17 6v12" /> },
+  { id: "zoom", label: t("trans.zoom"), ms: 500, icon: <path d="M9 9h6v6H9zM5 5l3 3M19 5l-3 3M5 19l3-3M19 19l-3-3" /> },
+  { id: "circle", label: t("trans.circle"), ms: 1000, icon: <circle cx="12" cy="12" r="6" /> },
 ];
 
 /** Effect options per type: [option id, label]. Directions are where the slide moves. */
 const OPTIONS: Record<string, [string, string][]> = {
   cut: [
-    ["", "平滑"],
-    ["thruBlk", "穿過黑色"],
+    ["", t("trans.smoothly")],
+    ["thruBlk", t("trans.throughBlack")],
   ],
   fade: [
-    ["", "平滑"],
-    ["thruBlk", "穿過黑色"],
+    ["", t("trans.smoothly")],
+    ["thruBlk", t("trans.throughBlack")],
   ],
   push: [
-    ["u", "從下"],
-    ["l", "從右"],
-    ["d", "從上"],
-    ["r", "從左"],
+    ["u", t("trans.fromBottom")],
+    ["l", t("trans.fromRight")],
+    ["d", t("trans.fromTop")],
+    ["r", t("trans.fromLeft")],
   ],
   wipe: [
-    ["l", "從右"],
-    ["u", "從下"],
-    ["r", "從左"],
-    ["d", "從上"],
+    ["l", t("trans.fromRight")],
+    ["u", t("trans.fromBottom")],
+    ["r", t("trans.fromLeft")],
+    ["d", t("trans.fromTop")],
   ],
   cover: [
-    ["l", "從右"],
-    ["u", "從下"],
-    ["r", "從左"],
-    ["d", "從上"],
-    ["ld", "從右上"],
-    ["lu", "從右下"],
-    ["rd", "從左上"],
-    ["ru", "從左下"],
+    ["l", t("trans.fromRight")],
+    ["u", t("trans.fromBottom")],
+    ["r", t("trans.fromLeft")],
+    ["d", t("trans.fromTop")],
+    ["ld", t("trans.fromTopRight")],
+    ["lu", t("trans.fromBottomRight")],
+    ["rd", t("trans.fromTopLeft")],
+    ["ru", t("trans.fromBottomLeft")],
   ],
   split: [
-    ["vertOut", "垂直向外"],
-    ["vertIn", "垂直向內"],
-    ["horzOut", "水平向外"],
-    ["horzIn", "水平向內"],
+    ["vertOut", t("trans.verticalOut")],
+    ["vertIn", t("trans.verticalIn")],
+    ["horzOut", t("trans.horizontalOut")],
+    ["horzIn", t("trans.horizontalIn")],
   ],
   randomBar: [
-    ["vert", "垂直"],
-    ["horz", "水平"],
+    ["vert", t("trans.vertical")],
+    ["horz", t("trans.horizontal")],
   ],
   zoom: [
-    ["in", "拉近"],
-    ["out", "拉遠"],
+    ["in", t("trans.in")],
+    ["out", t("trans.out")],
   ],
 };
 OPTIONS.pull = OPTIONS.cover;
@@ -77,10 +78,10 @@ const Svg = ({ children }: { children: ReactNode }) => (
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 export function TransitionTab({ status, run }: { status: Status; run: (c: Command) => void }) {
-  const t: TransitionInfo | undefined = status.transition;
-  const id = t?.id ?? "none";
+  const tr: TransitionInfo | undefined = status.transition;
+  const id = tr?.id ?? "none";
   const set = (patch: Partial<TransitionInfo>, all = false) => {
-    const next: TransitionInfo = { id, option: t?.option ?? "", durationMs: t?.durationMs ?? 700, onClick: t?.onClick ?? true, afterMs: t?.afterMs ?? -1, ...patch };
+    const next: TransitionInfo = { id, option: tr?.option ?? "", durationMs: tr?.durationMs ?? 700, onClick: tr?.onClick ?? true, afterMs: tr?.afterMs ?? -1, ...patch };
     run({ kind: "setTransition", ...next, all });
   };
   const choose = (type: (typeof TYPES)[number]) => {
@@ -95,14 +96,14 @@ export function TransitionTab({ status, run }: { status: Status; run: (c: Comman
     <>
       <div className="rb-group">
         <div className="rb-items">
-          <button className="rb-btn large" disabled={id === "none"} onMouseDown={keepFocus} onClick={() => run({ kind: "previewTransition" })} title="預覽">
+          <button className="rb-btn large" disabled={id === "none"} onMouseDown={keepFocus} onClick={() => run({ kind: "previewTransition" })} title={t("anim.preview")}>
             <Svg>
               <path d="M10 8.5v7l5.5-3.5z" fill="currentColor" />
             </Svg>
-            <span>預覽</span>
+            <span>{t("anim.preview")}</span>
           </button>
         </div>
-        <div className="rb-label">預覽</div>
+        <div className="rb-label">{t("anim.preview")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-items transition-gallery">
@@ -113,18 +114,18 @@ export function TransitionTab({ status, run }: { status: Status; run: (c: Comman
             </button>
           ))}
           {!known && (
-            <span className="transition-other" title="這個轉場類型會以淡出播放">
-              其他（{id}）
+            <span className="transition-other" title={t("trans.otherTip")}>
+              {t("trans.other", { id })}
             </span>
           )}
         </div>
-        <div className="rb-label">切換到此投影片</div>
+        <div className="rb-label">{t("trans.toThisSlide")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
           <label className="rb-field">
-            效果選項
-            <select disabled={!options} value={t?.option ?? ""} onChange={(e) => set({ option: e.target.value })}>
+            {t("anim.effectOptions")}
+            <select disabled={!options} value={tr?.option ?? ""} onChange={(e) => set({ option: e.target.value })}>
               {(options ?? [["", "—"]]).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -133,55 +134,55 @@ export function TransitionTab({ status, run }: { status: Status; run: (c: Comman
             </select>
           </label>
           <label className="rb-field">
-            期間（秒）
+            {t("anim.duration")}
             <input
               type="number"
               min={0.01}
               max={59}
               step={0.25}
               disabled={id === "none"}
-              value={((t?.durationMs ?? 0) / 1000).toFixed(2)}
+              value={((tr?.durationMs ?? 0) / 1000).toFixed(2)}
               onChange={(e) => {
                 const s = Number(e.target.value);
                 if (s > 0) set({ durationMs: Math.round(s * 1000) });
               }}
             />
           </label>
-          <button className="rb-btn" onMouseDown={keepFocus} onClick={() => set({}, true)} title="把這張投影片的轉場套用到所有投影片">
-            全部套用
+          <button className="rb-btn" onMouseDown={keepFocus} onClick={() => set({}, true)} title={t("trans.applyAllTip")}>
+            {t("trans.applyAll")}
           </button>
         </div>
-        <div className="rb-label">預存時間</div>
+        <div className="rb-label">{t("anim.timing")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
           <label className="rb-check">
-            <input type="checkbox" checked={t?.onClick ?? true} onChange={(e) => set({ id: id === "none" ? "cut" : id, durationMs: id === "none" ? 100 : (t?.durationMs ?? 0), onClick: e.target.checked })} />
-            按一下滑鼠時
+            <input type="checkbox" checked={tr?.onClick ?? true} onChange={(e) => set({ id: id === "none" ? "cut" : id, durationMs: id === "none" ? 100 : (tr?.durationMs ?? 0), onClick: e.target.checked })} />
+            {t("trans.onClick")}
           </label>
           <label className="rb-check">
             <input
               type="checkbox"
-              checked={(t?.afterMs ?? -1) >= 0}
-              onChange={(e) => set({ id: id === "none" ? "cut" : id, durationMs: id === "none" ? 100 : (t?.durationMs ?? 0), afterMs: e.target.checked ? 5000 : -1 })}
+              checked={(tr?.afterMs ?? -1) >= 0}
+              onChange={(e) => set({ id: id === "none" ? "cut" : id, durationMs: id === "none" ? 100 : (tr?.durationMs ?? 0), afterMs: e.target.checked ? 5000 : -1 })}
             />
-            之後
+            {t("trans.after")}
             <input
               type="number"
               min={0}
               step={0.5}
               className="narrow"
-              disabled={(t?.afterMs ?? -1) < 0}
-              value={((t?.afterMs ?? -1) >= 0 ? (t!.afterMs / 1000).toFixed(1) : "")}
+              disabled={(tr?.afterMs ?? -1) < 0}
+              value={((tr?.afterMs ?? -1) >= 0 ? (tr!.afterMs / 1000).toFixed(1) : "")}
               onChange={(e) => {
                 const s = Number(e.target.value);
                 if (s >= 0) set({ afterMs: Math.round(s * 1000) });
               }}
             />
-            秒
+            {t("trans.secondsUnit")}
           </label>
         </div>
-        <div className="rb-label">換頁</div>
+        <div className="rb-label">{t("trans.advance")}</div>
       </div>
     </>
   );

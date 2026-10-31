@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { Appearance } from "../lib/appearance";
 import { useEffect, useState, type ReactNode } from "react";
 import { icons } from "./icons";
@@ -22,17 +23,17 @@ import type { AnimationPreset, Status } from "../lib/status";
 
 /** Character spacing presets (points), as PowerPoint names them. */
 const CHAR_SPACINGS: [number, string][] = [
-  [-3, "非常緊"],
-  [-1.5, "緊"],
-  [0, "標準"],
-  [3, "鬆"],
-  [6, "非常鬆"],
+  [-3, t("ribbon.spacingVeryTight")],
+  [-1.5, t("ribbon.spacingTight")],
+  [0, t("ribbon.spacingNormal")],
+  [3, t("ribbon.spacingLoose")],
+  [6, t("ribbon.spacingVeryLoose")],
 ];
 const LINE_SPACINGS = [1, 1.5, 2, 2.5, 3];
 const ANCHORS = [
-  ["top", "anchorTop", "上"],
-  ["middle", "anchorMiddle", "中"],
-  ["bottom", "anchorBottom", "下"],
+  ["top", "anchorTop", t("ribbon.anchorTop")],
+  ["middle", "anchorMiddle", t("ribbon.anchorMiddle")],
+  ["bottom", "anchorBottom", t("ribbon.anchorBottom")],
 ] as const;
 
 const TABS = ["常用", "插入", "設計", "圖形格式", "轉場", "動畫", "投影片放映", "校閱", "檢視"] as const;
@@ -42,7 +43,23 @@ const PICTURE_TAB = "圖片格式" as const;
 /** Shown while a SmartArt is selected. */
 const SMARTART_TAB = "SmartArt 設計" as const;
 type Tab = (typeof TABS)[number] | (typeof TABLE_TABS)[number] | typeof PICTURE_TAB | typeof SMARTART_TAB;
-const isTableTab = (t: Tab) => (TABLE_TABS as readonly string[]).includes(t);
+const isTableTab = (id: Tab) => (TABLE_TABS as readonly string[]).includes(id);
+/** Tabs are identified by their Traditional Chinese names; these are what is shown. */
+const TAB_LABELS: Record<Tab, string> = {
+  常用: t("tab.home"),
+  插入: t("tab.insert"),
+  設計: t("tab.design"),
+  圖形格式: t("tab.shapeFormat"),
+  轉場: t("tab.transitions"),
+  動畫: t("tab.animations"),
+  投影片放映: t("tab.slideShow"),
+  校閱: t("tab.review"),
+  檢視: t("tab.view"),
+  表格設計: t("tab.tableDesign"),
+  版面配置: t("tab.tableLayout"),
+  圖片格式: t("tab.pictureFormat"),
+  "SmartArt 設計": t("tab.smartArtDesign"),
+};
 
 /** Numbering schemes offered in the gallery, with a sample. */
 const NUMBERINGS: [string, string][] = [
@@ -136,8 +153,8 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
       onPick={(layout) => run({ kind: "newSlide", layout })}
       button={(open, toggle) => (
         <span className="split-btn">
-          <Button large={large} icon={icons.newSlide} label="新增投影片" onClick={() => run({ kind: "newSlide" })} />
-          <button className={open ? "split-arrow active" : "split-arrow"} title="選擇版面配置" onClick={toggle} onMouseDown={keepFocus}>
+          <Button large={large} icon={icons.newSlide} label={t("ribbon.newSlide")} onClick={() => run({ kind: "newSlide" })} />
+          <button className={open ? "split-arrow active" : "split-arrow"} title={t("ribbon.chooseLayout")} onClick={toggle} onMouseDown={keepFocus}>
             ▾
           </button>
         </span>
@@ -147,13 +164,13 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
 
   // 協助工具: alternative text of the selected object, and the selection pane.
   const accessGroup = (
-    <Group label="協助工具">
+    <Group label={t("group.accessibility")}>
       <AltTextDialog
         load={loadAltText}
         run={run}
-        button={(open, toggle) => <Button large icon={icons.altText} label="替代文字" active={open} disabled={!status.frame || status.selectionCount !== 1} onClick={toggle} />}
+        button={(open, toggle) => <Button large icon={icons.altText} label={t("ribbon.altText")} active={open} disabled={!status.frame || status.selectionCount !== 1} onClick={toggle} />}
       />
-      <Button large icon={icons.selectionPane} label="選取窗格" active={paneOpen} onClick={() => run({ kind: "selectionPane" })} />
+      <Button large icon={icons.selectionPane} label={t("ribbon.selectionPane")} active={paneOpen} onClick={() => run({ kind: "selectionPane" })} />
     </Group>
   );
 
@@ -195,23 +212,23 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
   return (
     <div className="ribbon" onKeyDown={onKeyDown}>
       <div className="rb-tabs" role="tablist">
-        {tabs.map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={[tab === t && "active", (isTableTab(t) || t === PICTURE_TAB || t === SMARTART_TAB) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(t)} onMouseDown={keepFocus}>
-            {t}
+        {tabs.map((id) => (
+          <button key={id} role="tab" aria-selected={tab === id} className={[tab === id && "active", (isTableTab(id) || id === PICTURE_TAB || id === SMARTART_TAB) && "contextual"].filter(Boolean).join(" ")} onClick={() => setTab(id)} onMouseDown={keepFocus}>
+            {TAB_LABELS[id]}
           </button>
         ))}
       </div>
-      <div className="rb-body" role="tabpanel" aria-label={tab}>
+      <div className="rb-body" role="tabpanel" aria-label={TAB_LABELS[tab]}>
         {tab === "常用" && (
           <>
-            <Group label="剪貼簿">
-              <Button large icon={icons.paste} label="貼上" onClick={() => run({ kind: "paste" })} />
+            <Group label={t("group.clipboard")}>
+              <Button large icon={icons.paste} label={t("ribbon.paste")} onClick={() => run({ kind: "paste" })} />
               <div className="rb-col">
-                <Button icon={icons.cut} label="剪下" disabled={!status.hasSelection} onClick={() => run({ kind: "cut" })} />
-                <Button icon={icons.copy} label="複製" disabled={!status.hasSelection} onClick={() => run({ kind: "copy" })} />
+                <Button icon={icons.cut} label={t("ribbon.cut")} disabled={!status.hasSelection} onClick={() => run({ kind: "cut" })} />
+                <Button icon={icons.copy} label={t("ribbon.copy")} disabled={!status.hasSelection} onClick={() => run({ kind: "copy" })} />
               </div>
             </Group>
-            <Group label="投影片">
+            <Group label={t("group.slides")}>
               {newSlide(true)}
               <div className="rb-col">
                 <LayoutPicker
@@ -220,12 +237,12 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                   current={status.slideLayout}
                   onOpen={loadLayoutThumbs}
                   onPick={(layout) => run({ kind: "applyLayout", layout })}
-                  button={(open, toggle) => <Button icon={icons.layout} label="版面配置 ▾" active={open} onClick={toggle} />}
+                  button={(open, toggle) => <Button icon={icons.layout} label={t("ribbon.layoutMenu")} active={open} onClick={toggle} />}
                 />
-                <Button icon={icons.resetSlide} label="重設" disabled={(status.slideLayout ?? -1) < 0} onClick={() => run({ kind: "resetSlide" })} />
+                <Button icon={icons.resetSlide} label={t("ribbon.reset")} disabled={(status.slideLayout ?? -1) < 0} onClick={() => run({ kind: "resetSlide" })} />
               </div>
             </Group>
-            <Group label="字型">
+            <Group label={t("group.font")}>
               <div className="rb-col">
                 <div className="rb-row">
                   <input
@@ -233,7 +250,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                     list="font-list"
                     value={fontDraft ?? status.fontFamily ?? ""}
                     disabled={!text}
-                    placeholder="字型"
+                    placeholder={t("group.font")}
                     onFocus={(e) => setFontDraft(e.target.value)}
                     onChange={(e) => {
                       setFontDraft(e.target.value);
@@ -285,18 +302,18 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                       <option key={s} value={s} />
                     ))}
                   </datalist>
-                  <Button iconOnly icon={<b className="glyph">A⁺</b>} label="放大字型 (⌘])" disabled={!text} onClick={() => run({ kind: "fontStep", up: true })} />
-                  <Button iconOnly icon={<b className="glyph">A⁻</b>} label="縮小字型 (⌘[)" disabled={!text} onClick={() => run({ kind: "fontStep", up: false })} />
+                  <Button iconOnly icon={<b className="glyph">A⁺</b>} label={t("ribbon.growFont")} disabled={!text} onClick={() => run({ kind: "fontStep", up: true })} />
+                  <Button iconOnly icon={<b className="glyph">A⁻</b>} label={t("ribbon.shrinkFont")} disabled={!text} onClick={() => run({ kind: "fontStep", up: false })} />
                 </div>
                 <div className="rb-row">
-                  <Button iconOnly icon={<b className="glyph">B</b>} label="粗體 (⌘B)" active={status.bold} disabled={!text} onClick={() => run({ kind: "toggle", which: "bold" })} />
-                  <Button iconOnly icon={<i className="glyph serif">I</i>} label="斜體 (⌘I)" active={status.italic} disabled={!text} onClick={() => run({ kind: "toggle", which: "italic" })} />
-                  <Button iconOnly icon={<u className="glyph">U</u>} label="底線 (⌘U)" active={status.underline} disabled={!text} onClick={() => run({ kind: "toggle", which: "underline" })} />
-                  <Button iconOnly icon={<s className="glyph">S</s>} label="刪除線" active={status.strike} disabled={!text} onClick={() => run({ kind: "toggle", which: "strike" })} />
-                  <Button iconOnly icon={<span className="glyph">x²</span>} label="上標" active={(status.baseline ?? 0) > 0} disabled={!text} onClick={() => run({ kind: "toggle", which: "superscript" })} />
-                  <Button iconOnly icon={<span className="glyph">x₂</span>} label="下標" active={(status.baseline ?? 0) < 0} disabled={!text} onClick={() => run({ kind: "toggle", which: "subscript" })} />
+                  <Button iconOnly icon={<b className="glyph">B</b>} label={t("ribbon.bold")} active={status.bold} disabled={!text} onClick={() => run({ kind: "toggle", which: "bold" })} />
+                  <Button iconOnly icon={<i className="glyph serif">I</i>} label={t("ribbon.italic")} active={status.italic} disabled={!text} onClick={() => run({ kind: "toggle", which: "italic" })} />
+                  <Button iconOnly icon={<u className="glyph">U</u>} label={t("ribbon.underline")} active={status.underline} disabled={!text} onClick={() => run({ kind: "toggle", which: "underline" })} />
+                  <Button iconOnly icon={<s className="glyph">S</s>} label={t("ribbon.strike")} active={status.strike} disabled={!text} onClick={() => run({ kind: "toggle", which: "strike" })} />
+                  <Button iconOnly icon={<span className="glyph">x²</span>} label={t("ribbon.superscript")} active={(status.baseline ?? 0) > 0} disabled={!text} onClick={() => run({ kind: "toggle", which: "superscript" })} />
+                  <Button iconOnly icon={<span className="glyph">x₂</span>} label={t("ribbon.subscript")} active={(status.baseline ?? 0) < 0} disabled={!text} onClick={() => run({ kind: "toggle", which: "subscript" })} />
                   <Popover
-                    button={(open, toggle) => <Button iconOnly icon={icons.charSpacing} label="字元間距" active={open} disabled={!text} onClick={toggle} />}
+                    button={(open, toggle) => <Button iconOnly icon={icons.charSpacing} label={t("ribbon.charSpacing")} active={open} disabled={!text} onClick={toggle} />}
                   >
                     {(close) => (
                       <div className="menu-panel">
@@ -316,20 +333,20 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                       </div>
                     )}
                   </Popover>
-                  <Button iconOnly icon={icons.clearFormat} label="清除所有格式設定" disabled={!text} onClick={() => run({ kind: "clearFormatting" })} />
-                  <ColorPicker icon={icons.fontColor} label="字型色彩" value={status.textColor} disabled={!text} onPick={(color) => color && run({ kind: "textColor", color })} />
+                  <Button iconOnly icon={icons.clearFormat} label={t("ribbon.clearFormatting")} disabled={!text} onClick={() => run({ kind: "clearFormatting" })} />
+                  <ColorPicker icon={icons.fontColor} label={t("ribbon.fontColor")} value={status.textColor} disabled={!text} onPick={(color) => color && run({ kind: "textColor", color })} />
                 </div>
               </div>
             </Group>
-            <Group label="段落">
+            <Group label={t("group.paragraph")}>
               <div className="rb-col">
                 <div className="rb-row">
-                  <Button iconOnly icon={icons.bulletList} label="項目符號" active={status.bullet} disabled={!text} onClick={() => run({ kind: "bullets" })} />
+                  <Button iconOnly icon={icons.bulletList} label={t("ribbon.bullets")} active={status.bullet} disabled={!text} onClick={() => run({ kind: "bullets" })} />
                   <Popover
                     button={(open, toggle) => (
                       <span className="split-btn">
-                        <Button iconOnly icon={icons.numberList} label="編號" active={!!status.numbering} disabled={!text} onClick={() => run({ kind: "numbering", scheme: status.numbering || "arabicPeriod" })} />
-                        <button className={open ? "split-arrow active" : "split-arrow"} title="編號格式" disabled={!text} onClick={toggle} onMouseDown={keepFocus}>
+                        <Button iconOnly icon={icons.numberList} label={t("ribbon.numbering")} active={!!status.numbering} disabled={!text} onClick={() => run({ kind: "numbering", scheme: status.numbering || "arabicPeriod" })} />
+                        <button className={open ? "split-arrow active" : "split-arrow"} title={t("ribbon.numberingFormat")} disabled={!text} onClick={toggle} onMouseDown={keepFocus}>
                           ▾
                         </button>
                       </span>
@@ -353,21 +370,21 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                       </div>
                     )}
                   </Popover>
-                  <Button iconOnly icon={icons.outdent} label="減少清單階層" disabled={!text} onClick={() => run({ kind: "level", delta: -1 })} />
-                  <Button iconOnly icon={icons.indent} label="增加清單階層" disabled={!text} onClick={() => run({ kind: "level", delta: 1 })} />
+                  <Button iconOnly icon={icons.outdent} label={t("ribbon.outdent")} disabled={!text} onClick={() => run({ kind: "level", delta: -1 })} />
+                  <Button iconOnly icon={icons.indent} label={t("ribbon.indent")} disabled={!text} onClick={() => run({ kind: "level", delta: 1 })} />
                 </div>
                 <div className="rb-row">
                   {(
                     [
-                      ["left", icons.alignLeft, "靠左對齊 (⌘L)"],
-                      ["center", icons.alignCenter, "置中 (⌘E)"],
-                      ["right", icons.alignRight, "靠右對齊 (⌘R)"],
-                      ["justify", icons.alignJustify, "左右對齊 (⌘J)"],
+                      ["left", icons.alignLeft, t("ribbon.alignLeft")],
+                      ["center", icons.alignCenter, t("ribbon.alignCenter")],
+                      ["right", icons.alignRight, t("ribbon.alignRight")],
+                      ["justify", icons.alignJustify, t("ribbon.justify")],
                     ] as const
                   ).map(([a, icon, label]) => (
                     <Button key={a} iconOnly icon={icon} label={label} active={status.align === a} disabled={!text} onClick={() => run({ kind: "align", align: a })} />
                   ))}
-                  <Popover button={(open, toggle) => <Button iconOnly icon={icons.lineSpacing} label="行距" active={open} disabled={!text} onClick={toggle} />}>
+                  <Popover button={(open, toggle) => <Button iconOnly icon={icons.lineSpacing} label={t("ribbon.lineSpacing")} active={open} disabled={!text} onClick={toggle} />}>
                     {(close) => (
                       <div className="menu-panel">
                         {LINE_SPACINGS.map((m) => (
@@ -388,7 +405,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                   </Popover>
                   <Popover
                     button={(open, toggle) => (
-                      <Button iconOnly icon={status.textAnchor === "middle" ? icons.anchorMiddle : status.textAnchor === "bottom" ? icons.anchorBottom : icons.anchorTop} label="對齊文字" active={open} disabled={!status.textAnchor} onClick={toggle} />
+                      <Button iconOnly icon={status.textAnchor === "middle" ? icons.anchorMiddle : status.textAnchor === "bottom" ? icons.anchorBottom : icons.anchorTop} label={t("ribbon.alignText")} active={open} disabled={!status.textAnchor} onClick={toggle} />
                     )}
                   >
                     {(close) => (
@@ -413,77 +430,77 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 </div>
               </div>
             </Group>
-            <Group label="繪圖">
+            <Group label={t("group.drawing")}>
               <div className="rb-col">
-                <ColorPicker icon={icons.fill} label="圖案填滿" value={status.fill} disabled={!shapes} noneLabel="無填滿" onPick={(color) => run({ kind: "fill", color })} />
-                <ColorPicker icon={icons.outline} label="圖案外框" value={status.lineColor} disabled={!shapes} noneLabel="無外框" onPick={(color) => run({ kind: "lineColor", color })} />
+                <ColorPicker icon={icons.fill} label={t("ribbon.shapeFill")} value={status.fill} disabled={!shapes} noneLabel={t("ribbon.noFill")} onPick={(color) => run({ kind: "fill", color })} />
+                <ColorPicker icon={icons.outline} label={t("ribbon.shapeOutline")} value={status.lineColor} disabled={!shapes} noneLabel={t("ribbon.noOutline")} onPick={(color) => run({ kind: "lineColor", color })} />
               </div>
             </Group>
-            <Group label="編輯">
+            <Group label={t("group.editing")}>
               <div className="rb-col">
-                <Button icon={icons.undo} label="復原" disabled={!status.canUndo} onClick={() => run({ kind: "undo" })} />
-                <Button icon={icons.redo} label="取消復原" disabled={!status.canRedo} onClick={() => run({ kind: "redo" })} />
+                <Button icon={icons.undo} label={t("ribbon.undo")} disabled={!status.canUndo} onClick={() => run({ kind: "undo" })} />
+                <Button icon={icons.redo} label={t("ribbon.redo")} disabled={!status.canRedo} onClick={() => run({ kind: "redo" })} />
               </div>
               <div className="rb-col">
-                <Button icon={icons.find} label="尋找 (⌘F)" onClick={() => run({ kind: "find", replace: false })} />
-                <Button icon={icons.replace} label="取代 (⌥⌘F)" onClick={() => run({ kind: "find", replace: true })} />
-                <Button icon={icons.selectAll} label="全選 (⌘A)" onClick={() => run({ kind: "selectAll" })} />
+                <Button icon={icons.find} label={t("ribbon.find")} onClick={() => run({ kind: "find", replace: false })} />
+                <Button icon={icons.replace} label={t("ribbon.replace")} onClick={() => run({ kind: "find", replace: true })} />
+                <Button icon={icons.selectAll} label={t("ribbon.selectAll")} onClick={() => run({ kind: "selectAll" })} />
               </div>
             </Group>
           </>
         )}
         {tab === "插入" && (
           <>
-            <Group label="投影片">{newSlide(true)}</Group>
-            <Group label="表格">
+            <Group label={t("group.slides")}>{newSlide(true)}</Group>
+            <Group label={t("ribbon.table")}>
               <TablePicker
                 onPick={(rows, cols) => run({ kind: "insertTable", rows, cols })}
-                button={(open, toggle) => <Button large active={open} icon={icons.table} label="表格" onClick={toggle} />}
+                button={(open, toggle) => <Button large active={open} icon={icons.table} label={t("ribbon.table")} onClick={toggle} />}
               />
             </Group>
-            <Group label="影像">
-              <Button large icon={icons.picture} label="圖片" onClick={() => run({ kind: "picture" })} />
+            <Group label={t("group.images")}>
+              <Button large icon={icons.picture} label={t("ribbon.picture")} onClick={() => run({ kind: "picture" })} />
             </Group>
-            <Group label="圖例">
+            <Group label={t("group.illustrations")}>
               <ShapeGallery
                 icons={shapeIcons}
                 active={status.drawTool}
                 onPick={(tool) => run({ kind: "drawTool", tool })}
-                button={(open, toggle) => <Button large active={open || !!status.drawTool} icon={icons.shapes} label="圖案" onClick={toggle} />}
+                button={(open, toggle) => <Button large active={open || !!status.drawTool} icon={icons.shapes} label={t("ribbon.shapes")} onClick={toggle} />}
               />
             </Group>
-            <Group label="文字">
-              <Button large icon={icons.textbox} label="文字方塊" onClick={() => run({ kind: "textBox" })} />
+            <Group label={t("group.text")}>
+              <Button large icon={icons.textbox} label={t("ribbon.textBox")} onClick={() => run({ kind: "textBox" })} />
               <div className="rb-col">
                 <HeaderFooterDialog
                   load={loadHeaderFooter}
                   onApply={(c) => run({ kind: "headerFooter", ...c })}
-                  button={(open, toggle) => <Button icon={icons.headerFooter} label="頁首及頁尾" active={open} onClick={toggle} />}
+                  button={(open, toggle) => <Button icon={icons.headerFooter} label={t("ribbon.headerFooter")} active={open} onClick={toggle} />}
                 />
-                <SymbolPicker onPick={(text) => run({ kind: "insertSymbol", text })} button={(open, toggle) => <Button icon={icons.symbol} label="符號" active={open} onClick={toggle} />} />
+                <SymbolPicker onPick={(text) => run({ kind: "insertSymbol", text })} button={(open, toggle) => <Button icon={icons.symbol} label={t("ribbon.symbol")} active={open} onClick={toggle} />} />
               </div>
             </Group>
-            <Group label="連結">
+            <Group label={t("group.links")}>
               <LinkPicker
                 current={status.link}
                 disabled={!text}
                 request={linkRequest}
                 onApply={(url) => run({ kind: "link", url })}
-                button={(open, toggle) => <Button large active={open} disabled={!text} icon={icons.link} label="連結 (⌘K)" onClick={toggle} />}
+                button={(open, toggle) => <Button large active={open} disabled={!text} icon={icons.link} label={t("ribbon.link")} onClick={toggle} />}
               />
             </Group>
           </>
         )}
         {tab === "圖形格式" && (
           <>
-            <Group label="圖形樣式">
+            <Group label={t("group.shapeStyles")}>
               <div className="rb-col">
-                <ColorPicker icon={icons.fill} label="圖案填滿" value={status.fill} disabled={!shapes} noneLabel="無填滿" onPick={(color) => run({ kind: "fill", color })} />
-                <ColorPicker icon={icons.outline} label="圖案外框" value={status.lineColor} disabled={!shapes} noneLabel="無外框" onPick={(color) => run({ kind: "lineColor", color })} />
+                <ColorPicker icon={icons.fill} label={t("ribbon.shapeFill")} value={status.fill} disabled={!shapes} noneLabel={t("ribbon.noFill")} onPick={(color) => run({ kind: "fill", color })} />
+                <ColorPicker icon={icons.outline} label={t("ribbon.shapeOutline")} value={status.lineColor} disabled={!shapes} noneLabel={t("ribbon.noOutline")} onPick={(color) => run({ kind: "lineColor", color })} />
               </div>
               <div className="rb-col">
                 <label className="rb-field">
-                  外框寬度
+                  {t("ribbon.outlineWeight")}
                   <select
                     disabled={!shapes}
                     value={status.lineWidth ?? ""}
@@ -502,32 +519,32 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 </label>
               </div>
             </Group>
-            <Group label="圖案">
+            <Group label={t("ribbon.shapes")}>
               <ShapeGallery
                 icons={shapeIcons}
                 lines={false}
                 onPick={(preset) => run({ kind: "changeShape", preset })}
                 button={(open, toggle) => (
-                  <button className={open ? "rb-btn active" : "rb-btn"} disabled={!status.canChangeShape} onMouseDown={keepFocus} onClick={toggle} title="變更圖案">
+                  <button className={open ? "rb-btn active" : "rb-btn"} disabled={!status.canChangeShape} onMouseDown={keepFocus} onClick={toggle} title={t("ribbon.changeShape")}>
                     {icons.changeShape}
-                    <span>變更圖案 ▾</span>
+                    <span>{t("ribbon.changeShapeMenu")}</span>
                   </button>
                 )}
               />
               <ShadowMenu status={status} disabled={!shapes || status.shadow === undefined} run={run} />
             </Group>
-            <Group label="排列">
+            <Group label={t("group.arrange")}>
               <div className="rb-col">
-                <Button icon={icons.front} label="移到最上層" disabled={!shapes} onClick={() => run({ kind: "reorder", order: "front" })} />
-                <Button icon={icons.back} label="移到最下層" disabled={!shapes} onClick={() => run({ kind: "reorder", order: "back" })} />
+                <Button icon={icons.front} label={t("ribbon.bringToFront")} disabled={!shapes} onClick={() => run({ kind: "reorder", order: "front" })} />
+                <Button icon={icons.back} label={t("ribbon.sendToBack")} disabled={!shapes} onClick={() => run({ kind: "reorder", order: "back" })} />
               </div>
               <div className="rb-col">
-                <Button icon={icons.front} label="上移一層" disabled={!shapes} onClick={() => run({ kind: "reorder", order: "forward" })} />
-                <Button icon={icons.back} label="下移一層" disabled={!shapes} onClick={() => run({ kind: "reorder", order: "backward" })} />
+                <Button icon={icons.front} label={t("ribbon.bringForward")} disabled={!shapes} onClick={() => run({ kind: "reorder", order: "forward" })} />
+                <Button icon={icons.back} label={t("ribbon.sendBackward")} disabled={!shapes} onClick={() => run({ kind: "reorder", order: "backward" })} />
               </div>
               <div className="rb-col">
-                <Button icon={icons.group} label="組成群組 (⌘⌥G)" disabled={!status.canGroup} onClick={() => run({ kind: "group", on: true })} />
-                <Button icon={icons.ungroup} label="取消群組 (⌘⌥⇧G)" disabled={!status.canUngroup} onClick={() => run({ kind: "group", on: false })} />
+                <Button icon={icons.group} label={t("ribbon.group")} disabled={!status.canGroup} onClick={() => run({ kind: "group", on: true })} />
+                <Button icon={icons.ungroup} label={t("ribbon.ungroup")} disabled={!status.canUngroup} onClick={() => run({ kind: "group", on: false })} />
               </div>
               <div className="rb-col">
                 <RotateMenu disabled={!status.frame} run={run} />
@@ -535,15 +552,15 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
             </Group>
             {accessGroup}
             <SizeGroup status={status} run={run} />
-            <Group label="對齊">
+            <Group label={t("group.align")}>
               {(
                 [
-                  ["left", "靠左"],
-                  ["center", "水平置中"],
-                  ["right", "靠右"],
-                  ["top", "靠上"],
-                  ["middle", "垂直置中"],
-                  ["bottom", "靠下"],
+                  ["left", t("ribbon.shapesLeft")],
+                  ["center", t("ribbon.shapesCenter")],
+                  ["right", t("ribbon.shapesRight")],
+                  ["top", t("ribbon.shapesTop")],
+                  ["middle", t("ribbon.shapesMiddle")],
+                  ["bottom", t("ribbon.shapesBottom")],
                 ] as const
               ).map(([to, label]) => (
                 <Button key={to} icon={icons.alignShapes} label={label} disabled={!shapes} onClick={() => run({ kind: "alignShapes", to })} />
@@ -564,21 +581,21 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "動畫" && <AnimationTab status={status} run={run} presets={animPresets} />}
         {tab === SMARTART_TAB && (
           <>
-            <Group label="建立圖形">
-              <Button large icon={icons.addShapeAfter} label="在後面新增圖案" onClick={() => run({ kind: "smartArt", command: "addAfter" })} />
+            <Group label={t("group.createGraphic")}>
+              <Button large icon={icons.addShapeAfter} label={t("ribbon.addShapeAfter")} onClick={() => run({ kind: "smartArt", command: "addAfter" })} />
               <div className="rb-col">
-                <Button icon={icons.addShapeBefore} label="在前面新增圖案" onClick={() => run({ kind: "smartArt", command: "addBefore" })} />
-                <Button icon={icons.addChild} label="新增下層圖案" onClick={() => run({ kind: "smartArt", command: "addChild" })} />
-                <Button icon={icons.textPane} label="文字窗格" active={textPaneOpen} onClick={() => run({ kind: "textPane" })} />
+                <Button icon={icons.addShapeBefore} label={t("ribbon.addShapeBefore")} onClick={() => run({ kind: "smartArt", command: "addBefore" })} />
+                <Button icon={icons.addChild} label={t("ribbon.addShapeBelow")} onClick={() => run({ kind: "smartArt", command: "addChild" })} />
+                <Button icon={icons.textPane} label={t("ribbon.textPane")} active={textPaneOpen} onClick={() => run({ kind: "textPane" })} />
               </div>
               <div className="rb-col">
-                <Button icon={icons.outdent} label="升階" onClick={() => run({ kind: "smartArt", command: "promote" })} />
-                <Button icon={icons.indent} label="降階" onClick={() => run({ kind: "smartArt", command: "demote" })} />
-                <Button icon={icons.delete} label="刪除圖案" onClick={() => run({ kind: "smartArt", command: "delete" })} />
+                <Button icon={icons.outdent} label={t("ribbon.promote")} onClick={() => run({ kind: "smartArt", command: "promote" })} />
+                <Button icon={icons.indent} label={t("ribbon.demote")} onClick={() => run({ kind: "smartArt", command: "demote" })} />
+                <Button icon={icons.delete} label={t("ribbon.deleteShape")} onClick={() => run({ kind: "smartArt", command: "delete" })} />
               </div>
               <div className="rb-col">
-                <Button icon={icons.moveUp} label="上移" onClick={() => run({ kind: "smartArt", command: "moveUp" })} />
-                <Button icon={icons.moveDown} label="下移" onClick={() => run({ kind: "smartArt", command: "moveDown" })} />
+                <Button icon={icons.moveUp} label={t("ribbon.moveUp")} onClick={() => run({ kind: "smartArt", command: "moveUp" })} />
+                <Button icon={icons.moveDown} label={t("ribbon.moveDown")} onClick={() => run({ kind: "smartArt", command: "moveDown" })} />
               </div>
             </Group>
             {accessGroup}
@@ -586,75 +603,75 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         )}
         {tab === "投影片放映" && (
           <>
-            <Group label="開始投影片放映">
-              <Button icon={icons.playStart} label="從首張投影片" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: true })} />
-              <Button icon={icons.playCurrent} label="從目前投影片" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} />
-              <Button icon={icons.presenter} label="簡報者檢視" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false, presenter: true })} />
+            <Group label={t("group.startSlideShow")}>
+              <Button icon={icons.playStart} label={t("ribbon.fromBeginning")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: true })} />
+              <Button icon={icons.playCurrent} label={t("ribbon.fromCurrent")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} />
+              <Button icon={icons.presenter} label={t("ribbon.presenterView")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false, presenter: true })} />
             </Group>
-            <Group label="螢幕">
-              <label className="rb-check" title="接上第二個螢幕時，投影片在外接螢幕放映，這個螢幕顯示簡報者檢視">
+            <Group label={t("group.monitors")}>
+              <label className="rb-check" title={t("ribbon.usePresenterTip")}>
                 <input type="checkbox" checked={usePresenter} onChange={(e) => run({ kind: "usePresenter", on: e.target.checked })} />
-                使用簡報者檢視
+                {t("ribbon.usePresenter")}
               </label>
             </Group>
-            <Group label="匯出">
-              <Button large icon={icons.exportVideo} label="匯出為視訊" disabled={status.slideCount === 0} onClick={() => run({ kind: "exportVideo" })} />
+            <Group label={t("group.export")}>
+              <Button large icon={icons.exportVideo} label={t("ribbon.exportVideo")} disabled={status.slideCount === 0} onClick={() => run({ kind: "exportVideo" })} />
             </Group>
           </>
         )}
         {tab === "校閱" && (
           <>
-            <Group label="校訂">
-              <Button large icon={icons.spelling} label="拼字檢查" active={spellOn} onClick={() => run({ kind: "spellCheck", on: !spellOn })} />
+            <Group label={t("group.proofing")}>
+              <Button large icon={icons.spelling} label={t("ribbon.spelling")} active={spellOn} onClick={() => run({ kind: "spellCheck", on: !spellOn })} />
             </Group>
-            <Group label="協助工具">
-              <Button large icon={icons.checkAccess} label="檢查協助工具" active={checkerOpen} onClick={() => run({ kind: "checker" })} />
+            <Group label={t("group.accessibility")}>
+              <Button large icon={icons.checkAccess} label={t("ribbon.checkAccessibility")} active={checkerOpen} onClick={() => run({ kind: "checker" })} />
               <AltTextDialog
                 load={loadAltText}
                 run={run}
-                button={(open, toggle) => <Button large icon={icons.altText} label="替代文字" active={open} disabled={!status.frame || status.selectionCount !== 1} onClick={toggle} />}
+                button={(open, toggle) => <Button large icon={icons.altText} label={t("ribbon.altText")} active={open} disabled={!status.frame || status.selectionCount !== 1} onClick={toggle} />}
               />
             </Group>
           </>
         )}
         {tab === "檢視" && (
           <>
-            <Group label="簡報檢視">
-              <Button large icon={icons.normalView} label="標準" active={viewMode === "normal"} onClick={() => run({ kind: "viewMode", mode: "normal" })} />
-              <Button large icon={icons.sorterView} label="投影片瀏覽" active={viewMode === "sorter"} onClick={() => run({ kind: "viewMode", mode: "sorter" })} />
+            <Group label={t("group.presentationViews")}>
+              <Button large icon={icons.normalView} label={t("ribbon.normal")} active={viewMode === "normal"} onClick={() => run({ kind: "viewMode", mode: "normal" })} />
+              <Button large icon={icons.sorterView} label={t("ribbon.sorter")} active={viewMode === "sorter"} onClick={() => run({ kind: "viewMode", mode: "sorter" })} />
             </Group>
-            <Group label="顯示">
+            <Group label={t("group.show")}>
               <div className="rb-checks">
                 <label className="rb-check">
                   <input type="checkbox" checked={rulerOn} onChange={() => run({ kind: "toggleRuler" })} />
-                  尺規
+                  {t("ribbon.ruler")}
                 </label>
                 <label className="rb-check">
                   <input type="checkbox" checked={!!status.showGrid} onChange={(e) => run({ kind: "showGrid", on: e.target.checked })} />
-                  格線
+                  {t("ribbon.gridlines")}
                 </label>
                 <label className="rb-check">
                   <input type="checkbox" checked={!!status.showGuides} onChange={(e) => run({ kind: "showGuides", on: e.target.checked })} />
-                  輔助線
+                  {t("ribbon.guides")}
                 </label>
               </div>
               <GridMenu status={status} run={run} />
-              <Button icon={icons.notes} label="備忘稿" active={notesOpen} onClick={() => run({ kind: "toggleNotes" })} />
+              <Button icon={icons.notes} label={t("ribbon.notes")} active={notesOpen} onClick={() => run({ kind: "toggleNotes" })} />
             </Group>
-            <Group label="外觀">
+            <Group label={t("group.appearance")}>
               <label className="rb-field">
-                介面
+                {t("ribbon.interface")}
                 <select value={appearance} onChange={(e) => run({ kind: "appearance", value: e.target.value as Appearance })} onMouseDown={(e) => e.stopPropagation()}>
-                  <option value="system">跟隨系統</option>
-                  <option value="light">淺色</option>
-                  <option value="dark">深色</option>
+                  <option value="system">{t("ribbon.followSystem")}</option>
+                  <option value="light">{t("ribbon.light")}</option>
+                  <option value="dark">{t("ribbon.dark")}</option>
                 </select>
               </label>
             </Group>
-            <Group label="縮放">
-              <Button icon={icons.zoomIn} label="放大" onClick={() => run({ kind: "zoom", factor: 1.25 })} />
-              <Button icon={icons.zoomOut} label="縮小" onClick={() => run({ kind: "zoom", factor: 0.8 })} />
-              <Button icon={icons.fit} label="符合視窗" onClick={() => run({ kind: "zoom", factor: "fit" })} />
+            <Group label={t("group.zoom")}>
+              <Button icon={icons.zoomIn} label={t("ribbon.zoomIn")} onClick={() => run({ kind: "zoom", factor: 1.25 })} />
+              <Button icon={icons.zoomOut} label={t("ribbon.zoomOut")} onClick={() => run({ kind: "zoom", factor: 0.8 })} />
+              <Button icon={icons.fit} label={t("ribbon.fit")} onClick={() => run({ kind: "zoom", factor: "fit" })} />
             </Group>
           </>
         )}
@@ -673,48 +690,48 @@ function GridMenu({ status, run }: { status: Status; run: (c: Command) => void }
   return (
     <Popover
       button={(open, toggle) => (
-        <button className={open ? "rb-btn active" : "rb-btn"} title="格線及輔助線" onMouseDown={keepFocus} onClick={toggle}>
+        <button className={open ? "rb-btn active" : "rb-btn"} title={t("grid.title")} onMouseDown={keepFocus} onClick={toggle}>
           {icons.grid}
-          <span>格線設定 ▾</span>
+          <span>{t("grid.settingsMenu")}</span>
         </button>
       )}
     >
       {(close) => (
-        <div className="hf-dialog grid-menu" role="dialog" aria-label="格線及輔助線">
-          <div className="hf-title">貼齊</div>
+        <div className="hf-dialog grid-menu" role="dialog" aria-label={t("grid.title")}>
+          <div className="hf-title">{t("grid.snapTo")}</div>
           <label className="hf-row">
             <input type="checkbox" checked={!!status.snapToGrid} onChange={(e) => run({ kind: "snapToGrid", on: e.target.checked })} />
-            物件貼齊格線
+            {t("grid.snapToGrid")}
           </label>
-          <div className="hf-title sep">格線設定</div>
+          <div className="hf-title sep">{t("grid.gridSettings")}</div>
           <label className="hf-row">
-            間距
+            {t("grid.spacing")}
             <select value={GRID_SPACINGS.find((g) => Math.abs(g - spacing) < 0.005) ?? ""} onChange={(e) => run({ kind: "gridSpacing", emu: Number(e.target.value) * EMU_PER_CM })}>
-              {!GRID_SPACINGS.some((g) => Math.abs(g - spacing) < 0.005) && <option value="">{spacing.toFixed(2)} 公分</option>}
+              {!GRID_SPACINGS.some((g) => Math.abs(g - spacing) < 0.005) && <option value="">{t("ribbon.cm", { n: spacing.toFixed(2) })}</option>}
               {GRID_SPACINGS.map((g) => (
                 <option key={g} value={g}>
-                  {g} 公分
+                  {t("ribbon.cm", { n: g })}
                 </option>
               ))}
             </select>
           </label>
           <label className="hf-row">
             <input type="checkbox" checked={!!status.showGrid} onChange={(e) => run({ kind: "showGrid", on: e.target.checked })} />
-            在螢幕上顯示格線
+            {t("grid.showGrid")}
           </label>
-          <div className="hf-title sep">輔助線設定</div>
+          <div className="hf-title sep">{t("grid.guideSettings")}</div>
           <label className="hf-row">
             <input type="checkbox" checked={!!status.showGuides} onChange={(e) => run({ kind: "showGuides", on: e.target.checked })} />
-            在螢幕上顯示繪圖輔助線
+            {t("grid.showGuides")}
           </label>
           <div className="hf-buttons">
-            <button onClick={() => run({ kind: "addGuide", vertical: true })}>新增垂直輔助線</button>
-            <button onClick={() => run({ kind: "addGuide", vertical: false })}>新增水平輔助線</button>
+            <button onClick={() => run({ kind: "addGuide", vertical: true })}>{t("grid.addVertical")}</button>
+            <button onClick={() => run({ kind: "addGuide", vertical: false })}>{t("grid.addHorizontal")}</button>
           </div>
-          <div className="hf-note">拖曳輔助線可移動，拖出投影片即可刪除。</div>
+          <div className="hf-note">{t("grid.dragHint")}</div>
           <div className="hf-buttons">
             <button className="primary" onClick={close}>
-              完成
+              {t("common.done")}
             </button>
           </div>
         </div>

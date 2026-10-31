@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { Thumb } from "./Thumb";
 import type { Command } from "../lib/commands";
@@ -89,7 +90,7 @@ export function SlideSorter({ count, current, thumbs, transitions, size, onSelec
       className="slide-sorter"
       tabIndex={0}
       role="listbox"
-      aria-label="投影片瀏覽"
+      aria-label={t("ribbon.sorter")}
       onKeyDown={onKey}
       onDragOver={(e) => e.preventDefault()}
       onDrop={() => finishDrop(dropAt ?? count)}
@@ -100,7 +101,7 @@ export function SlideSorter({ count, current, thumbs, transitions, size, onSelec
           key={i}
           role="option"
           aria-selected={i === current}
-          aria-label={labels?.[i] ?? `投影片 ${i + 1}`}
+          aria-label={labels?.[i] ?? t("slide.label", { n: i + 1 })}
           className={["sorter-item", i === current && "current", dragFrom !== null && dropAt === i && "drop-before", dragFrom !== null && dropAt === i + 1 && i === count - 1 && "drop-after"].filter(Boolean).join(" ")}
           draggable
           onDragStart={(e) => {

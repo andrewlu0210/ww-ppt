@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef } from "react";
 import init, { createApp, type App } from "../wasm/ppt_wasm";
 import { SHAPES_MARKER } from "../lib/commands";
@@ -68,7 +69,7 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
 
     (async () => {
       if (!("gpu" in navigator)) {
-        onError("此 WebView 不支援 WebGPU（需要 macOS 26 以上）。");
+        onError(t("canvas.noWebGpu"));
         return;
       }
       setWasmMemory((await init()).memory);
@@ -77,7 +78,7 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
       try {
         app = await createApp(canvas, dpr);
       } catch (e) {
-        onError(`無法初始化 WebGPU 渲染器：${String(e)}`);
+        onError(t("canvas.initFailed", { error: String(e) }));
         return;
       }
       if (disposed) return;
@@ -263,7 +264,7 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
       <textarea
         ref={inputRef}
         className="ime-input"
-        aria-label="投影片文字輸入"
+        aria-label={t("canvas.textInput")}
         autoCorrect="off"
         autoCapitalize="off"
         spellCheck={false}

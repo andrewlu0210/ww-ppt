@@ -154,21 +154,21 @@ export function App() {
     const f = status.frame;
     const frame = f ? `${f.x},${f.y},${f.w},${f.h},${f.rot}` : "";
     const input = document.querySelector(".ime-input");
-    input?.setAttribute("aria-label", `投影片編輯區。${selection || engine.describeSlide()}`);
+    input?.setAttribute("aria-label", t("app.editArea", { detail: selection || engine.describeSlide() }));
     if (status.slideCount > 0 && status.slideIndex !== prev.slide) {
       announce(engine.describeSlide());
     } else if (selection !== prev.selection) {
-      announce(selection || (prev.selection ? "已取消選取" : ""));
+      announce(selection || (prev.selection ? t("app.deselected") : ""));
     } else if (f && frame !== prev.frame && prev.frame && performance.now() - lastKeyAt.current < 500) {
       const cm = (emu: number) => (emu / 360_000).toFixed(2);
       const [px, py, pw, ph, prot] = prev.frame.split(",").map(Number);
-      if (f.rot !== prot) announce(`旋轉 ${Math.round(f.rot)} 度`);
-      else if (f.w !== pw || f.h !== ph) announce(`寬 ${cm(f.w)}，高 ${cm(f.h)} 公分`);
-      else if (f.x !== px || f.y !== py) announce(`水平 ${cm(f.x)}，垂直 ${cm(f.y)} 公分`);
+      if (f.rot !== prot) announce(t("app.rotated", { deg: Math.round(f.rot) }));
+      else if (f.w !== pw || f.h !== ph) announce(t("app.resized", { w: cm(f.w), h: cm(f.h) }));
+      else if (f.x !== px || f.y !== py) announce(t("app.moved", { x: cm(f.x), y: cm(f.y) }));
     }
     spoken.current = { slide: status.slideIndex, selection, frame };
   }, [status]);
-  const [doc, setDoc] = useState<Doc>({ name: "簡報1", path: null, savedRevision: 0 });
+  const [doc, setDoc] = useState<Doc>({ name: t("doc.defaultName"), path: null, savedRevision: 0 });
   const [error, setError] = useState<string | null>(null);
   const [fontsLoading, setFontsLoading] = useState(false);
   const [fonts, setFonts] = useState<string[]>([]);
@@ -193,7 +193,7 @@ export function App() {
   const shownSlide = showState?.slide;
   useEffect(() => {
     if (shownSlide === undefined) return;
-    announce(shownSlide < 0 ? "放映結束，按 Esc 離開" : (slideLabelsRef.current[shownSlide] ?? `投影片 ${shownSlide + 1}`));
+    announce(shownSlide < 0 ? t("app.showEnded") : (slideLabelsRef.current[shownSlide] ?? t("slide.label", { n: shownSlide + 1 })));
   }, [shownSlide]);
   /** Whether the slides are on another display (the audience window is open). */
   const [audienceOpen, setAudienceOpen] = useState(false);
@@ -673,7 +673,7 @@ export function App() {
       setDoc({ name, path, savedRevision: engine.revision() });
       return true;
     } catch (e) {
-      await showError(`無法儲存檔案：${String(e)}`);
+      await showError(t("app.saveFailed", { error: String(e) }));
       return false;
     }
   }, []);
@@ -693,7 +693,7 @@ export function App() {
     try {
       await writeFile(path, engine.exportPdf());
     } catch (e) {
-      await showError(`無法匯出 PDF：${String(e)}`);
+      await showError(t("app.pdfFailed", { error: String(e) }));
     }
   }, []);
 
@@ -718,7 +718,7 @@ export function App() {
         await nextFrame();
         mark("open: first slide on screen", performance.now() - t0);
       } catch (e) {
-        setError(`無法開啟檔案：${String(e)}`);
+        setError(t("app.openFailed", { error: String(e) }));
       }
     },
     [documentReplaced],
@@ -739,7 +739,7 @@ export function App() {
     const scale = at?.scaleFactor ?? 1;
     const win = new WebviewWindow(AUDIENCE_LABEL, {
       url: "index.html?audience",
-      title: "投影片放映",
+      title: t("tab.slideShow"),
       x: (at?.position.x ?? 0) / scale + (target ? 0 : 60),
       y: (at?.position.y ?? 0) / scale + (target ? 0 : 60),
       width: target ? target.size.width / scale : 800,
@@ -914,7 +914,7 @@ export function App() {
         case "new":
           if (!(await confirmDiscard())) break;
           engine.newDeck();
-          await documentReplaced("簡報1", null);
+          await documentReplaced(t("doc.defaultName"), null);
           break;
         case "save":
           await save();
@@ -926,12 +926,12 @@ export function App() {
           await exportPdf();
           break;
         case "undo":
-          announce(engine.undo() ? "復原" : "沒有可以復原的動作");
+          announce(engine.undo() ? t("ribbon.undo") : t("app.nothingToUndo"));
           structural = true;
           await deckStyleChanged();
           break;
         case "redo":
-          announce(engine.redo() ? "取消復原" : "沒有可以取消復原的動作");
+          announce(engine.redo() ? t("ribbon.redo") : t("app.nothingToRedo"));
           structural = true;
           await deckStyleChanged();
           break;
@@ -973,7 +973,7 @@ export function App() {
           const path = await pickImage();
           if (!path) break;
           const ext = path.split(".").pop() ?? "png";
-          if (!engine.insertPicture(await readFile(path), ext)) setError("無法讀取這個圖片檔。");
+          if (!engine.insertPicture(await readFile(path), ext)) setError(t("app.badImage"));
           break;
         }
         case "tableMerge":
@@ -1106,7 +1106,7 @@ export function App() {
           const path = await pickImage();
           if (!path) break;
           const ext = path.split(".").pop() ?? "png";
-          if (!engine.setBackgroundPicture(await readFile(path), ext)) setError("無法讀取這個圖片檔。");
+          if (!engine.setBackgroundPicture(await readFile(path), ext)) setError(t("app.badImage"));
           break;
         }
         case "resetBackground":
@@ -1127,7 +1127,7 @@ export function App() {
             else if (c.kind === "fontScheme") engine.setFontScheme(c.name);
             else engine.setSlideSize(c.width, c.height, c.fit);
           } catch (e) {
-            setError(`無法變更設計：${String(e)}`);
+            setError(t("app.designFailed", { error: String(e) }));
           }
           structural = true;
           await deckStyleChanged();
@@ -1349,7 +1349,7 @@ export function App() {
         await documentReplaced(newest.name, newest.path, newest.id);
         return true;
       } catch (e) {
-        await showError(`無法復原「${newest.name}」：${String(e)}`);
+        await showError(t("app.recoverFailed", { name: newest.name, error: String(e) }));
         return false;
       }
     },
@@ -1362,13 +1362,13 @@ export function App() {
       engine.setFallbackFonts([...FALLBACK_FAMILIES, EMOJI_FAMILY]);
       engine.setWorkspaceColor(cssColor("--workspace"));
       engine.setShowGrid(loadViewPrefs().grid);
-      if (!inTauri) setError("目前在瀏覽器中執行：沒有原生字型與檔案存取，請用 npm run tauri dev 啟動。");
+      if (!inTauri) setError(t("app.inBrowser"));
       void listFonts().then(setFonts);
       await loadFonts(FALLBACK_FAMILIES);
       if (!(await offerRecovery(engine))) {
         const [first] = await startupFiles();
         if (first) await openPath(first);
-        else await documentReplaced("簡報1", null);
+        else await documentReplaced(t("doc.defaultName"), null);
       }
       void startAutomation({ engine: () => engineRef.current, openPath, refresh, run, documentReplaced });
     },
@@ -1466,7 +1466,7 @@ export function App() {
             {error && (
               <div className="banner" role="alert">
                 {error}
-                <button onClick={() => setError(null)} aria-label="關閉">
+                <button onClick={() => setError(null)} aria-label={t("common.close")}>
                   ×
                 </button>
               </div>

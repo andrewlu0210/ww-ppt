@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { ReactNode } from "react";
 import { Popover } from "./Popover";
 
@@ -54,7 +55,7 @@ export function ColorPicker({ icon, label, value, disabled, noneLabel, onPick }:
         };
         return (
           <div className="color-panel" onMouseDown={(e) => e.preventDefault()}>
-            <div className="color-heading">佈景主題色彩</div>
+            <div className="color-heading">{t("color.theme")}</div>
             <div className="color-grid">
               {THEME.map((c, i) => (
                 <button key={i} className="swatch" style={{ background: c }} title={c} onClick={() => pick(c)} />
@@ -66,7 +67,7 @@ export function ColorPicker({ icon, label, value, disabled, noneLabel, onPick }:
                 }),
               )}
             </div>
-            <div className="color-heading">標準色彩</div>
+            <div className="color-heading">{t("color.standard")}</div>
             <div className="color-grid">
               {STANDARD.map((c) => (
                 <button key={c} className="swatch" style={{ background: c }} title={c} onClick={() => pick(c)} />

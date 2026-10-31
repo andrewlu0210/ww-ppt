@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef } from "react";
 
 /** A misspelled word under the pointer (`App::spellingAt`); ranges in UTF-16 units. */
@@ -54,13 +55,13 @@ export function SpellMenu({ x, y, hit, guesses, onPick, onIgnore, onLearn, onClo
     </button>
   );
   return (
-    <div ref={ref} className="spell-menu" role="menu" aria-label={`「${hit.word}」的拼字建議`} style={{ left: x, top: y }}>
-      {guesses === null && <div className="spell-note">正在尋找建議…</div>}
-      {guesses?.length === 0 && <div className="spell-note">沒有拼字建議</div>}
+    <div ref={ref} className="spell-menu" role="menu" aria-label={t("spell.suggestionsFor", { word: hit.word })} style={{ left: x, top: y }}>
+      {guesses === null && <div className="spell-note">{t("spell.looking")}</div>}
+      {guesses?.length === 0 && <div className="spell-note">{t("spell.none")}</div>}
       {guesses?.slice(0, MAX_GUESSES).map((g) => item(g, () => onPick(g), true))}
       <div className="spell-sep" />
-      {item("忽略拼字", onIgnore)}
-      {item("加入字典", onLearn)}
+      {item(t("spell.ignore"), onIgnore)}
+      {item(t("spell.learn"), onLearn)}
     </div>
   );
 }

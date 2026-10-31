@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import type { App } from "../wasm/ppt_wasm";
 import { focusCanvas } from "./CanvasHost";
@@ -15,15 +16,15 @@ interface PaneItem {
 }
 
 const KIND_LABELS: Record<string, string> = {
-  group: "群組",
-  picture: "圖片",
-  table: "表格",
-  chart: "圖表",
+  group: t("kind.group"),
+  picture: t("kind.picture"),
+  table: t("kind.table"),
+  chart: t("kind.chart"),
   diagram: "SmartArt",
-  text: "文字方塊",
-  line: "線條",
-  shape: "圖案",
-  other: "物件",
+  text: t("kind.textBox"),
+  line: t("kind.line"),
+  shape: t("kind.shape"),
+  other: t("kind.object"),
 };
 
 const KIND_GLYPHS: Record<string, string> = { group: "▣", picture: "▨", table: "▦", chart: "▥", diagram: "◈", text: "T", line: "╱", shape: "◆", other: "□" };
@@ -100,26 +101,26 @@ export function SelectionPane({ engine, version, onChange, onClose }: Props) {
   };
 
   return (
-    <aside className="selection-pane" aria-label="選取窗格">
+    <aside className="selection-pane" aria-label={t("ribbon.selectionPane")}>
       <div className="pane-head">
-        <span className="pane-title">選取窗格</span>
-        <button className="pane-close" onClick={onClose} aria-label="關閉選取窗格" title="關閉">
+        <span className="pane-title">{t("ribbon.selectionPane")}</span>
+        <button className="pane-close" onClick={onClose} aria-label={t("pane.close")} title={t("common.close")}>
           ×
         </button>
       </div>
       <div className="pane-tools">
-        <button onClick={() => act((e) => e.setAllHidden(false))}>全部顯示</button>
-        <button onClick={() => act((e) => e.setAllHidden(true))}>全部隱藏</button>
+        <button onClick={() => act((e) => e.setAllHidden(false))}>{t("pane.showAll")}</button>
+        <button onClick={() => act((e) => e.setAllHidden(true))}>{t("pane.hideAll")}</button>
         <span className="spacer" />
-        <button disabled={!current} onClick={() => current && act((e) => e.moveInPane(current.id, true))} aria-label="上移一層" title="上移一層">
+        <button disabled={!current} onClick={() => current && act((e) => e.moveInPane(current.id, true))} aria-label={t("ribbon.bringForward")} title={t("ribbon.bringForward")}>
           ▲
         </button>
-        <button disabled={!current} onClick={() => current && act((e) => e.moveInPane(current.id, false))} aria-label="下移一層" title="下移一層">
+        <button disabled={!current} onClick={() => current && act((e) => e.moveInPane(current.id, false))} aria-label={t("ribbon.sendBackward")} title={t("ribbon.sendBackward")}>
           ▼
         </button>
       </div>
-      <div className="pane-list" ref={listRef} role="listbox" aria-label="投影片上的物件" tabIndex={0} onKeyDown={onKey}>
-        {items.length === 0 && <div className="pane-empty">這張投影片沒有物件</div>}
+      <div className="pane-list" ref={listRef} role="listbox" aria-label={t("pane.objects")} tabIndex={0} onKeyDown={onKey}>
+        {items.length === 0 && <div className="pane-empty">{t("pane.empty")}</div>}
         {items.map((i) => (
           <div
             key={i.id}
@@ -127,7 +128,7 @@ export function SelectionPane({ engine, version, onChange, onClose }: Props) {
             aria-selected={i.selected}
             className={["pane-row", i.selected && "selected", i.hidden && "hidden"].filter(Boolean).join(" ")}
             style={{ paddingLeft: 8 + i.depth * 16 }}
-            title={i.altText ? `替代文字：${i.altText}` : i.decorative ? "裝飾用" : KIND_LABELS[i.kind]}
+            title={i.altText ? t("pane.altTextTip", { text: i.altText }) : i.decorative ? t("pane.decorative") : KIND_LABELS[i.kind]}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               listRef.current?.focus();
@@ -165,9 +166,9 @@ export function SelectionPane({ engine, version, onChange, onClose }: Props) {
             )}
             <button
               className="pane-eye"
-              aria-label={i.hidden ? `顯示 ${i.name}` : `隱藏 ${i.name}`}
+              aria-label={i.hidden ? t("pane.showNamed", { name: i.name }) : t("pane.hideNamed", { name: i.name })}
               aria-pressed={!i.hidden}
-              title={i.hidden ? "顯示" : "隱藏"}
+              title={i.hidden ? t("pane.show") : t("pane.hide")}
               onMouseDown={(e) => e.preventDefault()}
               onClick={(e) => {
                 e.stopPropagation();

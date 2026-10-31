@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useState } from "react";
 import { Popover } from "./Popover";
 
@@ -11,7 +12,7 @@ export function TablePicker(props: { button: (open: boolean, toggle: () => void)
     <Popover button={props.button}>
       {(close) => (
         <div className="table-picker" onMouseLeave={() => setHover([0, 0])}>
-          <div className="table-picker-title">{hover[0] ? `${hover[1]}x${hover[0]} 表格` : "插入表格"}</div>
+          <div className="table-picker-title">{hover[0] ? t("tablePicker.size", { cols: hover[1], rows: hover[0] }) : t("tablePicker.insert")}</div>
           <div className="table-picker-grid" style={{ gridTemplateColumns: `repeat(${COLS}, 1fr)` }}>
             {Array.from({ length: ROWS * COLS }, (_, i) => {
               const r = Math.floor(i / COLS) + 1;
@@ -21,7 +22,7 @@ export function TablePicker(props: { button: (open: boolean, toggle: () => void)
                 <button
                   key={i}
                   className={on ? "table-cell on" : "table-cell"}
-                  aria-label={`${r} 列 ${c} 欄`}
+                  aria-label={t("tablePicker.cellAria", { rows: r, cols: c })}
                   onMouseEnter={() => setHover([r, c])}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {

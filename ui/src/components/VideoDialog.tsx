@@ -1,12 +1,13 @@
+import { t } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import type { App as Engine } from "../wasm/ppt_wasm";
 import { cancelVideoExport, exportVideo, onVideoEvents, pickSavePath } from "../lib/backend";
 
 const QUALITIES: [number, string][] = [
-  [3840, "Ultra HD (4K)：3840 × 2160"],
-  [1920, "Full HD (1080p)：1920 × 1080"],
-  [1280, "HD (720p)：1280 × 720"],
-  [852, "標準 (480p)：852 × 480"],
+  [3840, t("video.uhd")],
+  [1920, t("video.fullHd")],
+  [1280, t("video.hd")],
+  [852, t("video.standard480")],
 ];
 
 interface Props {
@@ -34,7 +35,7 @@ export function VideoDialog({ engine, name, onClose }: Props) {
   useEffect(() => {
     const off = onVideoEvents(
       (done, total) => setPhase((p) => (p.kind === "running" ? { kind: "running", done, total } : p)),
-      (r) => setPhase(r.ok ? { kind: "finished", path: r.path } : r.cancelled ? { kind: "setup" } : { kind: "failed", error: r.error ?? "未知的錯誤" }),
+      (r) => setPhase(r.ok ? { kind: "finished", path: r.path } : r.cancelled ? { kind: "setup" } : { kind: "failed", error: r.error ?? t("video.unknownError") }),
     );
     return () => void off.then((f) => f());
   }, []);
@@ -58,10 +59,10 @@ export function VideoDialog({ engine, name, onClose }: Props) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !running && onClose()}>
-      <div className="hf-dialog video-dialog" role="dialog" aria-label="匯出為視訊" aria-modal="true" onKeyDown={(e) => e.key === "Escape" && !running && onClose()}>
-        <div className="hf-title">匯出為視訊</div>
+      <div className="hf-dialog video-dialog" role="dialog" aria-label={t("ribbon.exportVideo")} aria-modal="true" onKeyDown={(e) => e.key === "Escape" && !running && onClose()}>
+        <div className="hf-title">{t("ribbon.exportVideo")}</div>
         <label className="hf-row">
-          品質
+          {t("video.quality")}
           <select className="video-select" value={width} disabled={running} onChange={(e) => setWidth(Number(e.target.value))}>
             {QUALITIES.map(([w, label]) => (
               <option key={w} value={w}>
@@ -72,29 +73,29 @@ export function VideoDialog({ engine, name, onClose }: Props) {
         </label>
         <label className="hf-row">
           <input type="checkbox" checked={timings} disabled={running} onChange={(e) => setTimings(e.target.checked)} />
-          使用錄製的時間（投影片有設定「之後」時）
+          {t("video.useTimings")}
         </label>
         <label className="hf-row">
-          每張投影片的秒數
+          {t("video.secondsPerSlide")}
           <input className="hf-text video-seconds" type="number" min={1} max={600} step={0.5} value={seconds} disabled={running} onChange={(e) => setSeconds(Math.max(0.5, Number(e.target.value) || 5))} />
         </label>
-        <div className="hf-note">轉場與動畫會依序自動播放；隱藏的投影片不會匯出。</div>
+        <div className="hf-note">{t("video.note")}</div>
         {phase.kind === "running" && (
-          <div className="video-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label="匯出進度">
+          <div className="video-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={t("video.progressAria")}>
             <div className="video-bar" style={{ width: `${percent}%` }} />
-            <span>{phase.total ? `${percent}%（${phase.done} / ${phase.total} 格）` : "準備中…"}</span>
+            <span>{phase.total ? t("video.progress", { percent, done: phase.done, total: phase.total }) : t("video.preparing")}</span>
           </div>
         )}
-        {phase.kind === "finished" && <div className="hf-note video-done">已匯出到 {phase.path}</div>}
-        {phase.kind === "failed" && <div className="hf-note video-error">無法匯出視訊：{phase.error}</div>}
+        {phase.kind === "finished" && <div className="hf-note video-done">{t("video.exported", { path: phase.path })}</div>}
+        {phase.kind === "failed" && <div className="hf-note video-error">{t("video.failed", { error: phase.error })}</div>}
         <div className="hf-buttons">
           {running ? (
-            <button onClick={() => void cancelVideoExport()}>取消</button>
+            <button onClick={() => void cancelVideoExport()}>{t("save.cancel")}</button>
           ) : (
             <>
-              <button onClick={onClose}>{phase.kind === "finished" ? "完成" : "取消"}</button>
+              <button onClick={onClose}>{phase.kind === "finished" ? t("common.done") : t("save.cancel")}</button>
               <button className="primary" disabled={!engine} onClick={() => void start()} autoFocus>
-                {phase.kind === "finished" ? "再匯出一次…" : "建立視訊…"}
+                {phase.kind === "finished" ? t("video.exportAgain") : t("video.create")}
               </button>
             </>
           )}

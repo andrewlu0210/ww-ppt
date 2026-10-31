@@ -1,5 +1,7 @@
 // Spoken feedback for screen readers (VoiceOver) through a polite live region.
 
+import { t } from "../i18n";
+
 let region: HTMLElement | null = null;
 let timer = 0;
 /** Messages waiting for the next update, spoken together. */
@@ -28,7 +30,7 @@ export function announce(message: string) {
   window.clearTimeout(timer);
   // A fresh text node after a pause makes VoiceOver read even a repeated message.
   timer = window.setTimeout(() => {
-    lastAnnouncement = pending.join("。");
+    lastAnnouncement = pending.join(t("common.sentenceSeparator"));
     pending = [];
     el.textContent = lastAnnouncement;
   }, 80);

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useRef } from "react";
 import type { App as Engine } from "../wasm/ppt_wasm";
 
@@ -50,12 +51,12 @@ export function NotesPane({ engine, slideIndex, revision, spellCheck, height, on
 
   return (
     <div className="notes-pane" style={{ height }}>
-      <div className="notes-splitter" onPointerDown={startResize} role="separator" aria-orientation="horizontal" aria-label="調整備忘稿高度" />
+      <div className="notes-splitter" onPointerDown={startResize} role="separator" aria-orientation="horizontal" aria-label={t("notes.resize")} />
       <textarea
         ref={ref}
         className="notes-input"
-        placeholder="按一下以新增備忘稿"
-        aria-label="備忘稿"
+        placeholder={t("notes.placeholder")}
+        aria-label={t("ribbon.notes")}
         spellCheck={spellCheck}
         onFocus={() => {
           engine?.beginNotesEdit();

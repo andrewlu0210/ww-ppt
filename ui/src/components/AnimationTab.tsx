@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useState, type ReactNode } from "react";
 import { Popover } from "./Popover";
 import type { Command } from "../lib/commands";
@@ -6,83 +7,83 @@ import type { AnimationInfo, AnimationPreset, Status } from "../lib/status";
 /** PowerPoint preset names by class and `presetID` (the common ones). */
 const PRESETS: Record<string, Record<number, string>> = {
   entr: {
-    1: "出現",
-    2: "飛入",
-    3: "百葉窗",
-    4: "方塊",
-    5: "棋盤式",
-    6: "圓形",
-    7: "慢速推入",
-    8: "菱形",
-    9: "溶解",
-    10: "淡出",
-    12: "窺視",
-    13: "十字形",
-    14: "隨機線條",
-    16: "分割",
-    17: "伸展",
-    18: "階梯狀",
-    19: "旋轉",
-    20: "楔形",
-    21: "輪子",
-    22: "擦去",
-    23: "縮放",
-    26: "彈跳",
-    53: "縮放",
-    55: "放大旋轉",
+    1: t("anim.appear"),
+    2: t("anim.flyIn"),
+    3: t("anim.blinds"),
+    4: t("anim.box"),
+    5: t("anim.checkerboard"),
+    6: t("anim.circle"),
+    7: t("anim.crawlIn"),
+    8: t("anim.diamond"),
+    9: t("anim.dissolve"),
+    10: t("anim.fade"),
+    12: t("anim.peekIn"),
+    13: t("anim.plus"),
+    14: t("anim.randomBars"),
+    16: t("anim.split"),
+    17: t("anim.stretch"),
+    18: t("anim.strips"),
+    19: t("anim.swivel"),
+    20: t("anim.wedge"),
+    21: t("anim.wheel"),
+    22: t("anim.wipe"),
+    23: t("anim.zoom"),
+    26: t("anim.bounce"),
+    53: t("anim.zoom"),
+    55: t("anim.growTurn"),
   },
   exit: {
-    1: "消失",
-    2: "飛出",
-    3: "百葉窗",
-    4: "方塊",
-    5: "棋盤式",
-    6: "圓形",
-    8: "菱形",
-    9: "溶解",
-    10: "淡出",
-    14: "隨機線條",
-    16: "分割",
-    21: "輪子",
-    22: "擦去",
-    23: "縮放",
-    53: "縮放",
+    1: t("anim.disappear"),
+    2: t("anim.flyOut"),
+    3: t("anim.blinds"),
+    4: t("anim.box"),
+    5: t("anim.checkerboard"),
+    6: t("anim.circle"),
+    8: t("anim.diamond"),
+    9: t("anim.dissolve"),
+    10: t("anim.fade"),
+    14: t("anim.randomBars"),
+    16: t("anim.split"),
+    21: t("anim.wheel"),
+    22: t("anim.wipe"),
+    23: t("anim.zoom"),
+    53: t("anim.zoom"),
   },
   emph: {
-    1: "變更填滿色彩",
-    3: "變更字型色彩",
-    6: "放大/縮小",
-    7: "變更線條色彩",
-    8: "陀螺轉",
-    9: "透明",
-    14: "閃爍",
-    26: "脈衝",
-    32: "蹺蹺板",
+    1: t("anim.fillColor"),
+    3: t("anim.fontColor"),
+    6: t("anim.growShrink"),
+    7: t("anim.lineColor"),
+    8: t("anim.spin"),
+    9: t("anim.transparency"),
+    14: t("anim.blink"),
+    26: t("anim.pulse"),
+    32: t("anim.teeter"),
   },
   path: {},
 };
 
-const CLASS_LABEL: Record<string, string> = { entr: "進入", exit: "結束", emph: "強調", path: "移動路徑" };
+const CLASS_LABEL: Record<string, string> = { entr: t("anim.entrance"), exit: t("anim.exit"), emph: t("anim.emphasis"), path: t("anim.motionPath") };
 const TRIGGERS: [string, string][] = [
-  ["clickEffect", "按一下"],
-  ["withEffect", "與前一動畫同時"],
-  ["afterEffect", "接續前一動畫"],
+  ["clickEffect", t("anim.onClick")],
+  ["withEffect", t("anim.withPrevious")],
+  ["afterEffect", t("anim.afterPrevious")],
 ];
 const TRIGGER_LABEL: Record<string, string> = Object.fromEntries(TRIGGERS);
 /** Direction options (`presetSubtype`): where the shape comes from, or goes to on exits. */
 const DIRECTIONS: [number, string, string][] = [
-  [4, "自下方", "到下方"],
-  [8, "自左方", "到左方"],
-  [2, "自右方", "到右方"],
-  [1, "自上方", "到上方"],
+  [4, t("anim.fromBottom"), t("anim.toBottom")],
+  [8, t("anim.fromLeft"), t("anim.toLeft")],
+  [2, t("anim.fromRight"), t("anim.toRight")],
+  [1, t("anim.fromTop"), t("anim.toTop")],
 ];
 
 function presetName(cls: string, id: number | null): string {
   const named = id !== null ? PRESETS[cls]?.[id] : undefined;
-  return named ?? (cls === "path" ? "自訂路徑" : "自訂");
+  return named ?? (cls === "path" ? t("anim.customPath") : t("anim.custom"));
 }
 
-const seconds = (ms: number) => `${(ms / 1000).toFixed(2).replace(/\.?0+$/, "")} 秒`;
+const seconds = (ms: number) => t("anim.seconds", { n: (ms / 1000).toFixed(2).replace(/\.?0+$/, "") });
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 const Svg = ({ children }: { children: ReactNode }) => (
@@ -159,19 +160,19 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
     <>
       <div className="rb-group">
         <div className="rb-items">
-          <button className="rb-btn large" disabled={list.length === 0} onMouseDown={keepFocus} onClick={() => run({ kind: "previewAnimations" })} title="在編輯畫面播放這張投影片的動畫">
+          <button className="rb-btn large" disabled={list.length === 0} onMouseDown={keepFocus} onClick={() => run({ kind: "previewAnimations" })} title={t("anim.previewTip")}>
             <Svg>
               <rect x="3" y="3" width="18" height="18" rx="2" strokeOpacity="0.35" />
               <path d="M10 8.5v7l5.5-3.5z" fill="currentColor" />
             </Svg>
-            <span>預覽</span>
+            <span>{t("anim.preview")}</span>
           </button>
         </div>
-        <div className="rb-label">預覽</div>
+        <div className="rb-label">{t("anim.preview")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-items">
-          <EffectGallery presets={presets} large label="新增動畫" title="為選取的圖形新增動畫" disabled={!status.canAnimate} onPick={(p) => {
+          <EffectGallery presets={presets} large label={t("anim.addAnimation")} title={t("anim.addAnimationTip")} disabled={!status.canAnimate} onPick={(p) => {
               // New effects go to the end of the list; show the first of them.
               setPicked(list.length);
               run({ kind: "addAnimation", class: p.class, id: p.id });
@@ -180,14 +181,14 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
           <div className="rb-col">
             <EffectGallery
               presets={presets}
-              label="變更效果"
-              title="把選取的動畫換成另一個效果"
+              label={t("anim.changeEffect")}
+              title={t("anim.changeEffectTip")}
               disabled={!cur}
               current={cur}
               onPick={(p) => run({ kind: "changeAnimation", index, class: p.class, id: p.id })}
             />
             <label className="rb-field">
-              效果選項
+              {t("anim.effectOptions")}
               <select
                 disabled={!preset?.directional}
                 value={preset?.directional ? (cur?.subtype ?? preset.subtype) : ""}
@@ -206,12 +207,12 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             </label>
           </div>
         </div>
-        <div className="rb-label">動畫</div>
+        <div className="rb-label">{t("anim.animation")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
           <label className="rb-field">
-            開始
+            {t("anim.start")}
             <select disabled={!cur} value={cur?.trigger ?? ""} onChange={(e) => run({ kind: "setAnimationTrigger", index, trigger: e.target.value })}>
               {!cur && <option value="">—</option>}
               {TRIGGERS.map(([value, label]) => (
@@ -222,7 +223,7 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             </select>
           </label>
           <label className="rb-field">
-            期間（秒）
+            {t("anim.duration")}
             <input
               type="number"
               min={0.01}
@@ -237,7 +238,7 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             />
           </label>
           <label className="rb-field">
-            延遲（秒）
+            {t("anim.delay")}
             <input
               type="number"
               min={0}
@@ -252,40 +253,40 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             />
           </label>
         </div>
-        <div className="rb-label">預存時間</div>
+        <div className="rb-label">{t("anim.timing")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
-          <button className="rb-btn" disabled={!cur || index === 0} onMouseDown={keepFocus} onClick={() => move(index - 1)} title="讓這個動畫早一點播放">
-            ▲ 往前移
+          <button className="rb-btn" disabled={!cur || index === 0} onMouseDown={keepFocus} onClick={() => move(index - 1)} title={t("anim.earlierTip")}>
+            {t("anim.moveEarlier")}
           </button>
-          <button className="rb-btn" disabled={!cur || index === list.length - 1} onMouseDown={keepFocus} onClick={() => move(index + 1)} title="讓這個動畫晚一點播放">
-            ▼ 往後移
+          <button className="rb-btn" disabled={!cur || index === list.length - 1} onMouseDown={keepFocus} onClick={() => move(index + 1)} title={t("anim.laterTip")}>
+            {t("anim.moveLater")}
           </button>
-          <button className="rb-btn" disabled={!cur} onMouseDown={keepFocus} onClick={() => run({ kind: "removeAnimation", index })} title="移除這個動畫">
-            ✕ 移除
+          <button className="rb-btn" disabled={!cur} onMouseDown={keepFocus} onClick={() => run({ kind: "removeAnimation", index })} title={t("anim.removeTip")}>
+            {t("anim.remove")}
           </button>
         </div>
-        <div className="rb-label">重新排列</div>
+        <div className="rb-label">{t("anim.reorder")}</div>
       </div>
       <div className="rb-group anim-list-group">
-        <div className="anim-list" role="listbox" aria-label="動畫清單">
-          {list.length === 0 && <div className="anim-empty">這張投影片沒有動畫。選取圖形後按「新增動畫」。</div>}
+        <div className="anim-list" role="listbox" aria-label={t("anim.list")}>
+          {list.length === 0 && <div className="anim-empty">{t("anim.empty")}</div>}
           {list.map((a, i) => (
             <div key={i} className={i === index ? "anim-row active" : "anim-row"} role="option" aria-selected={i === index} onMouseDown={keepFocus} onClick={() => pick(i)}>
               <span className="anim-click">{a.trigger === "clickEffect" || (i === 0 && a.click === 0) ? a.click || "▶" : ""}</span>
               <span className={`anim-class ${a.class}`}>{CLASS_LABEL[a.class] ?? a.class}</span>
               <span className="anim-name">{presetName(a.class, a.presetId)}</span>
-              <span className="anim-shape">{a.shapes.join("、")}</span>
+              <span className="anim-shape">{a.shapes.join(t("common.listSeparator"))}</span>
               <span className="anim-meta">
                 {TRIGGER_LABEL[a.trigger] ?? a.trigger}
-                {a.startMs > 0 ? ` · 開始於 ${seconds(a.startMs)}` : ""}
+                {a.startMs > 0 ? ` · ${t("anim.startsAt", { time: seconds(a.startMs) })}` : ""}
                 {a.durMs > 1 ? ` · ${seconds(a.durMs)}` : ""}
               </span>
             </div>
           ))}
         </div>
-        <div className="rb-label">動畫清單</div>
+        <div className="rb-label">{t("anim.list")}</div>
       </div>
     </>
   );

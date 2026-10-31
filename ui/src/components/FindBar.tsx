@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { App as Engine } from "../wasm/ppt_wasm";
 import { focusCanvas } from "./CanvasHost";
@@ -56,7 +57,7 @@ export const FindBar = forwardRef<FindBarHandle, Props>(function FindBar({ engin
 
   const show = (m: FoundMatch | null, all = false) => {
     notesMatch.current = m?.notes ? m : null;
-    setResult(m ? `${m.index + 1} / ${m.total}` : query ? "找不到" : "");
+    setResult(m ? `${m.index + 1} / ${m.total}` : query ? t("find.notFound") : "");
     onChange(all);
     if (m?.notes && m.start !== undefined && m.end !== undefined) showNotesMatch(m.start, m.end);
   };
@@ -77,7 +78,7 @@ export const FindBar = forwardRef<FindBarHandle, Props>(function FindBar({ engin
     if (!engine || !query) return;
     const n = engine.replaceAll(query, replacement, matchCase, wholeWord);
     notesMatch.current = null;
-    setResult(n > 0 ? `已取代 ${n} 處` : "找不到");
+    setResult(n > 0 ? t("find.replaced", { count: n }) : t("find.notFound"));
     onChange(true);
   };
 
@@ -104,7 +105,7 @@ export const FindBar = forwardRef<FindBarHandle, Props>(function FindBar({ engin
     if (!open || !engine) return;
     notesMatch.current = null;
     const n = query ? engine.findCount(query, matchCase, wholeWord) : 0;
-    setResult(query ? (n ? `${n} 個結果` : "找不到") : "");
+    setResult(query ? (n ? t("find.results", { count: n }) : t("find.notFound")) : "");
   }, [open, engine, query, matchCase, wholeWord]);
 
   if (!open) return null;
@@ -127,38 +128,38 @@ export const FindBar = forwardRef<FindBarHandle, Props>(function FindBar({ engin
   return (
     <div className="find-bar" role="search" onMouseDown={(e) => e.target === e.currentTarget && e.preventDefault()}>
       <div className="find-row">
-        <button className={replacing ? "find-toggle-mode open" : "find-toggle-mode"} onClick={() => setReplacing((r) => !r)} title={replacing ? "隱藏取代" : "顯示取代"} aria-label="切換取代">
+        <button className={replacing ? "find-toggle-mode open" : "find-toggle-mode"} onClick={() => setReplacing((r) => !r)} title={replacing ? t("find.hideReplace") : t("find.showReplace")} aria-label={t("find.toggleReplace")}>
           ›
         </button>
-        <input ref={input} className="find-input" placeholder="尋找" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => onKey(e, () => step(false))} aria-label="尋找" />
+        <input ref={input} className="find-input" placeholder={t("find.find")} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => onKey(e, () => step(false))} aria-label={t("find.find")} />
         <span className="find-result" aria-live="polite">
           {result}
         </span>
-        <button className="find-btn" disabled={!query} onClick={() => step(true)} title="上一個（⇧⌘G）" aria-label="上一個">
+        <button className="find-btn" disabled={!query} onClick={() => step(true)} title={t("find.previousTip")} aria-label={t("find.previous")}>
           ▲
         </button>
-        <button className="find-btn" disabled={!query} onClick={() => step(false)} title="下一個（⌘G）" aria-label="下一個">
+        <button className="find-btn" disabled={!query} onClick={() => step(false)} title={t("find.nextTip")} aria-label={t("find.next")}>
           ▼
         </button>
-        <button className={matchCase ? "find-btn active" : "find-btn"} aria-pressed={matchCase} onClick={() => setMatchCase((v) => !v)} title="大小寫須相符">
+        <button className={matchCase ? "find-btn active" : "find-btn"} aria-pressed={matchCase} onClick={() => setMatchCase((v) => !v)} title={t("find.matchCase")}>
           Aa
         </button>
-        <button className={wholeWord ? "find-btn active" : "find-btn"} aria-pressed={wholeWord} onClick={() => setWholeWord((v) => !v)} title="全字拼寫須相符">
-          全字
+        <button className={wholeWord ? "find-btn active" : "find-btn"} aria-pressed={wholeWord} onClick={() => setWholeWord((v) => !v)} title={t("find.wholeWordsTip")}>
+          {t("find.wholeWords")}
         </button>
-        <button className="find-btn" onClick={close} title="關閉（Esc）" aria-label="關閉">
+        <button className="find-btn" onClick={close} title={t("find.closeTip")} aria-label={t("common.close")}>
           ✕
         </button>
       </div>
       {replacing && (
         <div className="find-row">
           <span className="find-toggle-mode spacer" />
-          <input className="find-input replace-input" placeholder="取代為" value={replacement} onChange={(e) => setReplacement(e.target.value)} onKeyDown={(e) => onKey(e, replaceOne)} aria-label="取代為" />
-          <button className="find-btn text replace-one" disabled={!query} onClick={replaceOne} title="取代選取的符合項目，並找下一個">
-            取代
+          <input className="find-input replace-input" placeholder={t("find.replaceWith")} value={replacement} onChange={(e) => setReplacement(e.target.value)} onKeyDown={(e) => onKey(e, replaceOne)} aria-label={t("find.replaceWith")} />
+          <button className="find-btn text replace-one" disabled={!query} onClick={replaceOne} title={t("find.replaceOneTip")}>
+            {t("find.replace")}
           </button>
-          <button className="find-btn text replace-all" disabled={!query} onClick={replaceAll} title="取代所有投影片與備忘稿中的符合項目">
-            全部取代
+          <button className="find-btn text replace-all" disabled={!query} onClick={replaceAll} title={t("find.replaceAllTip")}>
+            {t("find.replaceAll")}
           </button>
         </div>
       )}

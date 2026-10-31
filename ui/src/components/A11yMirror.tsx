@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useState } from "react";
 import type { App } from "../wasm/ppt_wasm";
 import { focusCanvas } from "./CanvasHost";
@@ -113,7 +114,7 @@ export function A11yMirror({ engine, version }: { engine: App | null; version: s
           default: {
             // Pictures, charts and plain shapes: their name and description, plus any text on them.
             const text = item.paragraphs.map((p) => p.text).join(" ");
-            return <div key={item.id} {...common} role="img" aria-label={text ? `${name}，文字：${text}` : name} />;
+            return <div key={item.id} {...common} role="img" aria-label={text ? t("a11y.withText", { name, text }) : name} />;
           }
         }
       })}

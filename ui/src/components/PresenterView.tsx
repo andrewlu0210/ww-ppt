@@ -1,3 +1,4 @@
+import { locale, t } from "../i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { App as Engine } from "../wasm/ppt_wasm";
 import { formatDuration, showKeyCommand, type ShowCommand, type ShowState } from "../lib/show";
@@ -114,7 +115,7 @@ export function PresenterView({ engine, state, command, timer, onToggleView }: P
 
   const elapsed = formatDuration(timerMs(timer) / 1000);
   const paused = timer.since === null;
-  const clock = new Date().toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
+  const clock = new Date().toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   const notes = state.slide >= 0 ? engine.notes(state.slide) : "";
   const [slideW, slideH] = engine.slideSize();
   const aspectRatio = `${slideW} / ${slideH}`;
@@ -125,9 +126,9 @@ export function PresenterView({ engine, state, command, timer, onToggleView }: P
   const keep = (e: React.MouseEvent) => e.preventDefault();
 
   return (
-    <div ref={rootRef} className="presenter" tabIndex={0} onKeyDown={onKeyDown} onContextMenu={(e) => e.preventDefault()} aria-label="簡報者檢視">
+    <div ref={rootRef} className="presenter" tabIndex={0} onKeyDown={onKeyDown} onContextMenu={(e) => e.preventDefault()} aria-label={t("ribbon.presenterView")}>
       <header className="pv-bar">
-        <span className="pv-timer" aria-label="已經過時間">
+        <span className="pv-timer" aria-label={t("presenter.elapsed")}>
           {elapsed}
         </span>
         <button
@@ -141,7 +142,7 @@ export function PresenterView({ engine, state, command, timer, onToggleView }: P
             tick((n) => n + 1);
           }}
         >
-          {paused ? "繼續" : "暫停"}
+          {paused ? t("presenter.resume") : t("presenter.pause")}
         </button>
         <button
           onMouseDown={keep}
@@ -151,17 +152,17 @@ export function PresenterView({ engine, state, command, timer, onToggleView }: P
             tick((n) => n + 1);
           }}
         >
-          重設
+          {t("ribbon.reset")}
         </button>
         <span className="pv-clock">{clock}</span>
         <span className="spacer" />
         {onToggleView && (
           <button onMouseDown={keep} onClick={onToggleView} title="⌥↩">
-            切換為投影片放映
+            {t("presenter.switchToShow")}
           </button>
         )}
         <button className="pv-end" onMouseDown={keep} onClick={() => command({ name: "end" })}>
-          結束放映
+          {t("presenter.endShow")}
         </button>
       </header>
       <div className="pv-main">
@@ -174,42 +175,42 @@ export function PresenterView({ engine, state, command, timer, onToggleView }: P
               if (e.button === 0 && state.onClick) command({ name: "next" });
             }}
           >
-            {state.slide === -1 && !state.blank && <div className="pv-end-label">投影片放映結束</div>}
+            {state.slide === -1 && !state.blank && <div className="pv-end-label">{t("presenter.showEnded")}</div>}
           </div>
           <div className="pv-controls">
-            <button onMouseDown={keep} onClick={() => command({ name: "prev" })} aria-label="上一張">
+            <button onMouseDown={keep} onClick={() => command({ name: "prev" })} aria-label={t("presenter.previous")}>
               ◀
             </button>
             <span className="pv-count">
-              {state.slide >= 0 ? `投影片 ${state.slide + 1} / ${state.count}` : "結束畫面"}
-              {state.slide >= 0 && state.steps > 0 && <span className="pv-steps">動畫 {state.step} / {state.steps}</span>}
+              {state.slide >= 0 ? t("status.slide", { current: state.slide + 1, total: state.count }) : t("presenter.endScreen")}
+              {state.slide >= 0 && state.steps > 0 && <span className="pv-steps">{t("presenter.steps", { step: state.step, steps: state.steps })}</span>}
             </span>
-            <button onMouseDown={keep} onClick={() => command({ name: "next" })} aria-label="下一張">
+            <button onMouseDown={keep} onClick={() => command({ name: "next" })} aria-label={t("presenter.next")}>
               ▶
             </button>
             <button className={state.blank === "black" ? "on" : ""} onMouseDown={keep} onClick={() => command({ name: "black" })} title="B">
-              黑屏
+              {t("presenter.black")}
             </button>
           </div>
         </section>
         <section className="pv-right">
-          <div className="pv-label">下一張</div>
+          <div className="pv-label">{t("presenter.next")}</div>
           <div className="pv-next" style={{ aspectRatio }}>
             <canvas ref={nextRef} />
-            {state.next < 0 && <div className="pv-next-end">{state.slide === -1 ? "" : "投影片放映結束"}</div>}
+            {state.next < 0 && <div className="pv-next-end">{state.slide === -1 ? "" : t("presenter.showEnded")}</div>}
           </div>
           <div className="pv-notes-head">
-            <span className="pv-label">備忘稿</span>
+            <span className="pv-label">{t("ribbon.notes")}</span>
             <span className="spacer" />
-            <button onMouseDown={keep} onClick={() => step(-1)} aria-label="縮小備忘稿文字">
+            <button onMouseDown={keep} onClick={() => step(-1)} aria-label={t("presenter.smallerNotes")}>
               A−
             </button>
-            <button onMouseDown={keep} onClick={() => step(1)} aria-label="放大備忘稿文字">
+            <button onMouseDown={keep} onClick={() => step(1)} aria-label={t("presenter.largerNotes")}>
               A+
             </button>
           </div>
           <div className="pv-notes" style={{ fontSize: notesSize }}>
-            {notes || <span className="pv-muted">（沒有備忘稿）</span>}
+            {notes || <span className="pv-muted">{t("presenter.noNotes")}</span>}
           </div>
         </section>
       </div>

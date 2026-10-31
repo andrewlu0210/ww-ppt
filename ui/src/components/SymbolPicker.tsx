@@ -1,14 +1,15 @@
+import { t } from "../i18n";
 import type { ReactNode } from "react";
 import { Popover } from "./Popover";
 
 /** Symbols by group, as in PowerPoint's 符號 dialog (common subsets). */
 const SYMBOLS: [string, string][] = [
-  ["常用", "©®™°±×÷≠≈≤≥∞√∑∏∫∂µπΩ€£¥¢§¶†‡•…‰′″"],
-  ["箭號", "←↑→↓↔↕↖↗↘↙⇐⇑⇒⇓⇔➔➜➤"],
-  ["圖形", "■□▲△▼▽◆◇○●◎★☆♠♣♥♦✓✔✕✖✗✘☐☑☒"],
-  ["標點", "，、。．；：？！「」『』（）【】《》〈〉—～…‥※〃々〒"],
-  ["數字", "①②③④⑤⑥⑦⑧⑨⑩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ½⅓¼¾¹²³"],
-  ["希臘字母", "αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΘΛΞΠΣΦΨΩ"],
+  [t("symbol.common"), "©®™°±×÷≠≈≤≥∞√∑∏∫∂µπΩ€£¥¢§¶†‡•…‰′″"],
+  [t("symbol.arrows"), "←↑→↓↔↕↖↗↘↙⇐⇑⇒⇓⇔➔➜➤"],
+  [t("symbol.shapes"), "■□▲△▼▽◆◇○●◎★☆♠♣♥♦✓✔✕✖✗✘☐☑☒"],
+  [t("symbol.punctuation"), "，、。．；：？！「」『』（）【】《》〈〉—～…‥※〃々〒"],
+  [t("symbol.numbers"), "①②③④⑤⑥⑦⑧⑨⑩ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ½⅓¼¾¹²³"],
+  [t("symbol.greek"), "αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΘΛΞΠΣΦΨΩ"],
 ];
 
 /** 插入 > 符號: a symbol for the caret (or a new text box). */

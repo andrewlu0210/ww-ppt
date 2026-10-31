@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useState, type ReactNode } from "react";
 import { icons } from "./icons";
 import { Popover } from "./Popover";
@@ -39,10 +40,10 @@ export interface BackgroundInfo {
 const EMU_PER_CM = 360_000;
 /** Named slide sizes in EMU, like PowerPoint's 投影片大小 menu. */
 const SIZES: [string, number, number][] = [
-  ["寬螢幕 (16:9)", 12_192_000, 6_858_000],
-  ["標準 (4:3)", 9_144_000, 6_858_000],
-  ["如螢幕大小 (16:10)", 9_144_000, 5_715_000],
-  ["A4 紙張", 9_906_000, 6_858_000],
+  [t("design.widescreen"), 12_192_000, 6_858_000],
+  [t("design.standard"), 9_144_000, 6_858_000],
+  [t("design.onScreen"), 9_144_000, 5_715_000],
+  [t("design.a4"), 9_906_000, 6_858_000],
 ];
 
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
@@ -58,7 +59,7 @@ function DropButton({ icon, label, open, toggle }: { icon: ReactNode; label: str
 
 function ColorsMenu({ theme, schemes, run }: { theme: ThemeInfo | null; schemes: ColorSchemeInfo[]; run: (c: Command) => void }) {
   return (
-    <Popover button={(open, toggle) => <DropButton icon={icons.colors} label="色彩" open={open} toggle={toggle} />}>
+    <Popover button={(open, toggle) => <DropButton icon={icons.colors} label={t("design.colors")} open={open} toggle={toggle} />}>
       {(close) => (
         <div className="menu-panel scheme-menu">
           {schemes.map((s) => (
@@ -88,7 +89,7 @@ function ColorsMenu({ theme, schemes, run }: { theme: ThemeInfo | null; schemes:
 
 function FontsMenu({ theme, schemes, run }: { theme: ThemeInfo | null; schemes: FontSchemeInfo[]; run: (c: Command) => void }) {
   return (
-    <Popover button={(open, toggle) => <DropButton icon={icons.fonts} label="字型" open={open} toggle={toggle} />}>
+    <Popover button={(open, toggle) => <DropButton icon={icons.fonts} label={t("group.font")} open={open} toggle={toggle} />}>
       {(close) => (
         <div className="menu-panel scheme-menu">
           {schemes.map((s) => (
@@ -144,7 +145,7 @@ function SlideSizeMenu({ size, run }: { size: [number, number]; run: (c: Command
       button={(open, toggle) => (
         <DropButton
           icon={icons.slideSize}
-          label="投影片大小"
+          label={t("design.slideSize")}
           open={open}
           toggle={() => {
             reset();
@@ -164,20 +165,20 @@ function SlideSizeMenu({ size, run }: { size: [number, number]; run: (c: Command
             done();
           };
           return (
-            <div className="hf-dialog" role="dialog" aria-label="調整投影片大小">
-              <div className="hf-title">您要將內容最大化，還是縮小以確保內容符合新的投影片大小？</div>
+            <div className="hf-dialog" role="dialog" aria-label={t("design.scaleTitle")}>
+              <div className="hf-title">{t("design.scaleQuestion")}</div>
               <div className="fit-choices">
                 <button className="fit-choice" onClick={() => fit("maximize")}>
                   <span className="fit-preview maximize" />
-                  最大化
+                  {t("design.maximize")}
                 </button>
                 <button className="fit-choice" onClick={() => fit("fit")}>
                   <span className="fit-preview ensure" />
-                  確保最適大小
+                  {t("design.ensureFit")}
                 </button>
               </div>
               <div className="hf-buttons">
-                <button onClick={done}>取消</button>
+                <button onClick={done}>{t("save.cancel")}</button>
               </div>
             </div>
           );
@@ -186,22 +187,22 @@ function SlideSizeMenu({ size, run }: { size: [number, number]; run: (c: Command
           const [w, h] = custom.map(Number);
           const ok = w >= 2.54 && h >= 2.54 && w <= 142.24 && h <= 142.24;
           return (
-            <div className="hf-dialog" role="dialog" aria-label="投影片大小">
-              <div className="hf-title">自訂投影片大小</div>
+            <div className="hf-dialog" role="dialog" aria-label={t("design.slideSize")}>
+              <div className="hf-title">{t("design.customSize")}</div>
               <label className="hf-row">
-                寬度
+                {t("design.width")}
                 <input className="hf-text" type="number" step="0.01" value={custom[0]} onChange={(e) => setCustom([e.target.value, custom[1]])} />
-                公分
+                {t("design.cmUnit")}
               </label>
               <label className="hf-row">
-                高度
+                {t("design.height")}
                 <input className="hf-text" type="number" step="0.01" value={custom[1]} onChange={(e) => setCustom([custom[0], e.target.value])} />
-                公分
+                {t("design.cmUnit")}
               </label>
               <div className="hf-buttons">
-                <button onClick={done}>取消</button>
+                <button onClick={done}>{t("save.cancel")}</button>
                 <button className="primary" disabled={!ok} onClick={() => choose(w * EMU_PER_CM, h * EMU_PER_CM, done)}>
-                  確定
+                  {t("common.ok")}
                 </button>
               </div>
             </div>
@@ -213,13 +214,13 @@ function SlideSizeMenu({ size, run }: { size: [number, number]; run: (c: Command
               <button key={label} className={Math.round(w) === cw && Math.round(h) === ch ? "menu-item active" : "menu-item"} onMouseDown={keepFocus} onClick={() => choose(w, h, done)}>
                 {label}
                 <span className="menu-note">
-                  {cm(w)} × {cm(h)} 公分
+                  {t("design.sizeCm", { w: cm(w), h: cm(h) })}
                 </span>
               </button>
             ))}
             <div className="spell-sep" />
             <button className="menu-item" onMouseDown={keepFocus} onClick={() => setCustom([String(cm(cw)), String(cm(ch))])}>
-              自訂投影片大小…
+              {t("design.customSizeMenu")}
             </button>
           </div>
         );
@@ -230,12 +231,12 @@ function SlideSizeMenu({ size, run }: { size: [number, number]; run: (c: Command
 
 /** Gradient directions offered, as PowerPoint's linear angles. */
 const ANGLES: [number, string][] = [
-  [90, "由上到下"],
-  [270, "由下到上"],
-  [0, "由左到右"],
-  [180, "由右到左"],
-  [45, "左上到右下"],
-  [135, "右上到左下"],
+  [90, t("design.topToBottom")],
+  [270, t("design.bottomToTop")],
+  [0, t("design.leftToRight")],
+  [180, t("design.rightToLeft")],
+  [45, t("design.diagDown")],
+  [135, t("design.diagUp")],
 ];
 
 /** 背景格式: solid, gradient or picture fill for the current slide, applied as it is edited. */
@@ -255,7 +256,7 @@ function BackgroundPanel({ initial, theme, run }: { initial: BackgroundInfo; the
       {palette.map((c, i) => (
         <button key={i} className={c === value ? "swatch active" : "swatch"} style={{ background: c }} title={c} onMouseDown={keepFocus} onClick={() => pick(c)} />
       ))}
-      <input type="color" title="其他色彩" value={value.toLowerCase()} onChange={(e) => pick(e.target.value.toUpperCase())} />
+      <input type="color" title={t("design.moreColors")} value={value.toLowerCase()} onChange={(e) => pick(e.target.value.toUpperCase())} />
     </div>
   );
   const kind = (k: BackgroundInfo["kind"]) => {
@@ -264,35 +265,35 @@ function BackgroundPanel({ initial, theme, run }: { initial: BackgroundInfo; the
     else run({ kind: "backgroundPicture" });
   };
   return (
-    <div className="hf-dialog bg-panel" role="dialog" aria-label="背景格式">
-      <div className="hf-title">填滿</div>
+    <div className="hf-dialog bg-panel" role="dialog" aria-label={t("design.formatBackground")}>
+      <div className="hf-title">{t("design.fill")}</div>
       {(["solid", "gradient", "picture"] as const).map((k) => (
         <label key={k} className="hf-row">
           <input type="radio" checked={bg.kind === k} onChange={() => kind(k)} />
-          {k === "solid" ? "實心填滿" : k === "gradient" ? "漸層填滿" : "圖片填滿"}
+          {k === "solid" ? t("design.solidFill") : k === "gradient" ? t("design.gradientFill") : t("design.pictureFill")}
         </label>
       ))}
       {bg.kind === "solid" && (
         <div className="hf-indent">
-          色彩
+          {t("design.color")}
           {swatches(bg.color, solid)}
         </div>
       )}
       {bg.kind === "gradient" && (
         <div className="hf-indent">
-          起點
+          {t("design.gradientStart")}
           {swatches(bg.colors[0], (c) => gradient([c, bg.colors[1]], bg.radial, bg.angle))}
-          終點
+          {t("design.gradientEnd")}
           {swatches(bg.colors[1], (c) => gradient([bg.colors[0], c], bg.radial, bg.angle))}
           <label className="hf-row">
-            方向
+            {t("design.direction")}
             <select value={bg.radial ? "radial" : String(bg.angle)} onChange={(e) => (e.target.value === "radial" ? gradient(bg.colors, true, 0) : gradient(bg.colors, false, Number(e.target.value)))}>
               {ANGLES.map(([a, label]) => (
                 <option key={a} value={a}>
-                  線性：{label}
+                  {t("design.linear", { dir: label })}
                 </option>
               ))}
-              <option value="radial">放射：從中心</option>
+              <option value="radial">{t("design.radial")}</option>
             </select>
           </label>
         </div>
@@ -300,7 +301,7 @@ function BackgroundPanel({ initial, theme, run }: { initial: BackgroundInfo; the
       {bg.kind === "picture" && (
         <div className="hf-indent">
           <button className="bg-button" onClick={() => run({ kind: "backgroundPicture" })}>
-            插入圖片…
+            {t("design.insertPicture")}
           </button>
         </div>
       )}
@@ -313,7 +314,7 @@ function BackgroundPanel({ initial, theme, run }: { initial: BackgroundInfo; the
             run({ kind: "hideBackgroundGraphics", on: e.target.checked });
           }}
         />
-        隱藏背景圖形
+        {t("design.hideBackgroundGraphics")}
       </label>
       <div className="hf-buttons">
         <button
@@ -323,10 +324,10 @@ function BackgroundPanel({ initial, theme, run }: { initial: BackgroundInfo; the
             setBg({ ...bg, own: false });
           }}
         >
-          重設背景
+          {t("design.resetBackground")}
         </button>
         <button className="primary" onClick={() => run({ kind: "backgroundToAll" })}>
-          全部套用
+          {t("trans.applyAll")}
         </button>
       </div>
     </div>
@@ -357,19 +358,19 @@ export function DesignTab({ theme, colorSchemes, fontSchemes, slideSize, loadBac
           <ColorsMenu theme={theme} schemes={colorSchemes} run={run} />
           <FontsMenu theme={theme} schemes={fontSchemes} run={run} />
         </div>
-        <div className="rb-label">變化</div>
+        <div className="rb-label">{t("design.variants")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-items">
           <SlideSizeMenu size={slideSize} run={run} />
-          <Popover button={(open, toggle) => <DropButton icon={icons.background} label="背景格式" open={open} toggle={toggle} />}>
+          <Popover button={(open, toggle) => <DropButton icon={icons.background} label={t("design.formatBackground")} open={open} toggle={toggle} />}>
             {() => {
               const bg = loadBackground();
-              return bg ? <BackgroundPanel initial={bg} theme={theme} run={run} /> : <div className="hf-dialog">沒有投影片</div>;
+              return bg ? <BackgroundPanel initial={bg} theme={theme} run={run} /> : <div className="hf-dialog">{t("design.noSlides")}</div>;
             }}
           </Popover>
         </div>
-        <div className="rb-label">自訂</div>
+        <div className="rb-label">{t("design.customize")}</div>
       </div>
     </>
   );

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { App } from "../wasm/ppt_wasm";
 import { focusCanvas } from "./CanvasHost";
@@ -139,44 +140,44 @@ export function DiagramPane({ engine, version, row, onRow, focusRequest, focusRa
   const topCount = rows.filter((r) => r.depth === 0).length;
 
   return (
-    <aside className="diagram-pane" aria-label="文字窗格">
+    <aside className="diagram-pane" aria-label={t("ribbon.textPane")}>
       <div className="pane-head">
-        <span className="pane-title">文字窗格</span>
-        <button className="pane-close" onClick={onClose} aria-label="關閉文字窗格" title="關閉">
+        <span className="pane-title">{t("ribbon.textPane")}</span>
+        <button className="pane-close" onClick={onClose} aria-label={t("diagram.close")} title={t("common.close")}>
           ×
         </button>
       </div>
       {!info ? (
-        <div className="pane-empty">選取 SmartArt 圖形以編輯它的文字</div>
+        <div className="pane-empty">{t("diagram.selectHint")}</div>
       ) : (
         <>
           <div className="pane-tools">
-            <button disabled={!info.restructure || !current || (current.depth > 0 && !info.nest)} onClick={() => command("addAfter")} title="在後面新增圖案 (Enter)">
-              ＋ 新增
+            <button disabled={!info.restructure || !current || (current.depth > 0 && !info.nest)} onClick={() => command("addAfter")} title={t("diagram.addTip")}>
+              {t("diagram.add")}
             </button>
-            <button disabled={!info.nest || !current || current.depth === 0} onClick={() => command("promote")} aria-label="升階" title="升階 (Shift+Tab)">
+            <button disabled={!info.nest || !current || current.depth === 0} onClick={() => command("promote")} aria-label={t("ribbon.promote")} title={t("diagram.promoteTip")}>
               ←
             </button>
-            <button disabled={!info.nest || !current || row === 0 || rows[row - 1].depth < current.depth} onClick={() => command("demote")} aria-label="降階" title="降階 (Tab)">
+            <button disabled={!info.nest || !current || row === 0 || rows[row - 1].depth < current.depth} onClick={() => command("demote")} aria-label={t("ribbon.demote")} title={t("diagram.demoteTip")}>
               →
             </button>
             <span className="spacer" />
-            <button disabled={!canMove(true)} onClick={() => command("moveUp")} aria-label="上移" title="上移 (⌥⇧↑)">
+            <button disabled={!canMove(true)} onClick={() => command("moveUp")} aria-label={t("ribbon.moveUp")} title={t("diagram.moveUpTip")}>
               ▲
             </button>
-            <button disabled={!canMove(false)} onClick={() => command("moveDown")} aria-label="下移" title="下移 (⌥⇧↓)">
+            <button disabled={!canMove(false)} onClick={() => command("moveDown")} aria-label={t("ribbon.moveDown")} title={t("diagram.moveDownTip")}>
               ▼
             </button>
             <button
               disabled={!info.restructure || !current || (current.depth > 0 ? !info.nest : topCount <= 1)}
               onClick={() => command("delete")}
-              aria-label="刪除圖案"
-              title="刪除圖案"
+              aria-label={t("ribbon.deleteShape")}
+              title={t("ribbon.deleteShape")}
             >
               ✕
             </button>
           </div>
-          <div className="diagram-rows" ref={listRef} role="list" aria-label="SmartArt 文字">
+          <div className="diagram-rows" ref={listRef} role="list" aria-label={t("diagram.text")}>
             {rows.map((r, i) => (
               <div key={i} role="listitem" className={["diagram-row", i === row && "current"].filter(Boolean).join(" ")} style={{ paddingLeft: 8 + r.depth * 18 }}>
                 <span className="diagram-bullet" aria-hidden="true">
@@ -186,8 +187,8 @@ export function DiagramPane({ engine, version, row, onRow, focusRequest, focusRa
                   className="diagram-input"
                   rows={Math.max(1, r.text.split("\n").length)}
                   value={r.text}
-                  placeholder="[文字]"
-                  aria-label={`第 ${r.depth + 1} 層：${r.text || "空白"}`}
+                  placeholder={t("diagram.placeholder")}
+                  aria-label={t("diagram.rowAria", { level: r.depth + 1, text: r.text || t("diagram.blank") })}
                   spellCheck={false}
                   onFocus={() => onRow(i)}
                   onChange={(e) => setText(i, e.currentTarget.value)}
@@ -196,8 +197,8 @@ export function DiagramPane({ engine, version, row, onRow, focusRequest, focusRa
               </div>
             ))}
           </div>
-          {!info.restructure && <div className="pane-note">這個版面只能修改文字。</div>}
-          {info.restructure && !info.nest && <div className="pane-note">這個版面沒有下層項目。</div>}
+          {!info.restructure && <div className="pane-note">{t("diagram.textOnly")}</div>}
+          {info.restructure && !info.nest && <div className="pane-note">{t("diagram.noLevels")}</div>}
         </>
       )}
     </aside>
