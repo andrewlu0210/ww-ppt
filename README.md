@@ -29,6 +29,24 @@ cargo test --workspace
 uv run --no-project --with python-pptx python scripts/make_sample_pptx.py samples/m0-demo.pptx
 ```
 
+## 打包與試用
+
+```sh
+npm run wasm
+npm run tauri build    # → target/release/bundle/macos/Want-Point.app 與 bundle/dmg/*.dmg
+```
+
+目前沒有 Developer ID 簽章與 Apple 公證，自己這台 Mac 打包出來的 App 可以直接開。透過網路、AirDrop 或通訊軟體傳給別人時，macOS 會擋下第一次開啟（「無法驗證開發者」或「Apple 無法檢查是否含有惡意軟體」），請對方用下列任一方式開啟：
+
+1. **系統設定**：先把 Want-Point 拖進「應用程式」並打開一次（會被擋，按「完成」）。到「系統設定 > 隱私權與安全性」，往下捲到「安全性」，按 Want-Point 旁的「強制打開」，輸入密碼後再按一次「強制打開」。之後就能正常開啟。（macOS 15 起，Finder 右鍵選「打開」已無法略過這個警告。）
+2. **終端機**：把 App 拖進「應用程式」後執行下面這行，移除「從網路下載」的標記：
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Want-Point.app
+   ```
+
+開啟後功能和簽章版相同。每次換新版本都要重做一次。
+
 ## 視覺回歸測試
 
 `samples/vr/` 裡每份 `<名稱>.pptx` 搭配一份從 PowerPoint 匯出的 `<名稱>.pdf` 當基準。工具會逐頁渲染並和 PDF 比對，另外會把簡報存檔再開啟，確認存檔後畫面不變。需要 poppler 的 `pdftoppm`（`brew install poppler`）。
