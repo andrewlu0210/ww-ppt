@@ -18,6 +18,8 @@ pub struct DiagramInfo {
     pub restructure: bool,
     /// Nodes can have children (shown inside their parent's shapes).
     pub nest: bool,
+    /// One top-level node only (an org chart): it cannot be added beside or promoted to.
+    pub single_root: bool,
 }
 
 /// `body` with every font size multiplied by `k`.
@@ -93,7 +95,7 @@ impl Editor {
 
     pub fn diagram_info(&self) -> Option<DiagramInfo> {
         let (_, d) = self.selected_diagram()?;
-        Some(DiagramInfo { rows: d.rows(), restructure: d.can_restructure(), nest: d.can_nest() })
+        Some(DiagramInfo { rows: d.rows(), restructure: d.can_restructure(), nest: d.can_nest(), single_root: d.is_tree() })
     }
 
     /// Text of row `row` of SmartArt `id` on `slide`.

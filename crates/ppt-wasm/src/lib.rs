@@ -1953,7 +1953,7 @@ impl App {
 
     // --- SmartArt text pane -------------------------------------------------------
 
-    /// The selected SmartArt's nodes, `{ rows: [{ depth, text }], restructure, nest }`,
+    /// The selected SmartArt's nodes, `{ rows: [{ depth, text }], restructure, nest, singleRoot }`,
     /// or null when no editable SmartArt is selected.
     #[wasm_bindgen(js_name = diagramInfo)]
     pub fn diagram_info(&self) -> JsValue {
@@ -1972,6 +1972,7 @@ impl App {
         let _ = Reflect::set(&o, &"rows".into(), &rows.into());
         let _ = Reflect::set(&o, &"restructure".into(), &info.restructure.into());
         let _ = Reflect::set(&o, &"nest".into(), &info.nest.into());
+        let _ = Reflect::set(&o, &"singleRoot".into(), &info.single_root.into());
         o.into()
     }
 

@@ -180,3 +180,143 @@ fn copied_slide_keeps_its_drawing() {
     let last = back.slides.last().unwrap();
     assert!(last.shapes.iter().any(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(_), shapes, .. } if !shapes.is_empty())));
 }
+
+fn org() -> (Presentation, usize, usize) {
+    let pres = deck("test8.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "orgChart1").expect("an org chart");
+    (pres, si, i)
+}
+
+/// (text, frame) of every box.
+fn boxes(shapes: &[ppt_model::Shape]) -> Vec<(String, ppt_model::Xfrm)> {
+    shapes.iter().filter_map(|s| Some((s.text.as_ref()?.plain_text(), s.xfrm))).collect()
+}
+
+/// The saved data model of the org chart on `slide` is consistent: unique ids,
+/// every reference resolves, and the presentation points form one tree with a
+/// box per node.
+fn check_org_data(saved: &[u8], slide: usize, nodes: usize) {
+    use std::collections::{HashMap, HashSet};
+    let pres = parse_pptx(saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d), .. } = &pres.slides[slide].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "orgChart1")).unwrap().kind else { panic!() };
+    assert_eq!(d.rows().len(), nodes);
+    let xml = part(saved, "ppt/diagrams/data2.xml");
+    let doc = roxmltree::Document::parse(&xml).unwrap();
+    let mut ids = HashSet::new();
+    let mut kind: HashMap<&str, &str> = HashMap::new();
+    let mut assoc: HashMap<&str, &str> = HashMap::new();
+    let mut names: HashMap<&str, &str> = HashMap::new();
+    for pt in doc.descendants().filter(|n| n.tag_name().name() == "pt" && n.attribute("modelId").is_some()) {
+        let id = pt.attribute("modelId").unwrap();
+        assert!(ids.insert(id), "duplicate point {id}");
+        kind.insert(id, pt.attribute("type").unwrap_or("node"));
+        if let Some(set) = pt.children().find(|c| c.tag_name().name() == "prSet") {
+            if let Some(a) = set.attribute("presAssocID") {
+                assoc.insert(id, a);
+            }
+            if let Some(n) = set.attribute("presName") {
+                names.insert(id, n);
+            }
+        }
+    }
+    let mut cxn_ids = HashSet::new();
+    let mut parent_of: HashMap<&str, &str> = HashMap::new();
+    for c in doc.descendants().filter(|n| n.tag_name().name() == "cxn") {
+        assert!(cxn_ids.insert(c.attribute("modelId").unwrap()), "duplicate connection");
+        let (s, t) = (c.attribute("srcId").unwrap(), c.attribute("destId").unwrap());
+        assert!(ids.contains(s) && ids.contains(t), "dangling connection {s} → {t}");
+        if c.attribute("type") == Some("presParOf") {
+            assert!(parent_of.insert(t, s).is_none(), "{t} hangs under two points");
+        }
+    }
+    for (p, a) in &assoc {
+        assert!(ids.contains(a), "{p} presents a missing point");
+    }
+    // Every presentation point but the first hangs somewhere, and the chain ends at one root.
+    let pres_pts: Vec<&str> = kind.iter().filter(|(_, k)| **k == "pres").map(|(i, _)| *i).collect();
+    let roots: Vec<&&str> = pres_pts.iter().filter(|p| !parent_of.contains_key(**p)).collect();
+    assert_eq!(roots.len(), 1, "one root point, got {}", roots.len());
+    for p in &pres_pts {
+        let mut at = *p;
+        for _ in 0..100 {
+            match parent_of.get(at) {
+                Some(up) => at = up,
+                None => break,
+            }
+        }
+        assert_eq!(at, *roots[0], "{p} is not under the root");
+    }
+    let boxes = names.values().filter(|n| n.starts_with("rootText")).count();
+    assert_eq!(boxes, nodes, "one box per node");
+    let links = names.values().filter(|n| **n == "Name37").count();
+    assert_eq!(links, nodes - 1, "one connector per link");
+}
+
+#[test]
+fn org_chart_is_a_tree() {
+    let (pres, si, i) = org();
+    let ShapeKind::Diagram { data: Some(d), shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Tree);
+    assert!(d.can_restructure() && d.can_nest());
+    assert_eq!(d.rows().len(), 11);
+    assert_eq!(shapes.len(), 11 + 10, "a box per node and a connector per link");
+    // One root: a node added beside it goes under it, and the departments cannot become roots.
+    let mut one = (**d).clone();
+    assert_eq!(one.insert(0, Insert::After), Some(11));
+    assert_eq!(one.rows()[11].depth, 1);
+    assert_eq!(one.insert(0, Insert::Before), Some(12));
+    assert!(!one.shift(1, false));
+    assert!(one.delete(0).is_none());
+}
+
+#[test]
+fn org_chart_adds_and_removes_nodes() {
+    let (mut pres, si, i) = org();
+    edit(&mut pres, si, i, |d| {
+        // A third department under the root, and a team under the last one.
+        let r = d.insert(1, Insert::After).unwrap();
+        d.set_text(r, "新部門");
+        let last = d.rows().len() - 1;
+        let kid = d.insert(last, Insert::After).unwrap();
+        d.set_text(kid, "新團隊");
+        // Remove the first department's last team.
+        d.delete(5).unwrap();
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 12);
+    let b = boxes(shapes);
+    assert_eq!(b.len(), 12);
+    let frame = |name: &str| b.iter().find(|(t, _)| t == name).unwrap().1;
+    // The departments sit in one row, in order, under the root.
+    let (a, new, c) = (frame("资讯共享旺智分中心"), frame("新部門"), frame("资讯共享旺能分中心"));
+    assert!(a.y == new.y && new.y == c.y && a.x < new.x && new.x < c.x);
+    assert!(new.y > frame("资讯中心").y);
+    // Teams hang below their department.
+    assert!(frame("新團隊").y > c.y);
+    // Everything stays inside the frame.
+    let ShapeKind::Diagram { w, h, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert!(b.iter().all(|(_, x)| x.x >= 0 && x.y >= 0 && x.x + x.w <= *w && x.y + x.h <= *h));
+    let saved = save_pptx(&pres).unwrap();
+    check_org_data(&saved, si, 12);
+    // And reopens with the same tree.
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "orgChart1")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+}
+
+#[test]
+fn org_chart_levels_follow_depth() {
+    let (mut pres, si, i) = org();
+    edit(&mut pres, si, i, |d| {
+        // Demote the second department's last team under the previous one: a level deeper.
+        let rows = d.rows();
+        let team = rows.iter().rposition(|r| r.depth == 2).unwrap();
+        assert!(d.shift(team, true));
+        // And a new top-level department hanging nothing.
+        let r = d.insert(1, Insert::Child).unwrap();
+        d.set_text(r, "新的第一個");
+    });
+    let saved = save_pptx(&pres).unwrap();
+    check_org_data(&saved, si, 12);
+}

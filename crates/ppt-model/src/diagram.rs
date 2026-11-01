@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 use crate::{Emu, Paragraph, Run, Shape, TextBody, Xfrm};
 
+mod tree;
+
 /// Deepest level a node can be demoted to (0 is the top level).
 pub const MAX_DEPTH: usize = 4;
 
@@ -35,6 +37,8 @@ pub enum Arrangement {
     Line { vertical: bool },
     /// Evenly spaced around a circle.
     Cycle,
+    /// An org chart: one root, each node's children in a row or hanging below it.
+    Tree,
 }
 
 /// A presentation point: one element of the layout, usually one drawn shape.
@@ -75,6 +79,8 @@ pub struct Template {
     /// Children are shown as paragraphs of their parent's shapes, so they can
     /// be added, removed and moved between levels.
     pub nests: bool,
+    /// What the drawing says about an org chart's layout.
+    tree: Option<tree::TreeTpl>,
     /// The original parts, for saving.
     pub data_xml: Arc<str>,
     pub drawing_xml: Arc<str>,
@@ -346,12 +352,18 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
 
     fn analyze(&mut self) {
+        if let Some(tree) = tree::TreeTpl::detect(self) {
+            self.tree = Some(tree);
+            self.arrangement = Arrangement::Tree;
+            self.nests = true;
+            return;
+        }
         let m = self.nodes.len();
         let top: HashMap<&str, usize> = self.nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), i)).collect();
         let sib: HashMap<&str, usize> = self.nodes.iter().enumerate().filter_map(|(i, n)| Some((self.links.get(&n.id)?.sib_trans.as_str(), i))).collect();
@@ -448,6 +460,12 @@ impl Template {
 
     fn links_of(&self, id: &str) -> Links {
         self.links.get(id).cloned().unwrap_or_else(|| Links { cxn: derived_id(id, "cxn"), par_trans: derived_id(id, "parTrans"), sib_trans: derived_id(id, "sibTrans") })
+    }
+
+    /// Org charts: the loaded node whose look the node `id` at `depth` takes,
+    /// and whether it is the node itself (still at the depth it was loaded at).
+    pub fn tree_look(&self, id: &str, depth: usize) -> Option<(&str, bool)> {
+        self.tree.as_ref().map(|t| t.look(id, depth))
     }
 
     /// Whether the transition shapes after the last node are drawn (a closed cycle).
@@ -558,11 +576,20 @@ impl Diagram {
         self.can_restructure() && self.template.0.nests
     }
 
+    /// An org chart: one root, with everything else below it.
+    pub fn is_tree(&self) -> bool {
+        self.arrangement() == Arrangement::Tree
+    }
+
     /// Rebuilds the drawing for the current nodes: shapes relative to the
     /// template's frame, and what each one is.
     pub fn layout(&mut self) -> Vec<Shape> {
         let t = self.template.0.clone();
-        let (shapes, drawn) = if t.same_structure(&self.nodes) || t.arrangement == Arrangement::Fixed { self.retext(&t) } else { self.rearrange(&t) };
+        let (shapes, drawn) = match &t.tree {
+            Some(tree) if !t.same_structure(&self.nodes) => tree.layout(&t, &self.nodes),
+            _ if t.same_structure(&self.nodes) || t.arrangement == Arrangement::Fixed => self.retext(&t),
+            _ => self.rearrange(&t),
+        };
         self.drawn = drawn;
         shapes
     }
@@ -665,6 +692,8 @@ impl Diagram {
     pub fn insert(&mut self, i: usize, place: Insert) -> Option<usize> {
         let mut rows = flatten(&self.nodes);
         let depth = rows.get(i)?.0;
+        // An org chart has one root: a node "beside" it goes under it.
+        let place = if depth == 0 && self.is_tree() { Insert::Child } else { place };
         let (at, depth) = match place {
             Insert::After => (subtree_end(&rows, i), depth),
             Insert::Before => (i, depth),
@@ -711,7 +740,7 @@ impl Diagram {
             }
             rows[i..end].iter_mut().for_each(|r| r.0 += 1);
         } else {
-            if depth == 0 {
+            if depth == 0 || (depth == 1 && self.is_tree()) {
                 return false;
             }
             rows[i..end].iter_mut().for_each(|r| r.0 -= 1);
@@ -826,7 +855,7 @@ impl Geometry {
                     })
                     .collect();
             }
-            Arrangement::Fixed => {}
+            Arrangement::Fixed | Arrangement::Tree => {}
         }
         g
     }
@@ -1044,4 +1073,88 @@ mod tests {
         assert_ne!(id, derived_id("b", "a"));
         assert_eq!(id, derived_id("a", "b"));
     }
+
+    /// A root with two departments in a row; the first has two teams hanging below it.
+    fn org_chart() -> Arc<Template> {
+        let nodes = vec![node("r", "R", vec![node("a", "A", vec![node("a1", "A1", vec![]), node("a2", "A2", vec![])]), node("b", "B", vec![])])];
+        let ids = ["r", "a", "a1", "a2", "b"];
+        let mut links = HashMap::new();
+        for id in ids {
+            links.insert(id.to_string(), Links { cxn: format!("{id}-cxn"), par_trans: format!("{id}-par"), sib_trans: format!("{id}-sib") });
+        }
+        let mut pres_pts = Vec::new();
+        let mut shapes = Vec::new();
+        let mut shape_pres = Vec::new();
+        let conn = |x, y, w, h| {
+            let mut s = Shape::new(crate::ShapeId(0), "", Xfrm::new(x, y, w, h));
+            s.geometry = crate::Geometry::Custom(vec![crate::CustomPath { w: 0.0, h: 0.0, cmds: vec![crate::PathCmd::MoveTo(0.0, 0.0), crate::PathCmd::LineTo(0.0, h as f64 / 2.0), crate::PathCmd::LineTo(w as f64, h as f64 / 2.0)], fill: true, stroke: true }]);
+            s
+        };
+        // Boxes, in the order of `ids`; the connector to each non-root node follows its box.
+        let boxes = [(150, 0, 100, 40), (0, 80, 100, 40), (20, 140, 80, 30), (20, 180, 80, 30), (250, 80, 100, 40)];
+        for (k, id) in ids.iter().enumerate() {
+            pres_pts.push(pres(&format!("p{id}"), "rootText", id, &[id]));
+            shape_pres.push(pres_pts.len() - 1);
+            let (x, y, w, h) = boxes[k];
+            shapes.push(text_shape(x, y, w, h, &id.to_uppercase()));
+            if k > 0 {
+                pres_pts.push(pres(&format!("c{id}"), "Name37", &format!("{id}-par"), &[]));
+                shape_pres.push(pres_pts.len() - 1);
+                // Teams hang from a point 10 in from A's left edge.
+                shapes.push(if k == 2 || k == 3 { conn(10, 80, x - 10, y - 80 + h / 2) } else { conn(x, y - 30, 40, 30) });
+            }
+        }
+        Arc::new(Template::new("urn:x/layout/orgChart1".into(), nodes, pres_pts, links, shapes, shape_pres, 400, 260, "".into(), "".into()))
+    }
+
+    #[test]
+    fn org_chart_is_a_tree() {
+        let t = org_chart();
+        assert_eq!(t.arrangement, Arrangement::Tree);
+        let d = Diagram::new(t);
+        assert!(d.can_restructure() && d.can_nest());
+    }
+
+    #[test]
+    fn org_chart_relays_out_after_adding() {
+        let mut d = Diagram::new(org_chart());
+        // Beside the root goes under it.
+        let row = d.insert(0, Insert::After).unwrap();
+        assert_eq!(row, 5);
+        assert_eq!(d.rows()[row].depth, 1);
+        d.set_text(row, "New");
+        let shapes = d.layout();
+        let frame = |text: &str| shapes.iter().find(|s| s.text.as_ref().is_some_and(|t| t.plain_text() == text)).unwrap().xfrm;
+        let (a, b, new, root) = (frame("A"), frame("B"), frame("New"), frame("R"));
+        // Three departments in a row below the root, which sits over the middle one.
+        assert!(a.y == b.y && b.y == new.y && a.x < b.x && b.x < new.x && root.y + root.h < a.y);
+        let mid = |x: crate::Xfrm| x.x + x.w / 2;
+        assert!((mid(root) - mid(b)).abs() <= 1);
+        // The teams still hang below A, indented, one under the other.
+        let (a1, a2) = (frame("A1"), frame("A2"));
+        assert!(a1.x > a.x && a1.x == a2.x && a1.y > a.y + a.h && a2.y > a1.y + a1.h);
+        // A box and a connector per node, boxes and connectors named by who they belong to.
+        assert_eq!(shapes.len(), 6 + 5);
+        assert_eq!(d.drawn.iter().filter(|x| x.node.is_some()).count(), 6);
+        // Everything fits the frame.
+        assert!(shapes.iter().all(|s| s.xfrm.x >= 0 && s.xfrm.y >= 0 && s.xfrm.x + s.xfrm.w <= 400 && s.xfrm.y + s.xfrm.h <= 260));
+        // A connector runs from its parent's bottom to the child's side or top.
+        let hang = shapes.iter().find(|s| s.xfrm.y == a.y + a.h && s.xfrm.x < a1.x && s.xfrm.h > 0 && s.text.is_none() && (s.xfrm.x + s.xfrm.w - a1.x).abs() <= 1);
+        assert!(hang.is_some(), "a hanging connector ends at A1's left edge");
+    }
+
+    #[test]
+    fn org_chart_demoting_follows_the_level_above() {
+        let mut d = Diagram::new(org_chart());
+        // B becomes a team of A: A's teams hang, and B is the third.
+        assert!(d.shift(4, true));
+        let shapes = d.layout();
+        let frame = |text: &str| shapes.iter().find(|s| s.text.as_ref().is_some_and(|t| t.plain_text() == text)).unwrap().xfrm;
+        let (a2, b) = (frame("A2"), frame("B"));
+        assert!(b.x == a2.x && b.y > a2.y);
+        // The first level cannot be left: the root stays alone.
+        assert!(!d.shift(1, false));
+        assert!(d.delete(0).is_none());
+    }
+
 }

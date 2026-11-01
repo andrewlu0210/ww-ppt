@@ -185,7 +185,7 @@ fn line_xml(line: Option<Line>) -> String {
     format!(r#"<a:ln w="{}"><a:solidFill>{}</a:solidFill>{dash}{}{}</a:ln>"#, l.width, color_xml(l.color), end("headEnd", l.head), end("tailEnd", l.tail))
 }
 
-fn geometry_xml(g: &Geometry) -> String {
+pub(crate) fn geometry_xml(g: &Geometry) -> String {
     match g {
         Geometry::Preset { name, adjust } => {
             let gds: String = adjust.iter().map(|(k, v)| format!(r#"<a:gd name="{}" fmla="val {}"/>"#, esc(k), v.round() as i64)).collect();

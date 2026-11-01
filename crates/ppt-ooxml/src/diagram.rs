@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
-use ppt_model::diagram::{Diagram, Links, Node as DNode, PresPoint, Template, derived_id, template_index};
+use ppt_model::diagram::{Arrangement, Diagram, Links, Node as DNode, PresPoint, Template, derived_id, template_index};
 use ppt_model::{Emu, Shape, Xfrm};
 use roxmltree::{Document, Node};
 
@@ -365,6 +365,11 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
     for p in m.pts.iter().filter(|p| p.kind == "pres" && !rebuilt_pres.contains(p.id)) {
         out_pts.push_str(&src[p.el.range()]);
     }
+    let rebuilt = |id: &str| rebuilt_pres.contains(id);
+    if d.arrangement() == Arrangement::Tree {
+        let ctx = TreeCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id, all: &all };
+        tree_pres(&ctx, &d.nodes, &mut out_pts, &mut out_cxns);
+    } else {
     // Presentation points of each node and transition, and what they show.
     let mut mapped: HashMap<(usize, usize), String> = HashMap::new(); // (template point, position) → id
     let mut block: Vec<(usize, usize, String)> = Vec::new(); // (template point, position, id), in order
@@ -430,7 +435,6 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
     }
     // Parent-child links between presentation points.
     let tpl_index: HashMap<&str, usize> = t.pres.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
-    let rebuilt = |id: &str| rebuilt_pres.contains(id);
     // Which position's copy of a template point a link from `src` goes to.
     let mut parents: HashMap<&str, Vec<&Cxn>> = HashMap::new();
     for c in m.cxns.iter().filter(|c| c.kind == "presParOf") {
@@ -476,6 +480,7 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
             }
         }
     }
+    }
     // Remaining links of the whole layout (the document's `presOf`), and kinds we don't edit.
     for c in m.cxns.iter().filter(|c| match c.kind {
         "presOf" => !rebuilt(c.dest) && !unit_assocs.contains(c.src),
@@ -487,6 +492,178 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
     edits.push((pt_lst.range(), format!("<{}>{out_pts}</{}>", qname(src, pt_lst), qname(src, pt_lst))));
     edits.push((cxn_lst.range(), format!("<{}>{out_cxns}</{}>", qname(src, cxn_lst), qname(src, cxn_lst))));
     apply_edits(src, edits)
+}
+
+/// What writing an org chart's presentation points needs.
+struct TreeCtx<'a, 'i> {
+    src: &'a str,
+    m: &'a Model<'a, 'i>,
+    t: &'a Template,
+    pts: &'a HashMap<&'a str, &'a Pt<'a, 'i>>,
+    dgm: &'a str,
+    pres_id: &'a str,
+    /// The loaded nodes with their depths (see [`walk`]).
+    all: &'a [(&'a DNode, Option<&'a str>, usize, usize)],
+}
+
+/// A node's presentation points in the loaded data: its own (`assoc` = the
+/// node) and the connector's (`assoc` = its `parTrans`), in file order.
+struct Unit<'a> {
+    ids: Vec<&'a str>,
+    /// The point of the node's box (hierRoot) and of the connector (Name37); both hang off a point outside the unit.
+    top: &'a str,
+    /// None for the root, which has no connector.
+    trans: Option<&'a str>,
+    /// Where the children's points hang: the box's second child.
+    container: &'a str,
+}
+
+fn tree_unit<'a>(ctx: &TreeCtx<'a, '_>, node: &str) -> Option<Unit<'a>> {
+    let t = ctx.t;
+    let par_trans = t.links.get(node)?.par_trans.as_str();
+    let ids: Vec<&str> = t.pres.iter().filter(|p| p.assoc == node || p.assoc == par_trans).map(|p| p.id.as_str()).collect();
+    let inside: HashSet<&str> = ids.iter().copied().collect();
+    let outside_parent = |id: &str| ctx.m.cxns.iter().any(|c| c.kind == "presParOf" && c.dest == id && !inside.contains(c.src));
+    let assoc = |id: &str| t.pres.iter().find(|p| p.id == id).map_or("", |p| p.assoc.as_str());
+    let top = *ids.iter().find(|id| assoc(id) == node && outside_parent(id))?;
+    let trans = ids.iter().find(|id| assoc(id) == par_trans && outside_parent(id)).copied();
+    let mut kids: Vec<&Cxn> = ctx.m.cxns.iter().filter(|c| c.kind == "presParOf" && c.src == top).collect();
+    kids.sort_by_key(|c| c.src_ord);
+    let container = kids.get(1)?.dest;
+    Some(Unit { ids, top, trans, container })
+}
+
+/// Writes the presentation points of an org chart: each node's group of
+/// points (box, its parts, children container, connector) repeats from the
+/// node it looks like, and the groups are hung under their parents again.
+fn tree_pres(ctx: &TreeCtx, nodes: &[DNode], out_pts: &mut String, out_cxns: &mut String) {
+    let TreeCtx { src, m, t, pts, dgm, pres_id, all } = ctx;
+    let mut list = Vec::new();
+    walk(nodes, None, &mut list, 0);
+    let links_of = |id: &str| t.links.get(id).cloned().unwrap_or_else(|| Links { cxn: derived_id(id, "cxn"), par_trans: derived_id(id, "parTrans"), sib_trans: derived_id(id, "sibTrans") });
+    let depth_of: HashMap<&str, usize> = all.iter().map(|(n, .., d)| (n.id.as_str(), *d)).collect();
+    let loaded_count = |depth: usize| all.iter().filter(|a| a.3 == depth).count();
+    // Position of each node among those at its depth, and how many there are.
+    let mut at_depth: HashMap<usize, usize> = HashMap::new();
+    let mut slot: HashMap<&str, (usize, usize)> = HashMap::new();
+    for (n, .., depth) in &list {
+        let i = at_depth.entry(*depth).or_default();
+        slot.insert(n.id.as_str(), (*i, 0));
+        *i += 1;
+    }
+    for (n, .., depth) in &list {
+        slot.get_mut(n.id.as_str()).expect("listed").1 = at_depth[depth];
+    }
+    let mut units: HashMap<&str, Unit> = HashMap::new();
+    for (n, ..) in all.iter() {
+        if let Some(u) = tree_unit(ctx, &n.id) {
+            units.insert(n.id.as_str(), u);
+        }
+    }
+    // Ids a node's points get: its own, or copies derived from the node it looks like.
+    let mapped = |id: &str, node: &DNode, own: bool| if own { id.to_string() } else { derived_id(&node.id, id) };
+    // Children of each node, in order, to number what hangs under a container.
+    let mut child_index: HashMap<&str, usize> = HashMap::new();
+    for (n, parent, ord, _) in &list {
+        if let Some(p) = parent {
+            let _ = p;
+            child_index.insert(n.id.as_str(), *ord);
+        }
+    }
+    let look_of = |node: &DNode, depth: usize| t.tree_look(&node.id, depth).map(|(l, own)| (l.to_string(), own));
+    for (node, parent, ord, depth) in &list {
+        let Some((look, own)) = look_of(node, *depth) else { continue };
+        let Some(unit) = units.get(look.as_str()) else { continue };
+        let l_links = links_of(&look);
+        let n_links = links_of(&node.id);
+        let lt = depth_of.get(look.as_str()).copied().unwrap_or(*depth);
+        let (idx, cnt) = slot[node.id.as_str()];
+        let new_id = |p: &str| mapped(p, node, own);
+        // Points.
+        for &p in &unit.ids {
+            let Some(pt) = pts.get(p) else { continue };
+            let mut edits = Vec::new();
+            if !own {
+                edits.push(set_attr(src, pt.el, "modelId", &new_id(p)));
+            }
+            if let Some(set) = child(pt.el, "prSet") {
+                let assoc = set.attribute("presAssocID").unwrap_or_default();
+                if !own {
+                    edits.push(set_attr(src, set, "presAssocID", if assoc == look { &node.id } else { &n_links.par_trans }));
+                    // Offsets belong to the node they were set on; sizes carry over.
+                    for a in set.attributes() {
+                        if a.name().starts_with("cust") && !a.name().starts_with("custScale") {
+                            edits.extend(remove_attr(set, a.name()));
+                        }
+                    }
+                }
+                let attr = |n: &str| set.attribute(n).and_then(|v| v.parse::<usize>().ok());
+                if attr("presStyleIdx").is_some() && attr("presStyleCnt") == Some(loaded_count(lt)) && loaded_count(lt) > 0 {
+                    edits.push(set_attr(src, set, "presStyleIdx", &idx.to_string()));
+                    edits.push(set_attr(src, set, "presStyleCnt", &cnt.to_string()));
+                }
+            }
+            out_pts.push_str(&rewrite(src, pt.el, edits));
+        }
+        let inside: HashSet<&str> = unit.ids.iter().copied().collect();
+        let unit_src = |s: &str| -> Option<String> {
+            if s == look {
+                Some(node.id.clone())
+            } else if s == l_links.par_trans {
+                Some(n_links.par_trans.clone())
+            } else {
+                None
+            }
+        };
+        // What the points show.
+        for c in m.cxns.iter().filter(|c| c.kind == "presOf" && inside.contains(c.dest)) {
+            let Some(s) = unit_src(c.src) else { continue };
+            if own {
+                out_cxns.push_str(&src[c.el.range()]);
+            } else {
+                let dest = new_id(c.dest);
+                out_cxns.push_str(&format!(
+                    r#"<{dgm}cxn modelId="{}" type="presOf" srcId="{}" destId="{}" srcOrd="{}" destOrd="{}" presId="{}"/>"#,
+                    esc(&derived_id(&s, &dest)),
+                    esc(&s),
+                    esc(&dest),
+                    c.src_ord,
+                    c.dest_ord,
+                    esc(pres_id)
+                ));
+            }
+        }
+        // How the points nest inside the node's group.
+        let nest = |parent_id: &str, dest_id: &str, ord: usize| {
+            format!(r#"<{dgm}cxn modelId="{}" type="presParOf" srcId="{}" destId="{}" srcOrd="{ord}" destOrd="0" presId="{}"/>"#, esc(&derived_id(parent_id, dest_id)), esc(parent_id), esc(dest_id), esc(pres_id))
+        };
+        for c in m.cxns.iter().filter(|c| c.kind == "presParOf" && inside.contains(c.src) && inside.contains(c.dest)) {
+            if own {
+                out_cxns.push_str(&src[c.el.range()]);
+            } else {
+                out_cxns.push_str(&nest(&new_id(c.src), &new_id(c.dest), c.src_ord as usize));
+            }
+        }
+        // Where the group hangs: under the parent's container, connector first.
+        match parent {
+            None => {
+                for c in m.cxns.iter().filter(|c| c.kind == "presParOf" && c.dest == unit.top && !inside.contains(c.src)) {
+                    out_cxns.push_str(&src[c.el.range()]);
+                }
+            }
+            Some(pid) => {
+                let Some(pnode) = list.iter().find(|x| x.0.id == *pid) else { continue };
+                let Some((plook, pown)) = look_of(pnode.0, depth - 1) else { continue };
+                let Some(punit) = units.get(plook.as_str()) else { continue };
+                let container = mapped(punit.container, pnode.0, pown);
+                let trans = unit.trans.map(new_id);
+                if let Some(trans) = &trans {
+                    out_cxns.push_str(&nest(&container, trans, 2 * ord));
+                }
+                out_cxns.push_str(&nest(&container, &new_id(unit.top), 2 * ord + 1));
+            }
+        }
+    }
 }
 
 /// The drawing part for `shapes` (the diagram's current drawing), stretched by
@@ -505,6 +682,12 @@ pub(crate) fn drawing_xml(d: &Diagram, shapes: &[Shape], sx: f64, sy: f64) -> St
         let new = scale(&shape.xfrm);
         if let Some(x) = sp.descendants().find(|n| n.tag_name().name() == "xfrm" && n.parent().is_some_and(|p| p.tag_name().name() == "spPr")) {
             edits.push((x.range(), xfrm_xml(qname(src, x), &new)));
+        }
+        // Connectors are redrawn between their boxes.
+        if shape.geometry != tpl.geometry
+            && let Some(geom) = sp.descendants().find(|n| n.tag_name().name() == "custGeom" && n.parent().is_some_and(|p| p.tag_name().name() == "spPr"))
+        {
+            edits.push((geom.range(), crate::writer::geometry_xml(&shape.geometry)));
         }
         // The text frame moves and scales with the shape.
         if let Some(tx) = child(*sp, "txXfrm")

@@ -10,6 +10,8 @@ export interface DiagramInfo {
   restructure: boolean;
   /** Nodes can be moved between levels. */
   nest: boolean;
+  /** An org chart: nothing can be promoted to the top level. */
+  singleRoot: boolean;
 }
 
 export type DiagramCommand = "addAfter" | "addBefore" | "addChild" | "delete" | "promote" | "demote" | "moveUp" | "moveDown";
@@ -155,7 +157,7 @@ export function DiagramPane({ engine, version, row, onRow, focusRequest, focusRa
             <button disabled={!info.restructure || !current || (current.depth > 0 && !info.nest)} onClick={() => command("addAfter")} title={t("diagram.addTip")}>
               {t("diagram.add")}
             </button>
-            <button disabled={!info.nest || !current || current.depth === 0} onClick={() => command("promote")} aria-label={t("ribbon.promote")} title={t("diagram.promoteTip")}>
+            <button disabled={!info.nest || !current || current.depth === 0 || (info.singleRoot && current.depth === 1)} onClick={() => command("promote")} aria-label={t("ribbon.promote")} title={t("diagram.promoteTip")}>
               ←
             </button>
             <button disabled={!info.nest || !current || row === 0 || rows[row - 1].depth < current.depth} onClick={() => command("demote")} aria-label={t("ribbon.demote")} title={t("diagram.demoteTip")}>

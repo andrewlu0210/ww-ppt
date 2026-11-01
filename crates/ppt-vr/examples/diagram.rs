@@ -24,7 +24,8 @@ fn edited(pres: &Presentation, slide: usize, shape: usize, f: &dyn Fn(&mut Diagr
 
 fn add(d: &mut Diagram) {
     let last = d.rows().iter().rposition(|r| r.depth == 0).unwrap();
-    if let Some(r) = d.insert(last, Insert::After) {
+    // An org chart has one root: add under it instead.
+    if let Some(r) = d.insert(last, Insert::After).or_else(|| d.insert(0, Insert::Child)) {
         d.set_text(r, "新增項目");
     }
 }
@@ -47,7 +48,9 @@ fn main() {
             }
             let grown = edited(&pres, si, i, &add);
             let shrunk = edited(&pres, si, i, &|d| {
-                d.delete(0);
+                if d.delete(0).is_none() {
+                    d.delete(1);
+                }
             });
             let images: Vec<_> = [&pres, &grown, &shrunk].iter().map(|p| r.render(p, &p.slides[si], 640).unwrap()).collect();
             side_by_side(&images.iter().collect::<Vec<_>>()).save(out.join(format!("slide{:02}-{i}-{name}.png", si + 1))).unwrap();
