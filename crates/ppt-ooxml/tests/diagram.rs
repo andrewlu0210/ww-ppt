@@ -954,3 +954,77 @@ fn step_down_adds_and_removes_steps() {
     let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
     assert!(shapes.iter().find(|s| s.text.as_ref().is_some_and(|t| !t.is_empty())).unwrap().xfrm.w > before);
 }
+
+fn columns() -> (Presentation, usize, usize) {
+    let pres = deck("test17.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "lProcess2").expect("a grouped list");
+    (pres, si, i)
+}
+
+#[test]
+fn grouped_list_relayout_reproduces_the_loaded_drawing() {
+    let (mut pres, si, i) = columns();
+    let ShapeKind::Diagram { data: Some(d), shapes: loaded, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Columns);
+    assert!(d.can_nest());
+    assert_eq!(loaded.len(), 3 + 6);
+    let loaded = loaded.clone();
+    // The columns in another order: laid out again, each place is still taken by one.
+    edit(&mut pres, si, i, |d| {
+        assert!(d.move_row(0, false).is_some());
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(shapes.len(), loaded.len());
+    for old in loaded.iter() {
+        let near = |a: i64, b: i64| (a - b).abs() <= 3_000;
+        assert!(shapes.iter().any(|new| near(new.xfrm.x, old.xfrm.x) && near(new.xfrm.y, old.xfrm.y) && near(new.xfrm.w, old.xfrm.w) && near(new.xfrm.h, old.xfrm.h)), "nothing like {:?}", old.xfrm);
+    }
+    // And the texts followed the move: the second column's title is now the first's.
+    let first = shapes.iter().min_by_key(|s| (s.xfrm.x, s.xfrm.y)).unwrap();
+    assert_eq!(first.text.as_ref().unwrap().plain_text(), "BBB");
+}
+
+#[test]
+fn grouped_list_adds_columns_and_boxes() {
+    let (mut pres, si, i) = columns();
+    edit(&mut pres, si, i, |d| {
+        // A third box in the first column, and a new column (after it) with one box.
+        let r = d.insert(2, Insert::After).unwrap();
+        d.set_text(r, "A3");
+        let col = d.insert(0, Insert::After).unwrap();
+        assert_eq!(d.rows()[col].depth, 0);
+        d.set_text(col, "DDD");
+        let kid = d.insert(col, Insert::Child).unwrap();
+        d.set_text(kid, "D1");
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 3 + 6 + 1 + 2);
+    assert_eq!(shapes.len(), 4 + 6 + 1 + 1);
+    let b = boxes(shapes);
+    let frame = |name: &str| b.iter().find(|(t, _)| t == name).unwrap().1;
+    // Four columns share the frame's width, evenly, and stay inside it.
+    let titles: Vec<ppt_model::Xfrm> = ["AAA", "DDD", "BBB", "清單3"].iter().map(|n| frame(n)).collect();
+    assert!(titles.windows(2).all(|p| p[1].x > p[0].x + p[0].w && p[1].w == p[0].w));
+    assert!(shapes.iter().all(|s| s.xfrm.x >= 0 && s.xfrm.y >= 0 && s.xfrm.x + s.xfrm.w <= *w && s.xfrm.y + s.xfrm.h <= *h));
+    // Three boxes are smaller than two, which are smaller than one; they stack in order inside their column.
+    let (a1, a2, a3) = (frame("A1"), frame("A2"), frame("A3"));
+    let (b1, d1) = (frame("B1"), frame("D1"));
+    assert!(a1.h == a2.h && a2.h == a3.h && a1.h < b1.h && b1.h < d1.h);
+    assert!(a1.y + a1.h < a2.y && a2.y + a2.h < a3.y && a3.y + a3.h <= titles[0].y + titles[0].h);
+    let saved = save_pptx(&pres).unwrap();
+    check_pres_counts(&saved, si, 12, "lProcess2", "ppt/diagrams/data1.xml", ("aNode", 4), ("childNode", 8));
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "lProcess2")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+    assert_eq!(d2.arrangement(), Arrangement::Columns);
+    // Fewer: two columns, each wider.
+    edit(&mut pres, si, i, |d| {
+        d.delete(0).unwrap();
+        d.delete(0).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    let titles: Vec<&ppt_model::Shape> = shapes.iter().filter(|s| s.xfrm.h > 4_000_000).collect();
+    assert_eq!(titles.len(), 2);
+    assert!(titles[0].xfrm.w > 3_000_000);
+}

@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use crate::{Emu, Paragraph, PathCmd, Run, Shape, TextBody, Xfrm};
 
+mod columns;
 mod pie;
 mod radial;
 mod stair;
@@ -48,6 +49,8 @@ pub enum Arrangement {
     Radial,
     /// Nodes stepping down and to the right.
     Stair,
+    /// Tall columns side by side, each a title over boxes for its children.
+    Columns,
 }
 
 /// A presentation point: one element of the layout, usually one drawn shape.
@@ -92,6 +95,8 @@ pub struct Template {
     pub tapered: bool,
     /// Pie cycle (`cycle8`): what the drawing says about its slices.
     pie: Option<pie::PieTpl>,
+    /// Grouped list (`lProcess2`): what the drawing says about its columns.
+    columns: Option<columns::ColumnsTpl>,
     /// Step-down process (`StepDownProcess`): what the drawing says about its staircase.
     stair: Option<stair::StairTpl>,
     /// Radial list (`radial2`): what the drawing says about its hub and nodes.
@@ -412,12 +417,18 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, pie: None, radial: None, stair: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, pie: None, radial: None, stair: None, columns: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
 
     fn analyze(&mut self) {
+        if let Some(columns) = columns::ColumnsTpl::detect(self) {
+            self.nests = true;
+            self.columns = Some(columns);
+            self.arrangement = Arrangement::Columns;
+            return;
+        }
         if let Some(radial) = radial::RadialTpl::detect(self) {
             self.nests = self.units_show_children();
             self.radial = Some(radial);
@@ -755,6 +766,7 @@ impl Diagram {
         let t = self.template.0.clone();
         let (shapes, drawn) = match &t.tree {
             Some(tree) if !t.same_structure(&self.nodes) => tree.layout(&t, &self.nodes),
+            _ if t.columns.is_some() && !t.same_structure(&self.nodes) => t.columns.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.stair.is_some() && !t.same_structure(&self.nodes) => t.stair.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.radial.is_some() && !t.same_structure(&self.nodes) => t.radial.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.pie.is_some() && !t.same_structure(&self.nodes) => t.pie.as_ref().expect("checked").layout(&t, &self.nodes),
@@ -1080,7 +1092,7 @@ impl Geometry {
                     })
                     .collect();
             }
-            Arrangement::Fixed | Arrangement::Tree | Arrangement::Pie | Arrangement::Radial | Arrangement::Stair => {}
+            Arrangement::Fixed | Arrangement::Tree | Arrangement::Pie | Arrangement::Radial | Arrangement::Stair | Arrangement::Columns => {}
         }
         g
     }

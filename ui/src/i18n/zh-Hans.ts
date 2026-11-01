@@ -111,6 +111,7 @@ export const zhHans: Messages = {
   "smartArt.vList2": "垂直项目符号列表",
   "smartArt.chevron1": "基本 V 形流程",
   "smartArt.hList1": "水平项目符号列表",
+  "smartArt.lProcess2": "分组列表",
   "smartArt.cycle2": "基本循环",
   "smartArt.cycle3": "连续循环",
   "smartArt.cycle5": "块循环",

@@ -78,7 +78,7 @@ const NUMBERINGS: [string, string][] = [
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
 /** Layouts of the Insert > SmartArt menu (`ppt_ooxml::smartart_kinds`). */
-const SMARTART_LAYOUTS = ["vList2", "hList1", "process1", "process2", "process3", "hProcess9", "StepDownProcess", "radial2", "chevron1", "hChevron3", "chevron2", "cycle2", "cycle3", "cycle5", "cycle8", "pyramid1", "orgChart1", "hierarchy1", "hierarchy2"] as const;
+const SMARTART_LAYOUTS = ["vList2", "hList1", "lProcess2", "process1", "process2", "process3", "hProcess9", "StepDownProcess", "radial2", "chevron1", "hChevron3", "chevron2", "cycle2", "cycle3", "cycle5", "cycle8", "pyramid1", "orgChart1", "hierarchy1", "hierarchy2"] as const;
 
 function Button(props: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean; large?: boolean; active?: boolean; iconOnly?: boolean }) {
   const cls = ["rb-btn", props.large && "large", props.active && "active", props.iconOnly && "icon-only"].filter(Boolean).join(" ");

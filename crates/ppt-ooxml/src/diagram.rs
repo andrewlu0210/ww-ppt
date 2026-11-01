@@ -309,6 +309,7 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
     }
     let pie = (d.arrangement() == Arrangement::Pie).then(|| pie_units(&m, t)).flatten();
     let radial = (d.arrangement() == Arrangement::Radial).then(|| radial_units(&m, t)).flatten();
+    let columns = (d.arrangement() == Arrangement::Columns).then(|| columns_units(&m, t)).flatten();
     let mut rebuilt_pres: HashSet<&str> = t.pres.iter().filter(|p| unit_assocs.contains(&p.assoc)).map(|p| p.id.as_str()).collect();
     if let Some(u) = &pie {
         rebuilt_pres.extend(u.groups.iter().flatten().copied());
@@ -371,7 +372,9 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
         out_pts.push_str(&src[p.el.range()]);
     }
     let rebuilt = |id: &str| rebuilt_pres.contains(id);
-    if let Some(units) = &radial {
+    if let Some(units) = &columns {
+        columns_pres(&PieCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id }, units, &rebuilt_pres, &d.nodes, &mut out_pts, &mut out_cxns);
+    } else if let Some(units) = &radial {
         radial_pres(&PieCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id }, units, &d.nodes, &mut out_pts, &mut out_cxns);
     } else if let Some(units) = &pie {
         pie_pres(&PieCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id }, units, &d.nodes, &mut out_pts, &mut out_cxns);
@@ -501,6 +504,159 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
     edits.push((pt_lst.range(), format!("<{}>{out_pts}</{}>", qname(src, pt_lst), qname(src, pt_lst))));
     edits.push((cxn_lst.range(), format!("<{}>{out_cxns}</{}>", qname(src, cxn_lst), qname(src, cxn_lst))));
     apply_edits(src, edits)
+}
+
+/// A grouped list's presentation points as loaded: the list they hang under, each
+/// column's points, and what one box and the gap after it are made of.
+struct ColumnsUnits<'a> {
+    container: &'a str,
+    /// Per loaded column: (column, its title, the title's text, the box area, the boxes' list, the space after the column).
+    columns: Vec<ColumnUnit<'a>>,
+    /// Boxes in the loaded drawing.
+    boxes: usize,
+}
+
+struct ColumnUnit<'a> {
+    comp: &'a str,
+    /// The title, its text and the point holding the boxes' list, in order.
+    parts: [&'a str; 3],
+    inner: &'a str,
+    space: Option<&'a str>,
+    /// Each box's point, and the point after it (between it and the next box).
+    list: Vec<(&'a str, Option<&'a str>)>,
+}
+
+fn columns_units<'a>(m: &Model<'a, '_>, t: &'a Template) -> Option<ColumnsUnits<'a>> {
+    let parent_of = |id: &str| m.cxns.iter().find(|c| c.kind == "presParOf" && c.dest == id);
+    let kids_of = |id: &str| -> Vec<&'a str> {
+        let mut v: Vec<&Cxn> = m.cxns.iter().filter(|c| c.kind == "presParOf" && c.src == id).collect();
+        v.sort_by_key(|c| c.src_ord);
+        v.iter().map(|c| c.dest).collect()
+    };
+    let first = t.nodes.first()?;
+    let comp0 = t.pres.iter().find(|p| p.assoc == first.id && parent_of(&p.id).is_some_and(|c| t.pres.iter().all(|q| q.id != c.src || q.assoc != first.id)))?;
+    let container = parent_of(&comp0.id)?.src;
+    let under: HashSet<&str> = kids_of(container).into_iter().collect();
+    let (mut columns, mut boxes) = (Vec::new(), 0);
+    for node in &t.nodes {
+        let mine: Vec<&PresPoint> = t.pres.iter().filter(|p| p.assoc == node.id && under.contains(p.id.as_str())).collect();
+        // The first is the column, a second (if any) the space after it.
+        let comp = mine.first()?.id.as_str();
+        let space = mine.get(1).map(|p| p.id.as_str());
+        let parts = kids_of(comp);
+        let [a, tx, cc] = parts[..] else { return None };
+        let [inner] = kids_of(cc)[..] else { return None };
+        boxes += node.children.len();
+        let mut list: Vec<(&str, Option<&str>)> = Vec::new();
+        // Boxes and the gaps between them alternate: box, gap, box, ... box.
+        for (at, id) in kids_of(inner).into_iter().enumerate() {
+            if at % 2 == 0 {
+                list.push((id, None));
+            } else if let Some(last) = list.last_mut() {
+                last.1 = Some(id);
+            }
+        }
+        columns.push(ColumnUnit { comp, parts: [a, tx, cc], inner, space, list });
+    }
+    columns.iter().any(|c| !c.list.is_empty()).then_some(ColumnsUnits { container, columns, boxes })
+}
+
+/// Writes the presentation points of a grouped list: columns, their parts,
+/// boxes and the spaces between repeat from the loaded ones.
+fn columns_pres(ctx: &PieCtx, units: &ColumnsUnits, rebuilt: &HashSet<&str>, nodes: &[DNode], out_pts: &mut String, out_cxns: &mut String) {
+    let PieCtx { src, m, t, pts, dgm, pres_id } = ctx;
+    let (n, k) = (nodes.len(), t.nodes.len());
+    let total_boxes: usize = nodes.iter().map(|x| x.children.len()).sum();
+    let link = |parent: &str, dest: &str, ord: usize| format!(r#"<{dgm}cxn modelId="{}" type="presParOf" srcId="{}" destId="{}" srcOrd="{ord}" destOrd="0" presId="{}"/>"#, esc(&derived_id(parent, dest)), esc(parent), esc(dest), esc(pres_id));
+    // Points that stay, with their links (the list itself).
+    for c in m.cxns.iter().filter(|c| c.kind == "presParOf" && !rebuilt.contains(c.src) && !rebuilt.contains(c.dest)) {
+        out_cxns.push_str(&src[c.el.range()]);
+    }
+    let space_proto = units.columns.iter().find_map(|c| c.space);
+    // One point: a copy for `assoc_id` (a node), with its new place among the styled points.
+    let point = |out: &mut String, proto: &str, owner: &str, style: Option<(usize, usize, usize)>| -> Option<String> {
+        let pt = pts.get(proto)?;
+        let id = derived_id(owner, proto);
+        let mut edits = vec![set_attr(src, pt.el, "modelId", &id)];
+        if let Some(set) = child(pt.el, "prSet") {
+            edits.push(set_attr(src, set, "presAssocID", owner));
+            if let Some((idx, cnt, old)) = style {
+                let attr = |a: &str| set.attribute(a).and_then(|v| v.parse::<usize>().ok());
+                if attr("presStyleIdx").is_some() && attr("presStyleCnt") == Some(old) {
+                    edits.push(set_attr(src, set, "presStyleIdx", &idx.to_string()));
+                    edits.push(set_attr(src, set, "presStyleCnt", &cnt.to_string()));
+                }
+            }
+        }
+        out.push_str(&rewrite(src, pt.el, edits));
+        Some(id)
+    };
+    let mut ordinal = 0;
+    for (j, node) in nodes.iter().enumerate() {
+        let tt = template_index(j, n, k);
+        let u = &units.columns[tt];
+        let tpl_node = &t.nodes[tt];
+        let Some(comp) = point(out_pts, u.comp, &node.id, None) else { continue };
+        out_cxns.push_str(&link(units.container, &comp, 2 * j));
+        if j + 1 < n
+            && let Some(sp) = space_proto
+            && let Some(id) = point(out_pts, sp, &node.id, None)
+        {
+            out_cxns.push_str(&link(units.container, &id, 2 * j + 1));
+        }
+        let mut ids = Vec::new();
+        for (i, &p) in u.parts.iter().enumerate() {
+            let Some(id) = point(out_pts, p, &node.id, Some((j, n, k))) else { continue };
+            out_cxns.push_str(&link(&comp, &id, i));
+            ids.push((p, id));
+        }
+        for &(p, ref id) in &ids {
+            // The title and its text present the node.
+            for c in m.cxns.iter().filter(|c| c.kind == "presOf" && c.dest == p && c.src == tpl_node.id) {
+                out_cxns.push_str(&format!(
+                    r#"<{dgm}cxn modelId="{}" type="presOf" srcId="{}" destId="{}" srcOrd="{}" destOrd="{}" presId="{}"/>"#,
+                    esc(&derived_id(&node.id, id)),
+                    esc(&node.id),
+                    esc(id),
+                    c.src_ord,
+                    c.dest_ord,
+                    esc(pres_id)
+                ));
+            }
+        }
+        // The list of boxes: the point holding it is the last of the column's parts.
+        let Some(cc) = ids.get(2).map(|x| x.1.clone()) else { continue };
+        let Some(inner) = point(out_pts, u.inner, &node.id, None) else { continue };
+        out_cxns.push_str(&link(&cc, &inner, 0));
+        let c = node.children.len();
+        for (i, ch) in node.children.iter().enumerate() {
+            // What the box looks like: as in the model, the same place in the loaded column, or the nearest box there is.
+            let any = units.columns.iter().flat_map(|c| c.list.first()).next();
+            let Some(&(proto, gap)) = u.list.get(i).or(u.list.last()).or(any) else { continue };
+            let Some(bid) = point(out_pts, proto, &ch.id, Some((ordinal, total_boxes, units.boxes))) else { continue };
+            ordinal += 1;
+            out_cxns.push_str(&link(&inner, &bid, 2 * i));
+            // The box shows the child and what is below it.
+            let mut shown = Vec::new();
+            walk(std::slice::from_ref(ch), None, &mut shown, 0);
+            for (di, (s, ..)) in shown.iter().enumerate() {
+                out_cxns.push_str(&format!(
+                    r#"<{dgm}cxn modelId="{}" type="presOf" srcId="{}" destId="{}" srcOrd="0" destOrd="{di}" presId="{}"/>"#,
+                    esc(&derived_id(&s.id, &bid)),
+                    esc(&s.id),
+                    esc(&bid),
+                    esc(pres_id)
+                ));
+            }
+            let gap_proto = gap.or_else(|| units.columns.iter().flat_map(|c| &c.list).find_map(|l| l.1));
+            if i + 1 < c
+                && let Some(gp) = gap_proto
+                && let Some(gid) = point(out_pts, gp, &ch.id, None)
+            {
+                out_cxns.push_str(&link(&inner, &gid, 2 * i + 1));
+            }
+        }
+    }
 }
 
 /// One node's presentation points in a radial list as loaded: its line to the hub,

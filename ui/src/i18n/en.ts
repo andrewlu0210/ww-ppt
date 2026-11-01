@@ -111,6 +111,7 @@ export const en: Messages = {
   "smartArt.vList2": "Vertical Bullet List",
   "smartArt.chevron1": "Basic Chevron Process",
   "smartArt.hList1": "Horizontal Bullet List",
+  "smartArt.lProcess2": "Grouped List",
   "smartArt.cycle2": "Basic Cycle",
   "smartArt.cycle3": "Continuous Cycle",
   "smartArt.cycle5": "Block Cycle",

@@ -113,6 +113,7 @@ export const zhHant = {
   "smartArt.vList2": "垂直項目符號清單",
   "smartArt.chevron1": "基本人字形流程",
   "smartArt.hList1": "水平項目符號清單",
+  "smartArt.lProcess2": "群組清單",
   "smartArt.cycle2": "基本循環",
   "smartArt.cycle3": "連續循環",
   "smartArt.cycle5": "區塊循環",
