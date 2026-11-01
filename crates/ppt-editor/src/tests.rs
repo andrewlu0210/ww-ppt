@@ -1579,3 +1579,38 @@ fn inserting_a_smartart_selects_it_and_undoes() {
     let back = ppt_ooxml::parse_pptx(&saved).unwrap();
     assert_eq!(back.slides[0].shapes.iter().filter(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(_), .. })).count(), n);
 }
+
+#[test]
+fn smartart_nodes_are_spell_checked_where_they_are_drawn() {
+    let mut eng = engine();
+    let (mut e, id) = smartart_editor(&mut eng, "/vList2");
+    let rows = e.diagram_info().unwrap().rows;
+    // Every node drawn in a shape of its own is a text to check.
+    let nodes: Vec<(FindPlace, String)> = e.slide_texts().into_iter().filter(|(p, _)| matches!(p, FindPlace::Node(i, _) if *i == id)).collect();
+    assert_eq!(nodes.len(), rows.len());
+    assert_eq!(nodes[2], (FindPlace::Node(id, 2), rows[2].text.clone()));
+    // Its characters are laid out inside the node's shape, in slide space.
+    let (layout, tf) = e.text_geometry(&mut eng, FindPlace::Node(id, 2)).expect("geometry");
+    let rects = crate::range_rects(&layout, 0..rows[2].text.len().min(3));
+    assert!(!rects.is_empty());
+    let (x, y) = smartart_point(&e, id, 2);
+    let at = tf * ppt_geometry::kurbo::Point::new(rects[0].x0, (rects[0].y0 + rects[0].y1) / 2.0);
+    let shape = e.pres.shape(e.slide, id).unwrap();
+    let ShapeKind::Diagram { shapes, .. } = &shape.kind else { panic!() };
+    let half_h = shapes[2].xfrm.h as f64 / 2.0 * shape.xfrm.h as f64 / shape.xfrm.h as f64;
+    assert!((at.y - y).abs() <= half_h, "inside the node's box vertically: {} vs {y}", at.y);
+    assert!(at.x <= x, "the word starts left of the box's middle");
+    // A correction goes through the node: one undo step.
+    let m = FindMatch { slide: e.slide, place: FindPlace::Node(id, 2), range: 0..rows[2].text.chars().next().unwrap().len_utf8() };
+    assert!(e.replace_range(&mut eng, &m, "更正"));
+    assert!(e.diagram_info().unwrap().rows[2].text.starts_with("更正"));
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.diagram_info().unwrap().rows[2].text, rows[2].text);
+    // While the node is edited on the canvas, its live text is the one checked.
+    click(&mut e, &mut eng, x, y, 2);
+    e.text.as_mut().unwrap().rich.select_all();
+    assert!(e.insert_text(&mut eng, "live"));
+    assert!(e.slide_texts().contains(&(FindPlace::Node(id, 2), "live".to_string())));
+    let (layout, _) = e.text_geometry(&mut eng, FindPlace::Node(id, 2)).expect("live geometry");
+    assert!(!crate::range_rects(&layout, 0..4).is_empty());
+}

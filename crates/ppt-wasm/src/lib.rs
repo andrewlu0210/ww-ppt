@@ -120,6 +120,10 @@ fn parse_spell_key(key: &str) -> Option<FindPlace> {
     if let Some(rest) = key.strip_prefix('s') {
         return Some(FindPlace::Shape(id(rest)?));
     }
+    if let Some(rest) = key.strip_prefix('d') {
+        let (shape, row) = rest.split_once(':')?;
+        return Some(FindPlace::Node(id(shape)?, row.parse().ok()?));
+    }
     let mut parts = key.strip_prefix('c')?.split(':');
     Some(FindPlace::Cell(id(parts.next()?)?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }

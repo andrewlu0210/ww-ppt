@@ -98,8 +98,11 @@ impl Editor {
                 };
                 match &shape.kind {
                     ShapeKind::Diagram { data: Some(d), .. } => {
+                        // A node edited on the canvas is live in the editor.
+                        let live = self.text.as_ref().filter(|t| i == self.slide && t.shape == shape.id).and_then(|t| Some((t.diagram?.1, t.rich.body.plain_text())));
                         for (r, row) in d.rows().into_iter().enumerate() {
-                            out.push((i, FindPlace::Node(shape.id, r), row.text));
+                            let text = live.as_ref().filter(|(lr, _)| *lr == r).map_or(row.text, |(_, t)| t.clone());
+                            out.push((i, FindPlace::Node(shape.id, r), text));
                         }
                     }
                     ShapeKind::Table(table) => {
@@ -249,26 +252,38 @@ impl Editor {
             self.push_undo(before);
             return true;
         }
-        if let FindPlace::Node(id, row) = m.place {
-            self.end_text_edit(engine);
-            let Some(mut text) = self.node_text(m.slide, id, row) else { return false };
-            text.replace_range(m.range.clone(), with);
-            let before = self.snapshot();
-            if !self.set_node_texts(engine, m.slide, id, &[(row, text)]) {
-                return false;
-            }
-            self.push_undo(before);
-            // Continue after the replacement.
-            let end = m.range.start + with.len();
-            self.node_match = Some(FindMatch { range: end..end, ..m.clone() });
-            return true;
+        if let FindPlace::Node(..) = m.place {
+            return self.replace_node_range(engine, m, with);
         }
         self.replace_range(engine, m, with)
+    }
+
+    /// Replaces the text of `m`, a SmartArt node's, with `with` (one undo step).
+    fn replace_node_range(&mut self, engine: &mut TextEngine, m: &FindMatch, with: &str) -> bool {
+        let FindPlace::Node(id, row) = m.place else { return false };
+        self.end_text_edit(engine);
+        let Some(mut text) = self.node_text(m.slide, id, row) else { return false };
+        if m.range.end > text.len() || !text.is_char_boundary(m.range.start) || !text.is_char_boundary(m.range.end) {
+            return false;
+        }
+        text.replace_range(m.range.clone(), with);
+        let before = self.snapshot();
+        if !self.set_node_texts(engine, m.slide, id, &[(row, text)]) {
+            return false;
+        }
+        self.push_undo(before);
+        // Continue after the replacement.
+        let end = m.range.start + with.len();
+        self.node_match = Some(FindMatch { range: end..end, ..m.clone() });
+        true
     }
 
     /// Replaces the text of `m` (a shape or cell match) with `with` through the
     /// text editor, leaving it editing there.
     pub fn replace_range(&mut self, engine: &mut TextEngine, m: &FindMatch, with: &str) -> bool {
+        if let FindPlace::Node(..) = m.place {
+            return self.replace_node_range(engine, m, with);
+        }
         if m.place == FindPlace::Notes || !self.select_match(engine, m) {
             return false;
         }
