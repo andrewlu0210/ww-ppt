@@ -81,6 +81,9 @@ pub struct Template {
     pub nests: bool,
     /// Levels stacked into one pyramid: each a trapezoid whose top edge is the one above's bottom edge.
     pub tapered: bool,
+    /// Cycle: one arrow around the whole ring of nodes (shape index), and where its tail and
+    /// tip sit after the first node, in node spacings (`cycle3`).
+    ring: Option<(usize, f64, f64)>,
     /// What the drawing says about an org chart's layout.
     tree: Option<tree::TreeTpl>,
     /// The original parts, for saving.
@@ -355,7 +358,7 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
@@ -406,7 +409,9 @@ impl Template {
         if !movable {
             return;
         }
-        self.arrangement = if self.is_cycle() {
+        let ring = self.find_ring();
+        self.arrangement = if self.is_cycle(ring.map(|r| r.0)) {
+            self.ring = ring;
             Arrangement::Cycle
         } else if let Some(vertical) = self.line_axis() {
             Arrangement::Line { vertical }
@@ -464,10 +469,29 @@ impl Template {
         (r > 0.0 && dist.iter().all(|d| (d - r).abs() <= r * 0.1) && even).then_some(Circle { center: c, radius: r, angles, dir })
     }
 
-    fn is_cycle(&self) -> bool {
+    /// A circular arrow around the whole ring, tied to the first node alone: its shape,
+    /// and the offsets of its tail and tip from that node in node spacings.
+    fn find_ring(&self) -> Option<(usize, f64, f64)> {
+        let m = self.units.len();
+        let [i] = self.units.first()?.trans[..] else { return None };
+        if m < 3 || self.units[1..].iter().any(|u| !u.trans.is_empty()) {
+            return None;
+        }
+        let crate::Geometry::Preset { name, adjust } = &self.shapes[i].geometry else { return None };
+        let adj = |k: &str| adjust.iter().find(|(n, _)| n == k).map(|a| a.1);
+        let (tip, tail) = (adj("adj3")? / 60_000.0, adj("adj4")? / 60_000.0);
+        let Circle { angles, dir, .. } = self.cycle_geometry()?;
+        if name != "circularArrow" || dir < 0.0 || self.shapes[i].xfrm.rot != 0.0 {
+            return None;
+        }
+        let (first, step) = (angles[0].to_degrees(), 360.0 / m as f64);
+        Some((i, (tail - first).rem_euclid(360.0) / step, ((tip - first + 180.0).rem_euclid(360.0) - 180.0) / step))
+    }
+
+    fn is_cycle(&self, ring: Option<usize>) -> bool {
         let Some(Circle { radius: r, .. }) = self.cycle_geometry() else { return false };
         // Connectors between nodes must be small (not arcs around the whole circle).
-        self.units.iter().flat_map(|u| &u.trans).all(|&i| {
+        self.units.iter().flat_map(|u| &u.trans).filter(|&&i| Some(i) != ring).all(|&i| {
             let x = &self.shapes[i].xfrm;
             (x.w.max(x.h) as f64) < r
         })
@@ -834,12 +858,14 @@ struct Geometry {
     taper: Option<f64>,
     /// Cycle: how much closer to the center than loaded the nodes sit, to stay inside the frame.
     rho: f64,
+    /// Cycle: the ring arrow's shape and offsets (see [`Template::ring`]).
+    ring: Option<(usize, f64, f64)>,
 }
 
 impl Geometry {
     fn new(t: &Template, n: usize) -> Geometry {
         let m = t.units.len();
-        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n, taper: None, rho: 1.0 };
+        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n, taper: None, rho: 1.0, ring: t.ring };
         match t.arrangement {
             Arrangement::Line { vertical } => {
                 let r: Vec<_> = t.units.iter().map(|u| u.rect.axis(vertical)).collect();
@@ -895,18 +921,23 @@ impl Geometry {
                 let fit = if size > 0.0 { (2.0 * (room - r) / size).max(1.0) } else { 1.0 };
                 g.along = chord.min(fit);
                 // Another count puts nodes where the loaded ring did not reach: pull them in until they fit.
-                let half = size * g.along / 2.0;
+                let half = (
+                    t.units.iter().map(|u| u.rect.w).fold(0.0, f64::max) * g.along / 2.0,
+                    t.units.iter().map(|u| u.rect.h).fold(0.0, f64::max) * g.along / 2.0,
+                );
                 let reach = |room: f64, d: f64| if d.abs() > 1e-6 { room / d.abs() } else { f64::INFINITY };
                 g.rho = (0..n)
                     .map(|j| {
                         let a = g.angle0 + dir * 2.0 * PI * j as f64 / n as f64;
                         let (cx, cy) = (a.cos(), a.sin());
-                        let x = if cx > 0.0 { t.w as f64 - c.0 - half } else { c.0 - half };
-                        let y = if cy > 0.0 { t.h as f64 - c.1 - half } else { c.1 - half };
+                        let x = if cx > 0.0 { t.w as f64 - c.0 - half.0 } else { c.0 - half.0 };
+                        let y = if cy > 0.0 { t.h as f64 - c.1 - half.1 } else { c.1 - half.1 };
                         reach(x, cx).min(reach(y, cy)) / r
                     })
                     .fold(1.0, f64::min)
                     .max(0.3);
+                // The nodes shrink with the ring.
+                g.along *= g.rho;
                 let r = r * g.rho;
                 g.rects = (0..n)
                     .map(|j| {
@@ -968,6 +999,26 @@ impl Geometry {
                 let center_c = self.cross0.1 + (rc + rcl / 2.0 - self.cross0.0) * self.across;
                 let to = Rect::from_axis(vertical, center_a - ral * k / 2.0, ral * k, center_c - rcl * k / 2.0, rcl * k);
                 placed(shape, r, to, self.font())
+            }
+            _ if self.ring.is_some_and(|r| r.0 == i) => {
+                // The arrow around the ring starts and ends next to the first node, as far from it as a share of the spacing.
+                let (_, tail, tip) = self.ring.expect("checked");
+                let step = 360.0 / self.n as f64;
+                let first = self.angle0.to_degrees();
+                let mut s = shape.clone();
+                let c = r.center();
+                let center = (self.center.0 + (c.0 - self.center.0) * self.rho, self.center.1 + (c.1 - self.center.1) * self.rho);
+                s.xfrm = Xfrm { x: (center.0 - r.w * self.rho / 2.0).round() as Emu, y: (center.1 - r.h * self.rho / 2.0).round() as Emu, w: (r.w * self.rho).round() as Emu, h: (r.h * self.rho).round() as Emu, ..shape.xfrm };
+                if let crate::Geometry::Preset { adjust, .. } = &mut s.geometry {
+                    for (name, share) in [("adj3", tip), ("adj4", tail)] {
+                        let value = (first + share * step).rem_euclid(360.0) * 60_000.0;
+                        match adjust.iter_mut().find(|(k, _)| k == name) {
+                            Some(a) => a.1 = value,
+                            None => adjust.push((name.into(), value)),
+                        }
+                    }
+                }
+                s
             }
             _ => {
                 // Turn it from its gap (after loaded node tt) to the new gap.

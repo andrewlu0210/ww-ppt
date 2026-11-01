@@ -201,6 +201,12 @@ fn check_org_data(saved: &[u8], slide: usize, nodes: usize) {
 
 /// [`check_org_data`] for any tree layout: its data part, and the start of the names of its box and connector points.
 fn check_tree_data(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_part: &str, box_name: &str, link_name: &str) {
+    check_pres_data(saved, slide, nodes, layout, data_part, box_name, link_name, nodes - 1);
+}
+
+/// The saved data model is consistent, with `links` points named like `link_name`.
+#[allow(clippy::too_many_arguments)]
+fn check_pres_data(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_part: &str, box_name: &str, link_name: &str, links: usize) {
     use std::collections::{HashMap, HashSet};
     let pres = parse_pptx(saved).unwrap();
     let ShapeKind::Diagram { data: Some(d), .. } = &pres.slides[slide].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == layout)).unwrap().kind else { panic!() };
@@ -253,8 +259,8 @@ fn check_tree_data(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_
     }
     let boxes = names.values().filter(|n| n.starts_with(box_name)).count();
     assert_eq!(boxes, nodes, "one box per node");
-    let links = names.values().filter(|n| n.starts_with(link_name)).count();
-    assert_eq!(links, nodes - 1, "one connector per link");
+    let found = names.values().filter(|n| n.starts_with(link_name)).count();
+    assert_eq!(found, links, "{link_name} points");
 }
 
 #[test]
@@ -585,4 +591,67 @@ fn horizontal_hierarchy_adds_and_removes_nodes() {
     let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "hierarchy2")).unwrap().kind else { panic!() };
     assert_eq!(texts(d2), texts(d));
     assert_eq!(s2.len(), shapes.len());
+}
+
+
+fn cycle3() -> (Presentation, usize, usize) {
+    let pres = deck("test12.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "cycle3").expect("a continuous cycle");
+    (pres, si, i)
+}
+
+/// (center, share of the way around from the first node) of nodes and the ring arrow's (tail, tip) in node spacings.
+fn ring_of(shapes: &[ppt_model::Shape], nodes: usize) -> (Vec<(f64, f64)>, (f64, f64)) {
+    let arrow = shapes.iter().find(|s| matches!(&s.geometry, ppt_model::Geometry::Preset { name, .. } if name == "circularArrow")).expect("the ring arrow");
+    let centers: Vec<(f64, f64)> = shapes.iter().filter(|s| s.text.is_some()).map(|s| (s.xfrm.x as f64 + s.xfrm.w as f64 / 2.0, s.xfrm.y as f64 + s.xfrm.h as f64 / 2.0)).collect();
+    assert_eq!(centers.len(), nodes);
+    let c = (centers.iter().map(|p| p.0).sum::<f64>() / nodes as f64, centers.iter().map(|p| p.1).sum::<f64>() / nodes as f64);
+    let first = (centers[0].1 - c.1).atan2(centers[0].0 - c.0).to_degrees();
+    let ppt_model::Geometry::Preset { adjust, .. } = &arrow.geometry else { unreachable!() };
+    let adj = |n: &str| adjust.iter().find(|(k, _)| k == n).unwrap().1 / 60_000.0;
+    let step = 360.0 / nodes as f64;
+    ((centers), (((adj("adj4") - first).rem_euclid(360.0)) / step, ((adj("adj3") - first + 180.0).rem_euclid(360.0) - 180.0) / step))
+}
+
+#[test]
+fn continuous_cycle_respaces_nodes_and_its_arrow() {
+    let (mut pres, si, i) = cycle3();
+    let ShapeKind::Diagram { data: Some(d), shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Cycle);
+    assert_eq!(d.rows().len(), 5);
+    let (_, (tail, tip)) = ring_of(shapes, 5);
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(4, Insert::After).unwrap();
+        d.set_text(r, "新階段");
+        let r = d.insert(1, Insert::After).unwrap();
+        d.set_text(r, "又一個");
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 7);
+    let (centers, (tail7, tip7)) = ring_of(shapes, 7);
+    // The nodes sit on one circle, evenly spaced.
+    let arrow = shapes.iter().find(|s| matches!(&s.geometry, ppt_model::Geometry::Preset { name, .. } if name == "circularArrow")).unwrap();
+    let c = (centers.iter().map(|p| p.0).sum::<f64>() / 7.0, centers.iter().map(|p| p.1).sum::<f64>() / 7.0);
+    let _ = arrow;
+    let radii: Vec<f64> = centers.iter().map(|p| ((p.0 - c.0).powi(2) + (p.1 - c.1).powi(2)).sqrt()).collect();
+    assert!(radii.iter().all(|r| (r - radii[0]).abs() <= radii[0] * 0.01), "{radii:?}");
+    // The arrow starts and ends the same share of a node spacing from the first node, and is one shape.
+    assert!((tail7 - tail).abs() < 0.01 && (tip7 - tip).abs() < 0.01, "{tail} {tip} vs {tail7} {tip7}");
+    assert_eq!(shapes.iter().filter(|s| matches!(&s.geometry, ppt_model::Geometry::Preset { name, .. } if name == "circularArrow")).count(), 1);
+    assert!(shapes.iter().all(|s| s.xfrm.x >= -2 && s.xfrm.y >= -2 && s.xfrm.x + s.xfrm.w <= *w + 2 && s.xfrm.y + s.xfrm.h <= *h + 2));
+    let saved = save_pptx(&pres).unwrap();
+    check_pres_data(&saved, si, 7, "cycle3", "ppt/diagrams/data8.xml", "node", "sibTrans", 1);
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "cycle3")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+    assert_eq!(d2.arrangement(), Arrangement::Cycle);
+    // Removing the first node: the next one leads, and the arrow follows it.
+    edit(&mut pres, si, i, |d| {
+        d.delete(0).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(ring_of(shapes, 6).0.len(), 6);
+    let saved = save_pptx(&pres).unwrap();
+    check_pres_data(&saved, si, 6, "cycle3", "ppt/diagrams/data8.xml", "node", "sibTrans", 1);
 }

@@ -112,6 +112,7 @@ export const zhHans: Messages = {
   "smartArt.chevron1": "基本 V 形流程",
   "smartArt.hList1": "水平项目符号列表",
   "smartArt.cycle2": "基本循环",
+  "smartArt.cycle3": "连续循环",
   "smartArt.pyramid1": "基本棱锥图",
   "smartArt.orgChart1": "组织结构图",
   "smartArt.hierarchy1": "层次结构",
