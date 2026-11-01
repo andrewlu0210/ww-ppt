@@ -57,6 +57,7 @@ const STARTERS: &[Starter] = &[
     starter!("cycle2", (4234921, 2134352), 4, 0, 0),
     starter!("pyramid1", (6636512, 5418667), 3, 0, 0),
     starter!("orgChart1", (2409189, 2743845), 1, 2, 2),
+    starter!("hierarchy1", (10023676, 3087848), 1, 2, 2),
     starter!("process1", (10417215, 2735376), 3, 0, 0),
     starter!("process2", (5594773, 6362749), 3, 0, 0),
     starter!("process3", (3034878, 1287921), 3, 1, 2),

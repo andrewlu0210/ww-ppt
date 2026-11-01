@@ -196,11 +196,16 @@ fn boxes(shapes: &[ppt_model::Shape]) -> Vec<(String, ppt_model::Xfrm)> {
 /// every reference resolves, and the presentation points form one tree with a
 /// box per node.
 fn check_org_data(saved: &[u8], slide: usize, nodes: usize) {
+    check_tree_data(saved, slide, nodes, "orgChart1", "ppt/diagrams/data2.xml", "rootText", "Name37");
+}
+
+/// [`check_org_data`] for any tree layout: its data part, and the start of the names of its box and connector points.
+fn check_tree_data(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_part: &str, box_name: &str, link_name: &str) {
     use std::collections::{HashMap, HashSet};
     let pres = parse_pptx(saved).unwrap();
-    let ShapeKind::Diagram { data: Some(d), .. } = &pres.slides[slide].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "orgChart1")).unwrap().kind else { panic!() };
+    let ShapeKind::Diagram { data: Some(d), .. } = &pres.slides[slide].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == layout)).unwrap().kind else { panic!() };
     assert_eq!(d.rows().len(), nodes);
-    let xml = part(saved, "ppt/diagrams/data2.xml");
+    let xml = part(saved, data_part);
     let doc = roxmltree::Document::parse(&xml).unwrap();
     let mut ids = HashSet::new();
     let mut kind: HashMap<&str, &str> = HashMap::new();
@@ -246,9 +251,9 @@ fn check_org_data(saved: &[u8], slide: usize, nodes: usize) {
         }
         assert_eq!(at, *roots[0], "{p} is not under the root");
     }
-    let boxes = names.values().filter(|n| n.starts_with("rootText")).count();
+    let boxes = names.values().filter(|n| n.starts_with(box_name)).count();
     assert_eq!(boxes, nodes, "one box per node");
-    let links = names.values().filter(|n| **n == "Name37").count();
+    let links = names.values().filter(|n| n.starts_with(link_name)).count();
     assert_eq!(links, nodes - 1, "one connector per link");
 }
 
@@ -474,4 +479,49 @@ fn two_new_smartarts_get_parts_of_their_own() {
     assert_eq!(data.len(), 2, "{data:?}");
     let back = parse_pptx(&saved).unwrap();
     assert_eq!(back.slides[0].shapes.iter().filter(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(_), .. })).count(), 2);
+}
+
+
+fn hierarchy() -> (Presentation, usize, usize) {
+    let pres = deck("test10.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "hierarchy1").expect("a hierarchy");
+    (pres, si, i)
+}
+
+#[test]
+fn hierarchy_is_a_tree_of_shape_groups() {
+    let (pres, si, i) = hierarchy();
+    let ShapeKind::Diagram { data: Some(d), shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Tree);
+    assert_eq!(d.rows().len(), 12);
+    // A box with its shadow per node, and a connector per link.
+    assert_eq!(shapes.len(), 12 * 2 + 11);
+}
+
+#[test]
+fn hierarchy_adds_and_removes_nodes() {
+    let (mut pres, si, i) = hierarchy();
+    edit(&mut pres, si, i, |d| {
+        // Another document under the first department, one fewer under the second.
+        let r = d.insert(1, Insert::Child).unwrap();
+        d.set_text(r, "新文件");
+        let last = d.rows().len() - 1;
+        d.delete(last).unwrap();
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 12);
+    let b = boxes(shapes);
+    let frame = |name: &str| b.iter().find(|(t, _)| t == name).unwrap().1;
+    // The new document sits in the row of its siblings, below its department.
+    let (new, old) = (frame("新文件"), frame("服务启停"));
+    assert_eq!(new.y, old.y);
+    assert!(new.y > frame("快速手册").y);
+    assert!(b.iter().all(|(_, x)| x.x >= 0 && x.y >= 0 && x.x + x.w <= *w && x.y + x.h <= *h));
+    // Every shape still has its shadow with it: a text shape sits inside its shadow's frame, offset as before.
+    let saved = save_pptx(&pres).unwrap();
+    check_tree_data(&saved, si, 12, "hierarchy1", "ppt/diagrams/data2.xml", "text", "Name");
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "hierarchy1")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
 }

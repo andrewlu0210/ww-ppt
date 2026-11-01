@@ -114,6 +114,7 @@ export const en: Messages = {
   "smartArt.cycle2": "Basic Cycle",
   "smartArt.pyramid1": "Basic Pyramid",
   "smartArt.orgChart1": "Organization Chart",
+  "smartArt.hierarchy1": "Hierarchy",
   "smartArt.process1": "Basic Process",
   "smartArt.process2": "Vertical Process",
   "smartArt.process3": "Process Arrows",

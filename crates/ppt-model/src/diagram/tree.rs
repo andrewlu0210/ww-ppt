@@ -1,4 +1,5 @@
-//! Org chart layouts (`orgChart1`): every node is one box with an elbow
+//! Org chart layouts (`orgChart1`, `hierarchy1`): every node is one box (or a
+//! few shapes drawn together, like a box and its shadow) with an elbow
 //! connector to its parent. After the tree changes, the boxes are placed again
 //! as a tidy tree and the connectors are redrawn between them.
 //!
@@ -37,8 +38,8 @@ impl Default for Level {
 /// What the loaded drawing says about an org chart.
 #[derive(Debug)]
 pub(super) struct TreeTpl {
-    /// Template shape of each node's box, and of the connector to its parent.
-    boxes: HashMap<String, usize>,
+    /// Template shapes of each node's box (the first one is what connectors meet), and of the connector to its parent.
+    boxes: HashMap<String, Vec<usize>>,
     conns: HashMap<String, usize>,
     /// Node ids per depth, in order.
     depths: Vec<Vec<String>>,
@@ -71,7 +72,7 @@ impl TreeTpl {
     /// Recognizes an org chart whose drawing is one box per node and one
     /// connector per parent link.
     pub(super) fn detect(t: &Template) -> Option<TreeTpl> {
-        if !t.layout.ends_with("/orgChart1") || t.nodes.len() != 1 || t.shapes.len() != t.shape_pres.len() {
+        if !(t.layout.ends_with("/orgChart1") || t.layout.ends_with("/hierarchy1")) || t.nodes.len() != 1 || t.shapes.len() != t.shape_pres.len() {
             return None;
         }
         let depths = depth_lists(&t.nodes);
@@ -81,14 +82,12 @@ impl TreeTpl {
         }
         let trans: HashMap<&str, &str> = depths.iter().flatten().filter_map(|id| Some((t.links.get(id)?.par_trans.as_str(), id.as_str()))).collect();
         let nodes: HashMap<&str, ()> = depths.iter().flatten().map(|id| (id.as_str(), ())).collect();
-        let (mut boxes, mut conns) = (HashMap::new(), HashMap::new());
+        let (mut boxes, mut conns): (HashMap<String, Vec<usize>>, HashMap<String, usize>) = (HashMap::new(), HashMap::new());
         for (i, &p) in t.shape_pres.iter().enumerate() {
             let assoc = t.pres[p].assoc.as_str();
             let shape = &t.shapes[i];
             if nodes.contains_key(assoc) {
-                if shape.text.is_none() || boxes.insert(assoc.to_string(), i).is_some() {
-                    return None;
-                }
+                boxes.entry(assoc.to_string()).or_insert_with(Vec::new).push(i);
             } else {
                 let child = trans.get(assoc)?;
                 if shape.text.is_some() || conns.insert(child.to_string(), i).is_some() {
@@ -99,19 +98,35 @@ impl TreeTpl {
         if boxes.len() != count || conns.len() != count - 1 || conns.contains_key(&depths[0][0]) {
             return None;
         }
+        // Each node has text somewhere in its shapes.
+        if boxes.values().any(|g| g.iter().all(|&i| t.shapes[i].text.is_none())) {
+            return None;
+        }
         let bounds = t.shapes.iter().fold(Rect::default(), |r, s| r.union(Rect::of(&s.xfrm)));
         let mut tree = TreeTpl { boxes, conns, depths, levels: Vec::new(), hgap: 0.0, bounds };
         tree.measure(t);
         Some(tree)
     }
 
+    /// The shape connectors meet.
     fn rect(&self, t: &Template, id: &str) -> Rect {
-        Rect::of(&t.shapes[self.boxes[id]].xfrm)
+        Rect::of(&t.shapes[self.boxes[id][0]].xfrm)
     }
 
-    /// Boxes of `node` and everything below it in the loaded drawing.
+    /// Everything drawn for the node.
+    fn foot(&self, t: &Template, id: &str) -> Rect {
+        self.boxes[id].iter().fold(Rect::default(), |r, &i| r.union(Rect::of(&t.shapes[i].xfrm)))
+    }
+
+    /// How far the node's shapes reach right of and below the shape connectors meet.
+    fn overhang(&self, t: &Template, id: &str) -> (f64, f64) {
+        let (a, f) = (self.rect(t, id), self.foot(t, id));
+        (((f.x + f.w) - (a.x + a.w)).max(0.0), ((f.y + f.h) - (a.y + a.h)).max(0.0))
+    }
+
+    /// Everything drawn for `node` and everything below it in the loaded drawing.
     fn subtree_rect(&self, t: &Template, node: &Node) -> Rect {
-        node.children.iter().fold(self.rect(t, &node.id), |r, c| r.union(self.subtree_rect(t, c)))
+        node.children.iter().fold(self.foot(t, &node.id), |r, c| r.union(self.subtree_rect(t, c)))
     }
 
     fn measure(&mut self, t: &Template) {
@@ -160,7 +175,7 @@ impl TreeTpl {
                 }
             }
         }
-        let avg_w = self.boxes.values().map(|&i| t.shapes[i].xfrm.w as f64).sum::<f64>() / self.boxes.len() as f64;
+        let avg_w = self.boxes.values().map(|g| t.shapes[g[0]].xfrm.w as f64).sum::<f64>() / self.boxes.len() as f64;
         self.hgap = if hgaps.is_empty() { avg_w * 0.1 } else { hgaps.iter().sum::<f64>() / hgaps.len() as f64 }.max(0.0);
         self.levels = levels;
     }
@@ -180,6 +195,9 @@ impl TreeTpl {
     }
 }
 
+/// A node's (width, height) and how far its other shapes reach right and below.
+type NodeSize = (f64, f64, f64, f64);
+
 /// A node placed relative to its own box's top left corner.
 struct Sub {
     /// (node id, parent id, depth, x, y), the node itself first.
@@ -193,11 +211,12 @@ struct Sub {
 }
 
 impl TreeTpl {
-    fn sub(&self, node: &Node, depth: usize, size: &dyn Fn(&str, usize) -> (f64, f64)) -> Sub {
-        let (w, h) = size(&node.id, depth);
+    /// `size` gives a node's (width, height) and how far its other shapes reach right and below.
+    fn sub(&self, node: &Node, depth: usize, size: &dyn Fn(&str, usize) -> NodeSize) -> Sub {
+        let (w, h, ox, oy) = size(&node.id, depth);
         let id = node.id.clone();
         if node.children.is_empty() {
-            return Sub { items: vec![(id, None, depth, 0.0, 0.0)], l: 0.0, r: w, b: h, w };
+            return Sub { items: vec![(id, None, depth, 0.0, 0.0)], l: 0.0, r: w + ox, b: h + oy, w };
         }
         let lv = self.level(depth);
         let kids: Vec<Sub> = node.children.iter().map(|c| self.sub(c, depth + 1, size)).collect();
@@ -207,7 +226,7 @@ impl TreeTpl {
         let shift;
         if lv.stack {
             let mut y = top;
-            (l, r, b) = (0.0f64, w, h);
+            (l, r, b) = (0.0f64, w + ox, h + oy);
             for k in &kids {
                 for (i, p, d, x, yy) in &k.items {
                     items.push((i.clone(), p.clone(), *d, x + lv.indent, yy + y));
@@ -234,8 +253,8 @@ impl TreeTpl {
             // The parent is the origin: move the children's frame.
             shift = -px;
             l = px.min(0.0) + shift;
-            r = (px + w).max(span) + shift;
-            b = top + kids.iter().map(|k| k.b).fold(0.0, f64::max);
+            r = (px + w + ox).max(span) + shift;
+            b = (top + kids.iter().map(|k| k.b).fold(0.0, f64::max)).max(h + oy);
         }
         for it in &mut items {
             it.3 += shift;
@@ -265,7 +284,8 @@ impl TreeTpl {
         let size = |id: &str, depth: usize| {
             let (look, _) = self.look(id, depth);
             let r = self.rect(t, look);
-            (r.w, r.h)
+            let (ox, oy) = self.overhang(t, look);
+            (r.w, r.h, ox, oy)
         };
         let root = self.sub(&nodes[0], 0, &size);
         let (width, height) = ((root.r - root.l).max(1.0), root.b.max(1.0));
@@ -279,7 +299,7 @@ impl TreeTpl {
 
         let mut rects: HashMap<&str, Rect> = HashMap::new();
         for (id, _, depth, x, y) in &root.items {
-            let (w, h) = size(id, *depth);
+            let (w, h, ..) = size(id, *depth);
             let (px, py) = place(*x, *y);
             rects.insert(id.as_str(), Rect { x: px, y: py, w: w * k, h: h * k });
         }
@@ -295,23 +315,26 @@ impl TreeTpl {
             let node = node_of[id];
             let (look, own) = self.look(id, *depth);
             let r = rects[id.as_str()];
-            // The box.
-            let tpl = self.boxes[look];
-            let mut s = t.shapes[tpl].clone();
-            s.xfrm = crate::Xfrm { x: r.x.round() as Emu, y: r.y.round() as Emu, w: r.w.round() as Emu, h: r.h.round() as Emu, ..s.xfrm };
-            if let Some(body) = &t.shapes[tpl].text {
-                let look_node = find_node(&t.nodes, look).expect("template node");
-                let (old, new): (Shown, Shown) = (vec![(0, &look_node.text)], vec![(0, &node.text)]);
-                let mut body = if old == new { body.clone() } else { build_text(body, &old, &new, 1.0) };
-                if let Some(text) = &mut s.text {
+            // The box: its shapes keep their places relative to the one connectors meet.
+            let group = &self.boxes[look];
+            let anchor = self.rect(t, look);
+            let look_node = find_node(&t.nodes, look).expect("template node");
+            for &tpl in group {
+                let mut s = t.shapes[tpl].clone();
+                let o = Rect::of(&s.xfrm);
+                let at = |v: f64, from: f64, to: f64| (to + (v - from) * k).round() as Emu;
+                s.xfrm = crate::Xfrm { x: at(o.x, anchor.x, r.x), y: at(o.y, anchor.y, r.y), w: (o.w * k).round() as Emu, h: (o.h * k).round() as Emu, ..s.xfrm };
+                if let Some(body) = &t.shapes[tpl].text {
+                    let (old, new): (Shown, Shown) = (vec![(0, &look_node.text)], vec![(0, &node.text)]);
+                    let mut body = if old == new { body.clone() } else { build_text(body, &old, &new, 1.0) };
                     let [l, tp, rr, bt] = body.insets;
                     body.insets = [(l as f64 * k) as Emu, (tp as f64 * k) as Emu, (rr as f64 * k) as Emu, (bt as f64 * k) as Emu];
                     scale_fonts(&mut body, k);
-                    *text = body;
+                    s.text = Some(body);
                 }
+                boxes.push(s);
+                box_drawn.push(Drawn { model_id: id_of(tpl, id, own), template: tpl, node: Some(id.clone()) });
             }
-            boxes.push(s);
-            box_drawn.push(Drawn { model_id: id_of(tpl, id, own), template: tpl, node: Some(id.clone()) });
             // The connector to the parent.
             let Some(parent) = parent else { continue };
             let pr = rects[parent.as_str()];
