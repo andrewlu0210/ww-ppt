@@ -15,6 +15,7 @@ use crate::{Emu, Paragraph, PathCmd, Run, Shape, TextBody, Xfrm};
 
 mod pie;
 mod radial;
+mod stair;
 mod tree;
 
 /// Deepest level a node can be demoted to (0 is the top level).
@@ -45,6 +46,8 @@ pub enum Arrangement {
     Pie,
     /// A hub with the nodes around it on an arc.
     Radial,
+    /// Nodes stepping down and to the right.
+    Stair,
 }
 
 /// A presentation point: one element of the layout, usually one drawn shape.
@@ -89,6 +92,8 @@ pub struct Template {
     pub tapered: bool,
     /// Pie cycle (`cycle8`): what the drawing says about its slices.
     pie: Option<pie::PieTpl>,
+    /// Step-down process (`StepDownProcess`): what the drawing says about its staircase.
+    stair: Option<stair::StairTpl>,
     /// Radial list (`radial2`): what the drawing says about its hub and nodes.
     radial: Option<radial::RadialTpl>,
     /// Cycle: one arrow around the whole ring of nodes (shape index), and where its tail and
@@ -407,7 +412,7 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, pie: None, radial: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, pie: None, radial: None, stair: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
@@ -477,10 +482,22 @@ impl Template {
             Arrangement::Cycle
         } else if let Some(vertical) = self.line_axis() {
             Arrangement::Line { vertical }
+        } else if let Some(stair) = self.find_stair() {
+            self.stair = Some(stair);
+            Arrangement::Stair
         } else {
             Arrangement::Fixed
         };
         self.tapered = self.arrangement == (Arrangement::Line { vertical: true }) && self.is_pyramid();
+    }
+
+    /// Nodes stepping down and to the right, one group each.
+    fn find_stair(&self) -> Option<stair::StairTpl> {
+        let units: Vec<Vec<usize>> = self.units.iter().map(|u| u.shapes.clone()).collect();
+        if self.units.iter().any(|u| !u.trans.is_empty()) {
+            return None;
+        }
+        stair::StairTpl::detect(self, &units)
     }
 
     /// The axis the units are evenly spaced along, if they are.
@@ -738,6 +755,7 @@ impl Diagram {
         let t = self.template.0.clone();
         let (shapes, drawn) = match &t.tree {
             Some(tree) if !t.same_structure(&self.nodes) => tree.layout(&t, &self.nodes),
+            _ if t.stair.is_some() && !t.same_structure(&self.nodes) => t.stair.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.radial.is_some() && !t.same_structure(&self.nodes) => t.radial.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.pie.is_some() && !t.same_structure(&self.nodes) => t.pie.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.same_structure(&self.nodes) || t.arrangement == Arrangement::Fixed => self.retext(&t),
@@ -1062,7 +1080,7 @@ impl Geometry {
                     })
                     .collect();
             }
-            Arrangement::Fixed | Arrangement::Tree | Arrangement::Pie | Arrangement::Radial => {}
+            Arrangement::Fixed | Arrangement::Tree | Arrangement::Pie | Arrangement::Radial | Arrangement::Stair => {}
         }
         g
     }

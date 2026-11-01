@@ -126,6 +126,7 @@ export const en: Messages = {
   "smartArt.chevron2": "Vertical Chevron List",
   "smartArt.hProcess9": "Continuous Block Process",
   "smartArt.radial2": "Radial List",
+  "smartArt.StepDownProcess": "Step Down Process",
   "group.images": "Images",
   "ribbon.picture": "Pictures",
   "group.illustrations": "Illustrations",

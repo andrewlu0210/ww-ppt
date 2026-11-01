@@ -887,3 +887,70 @@ fn radial_list_adds_and_removes_nodes() {
     let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
     assert_eq!(shapes.len(), 1 + 3 * 2);
 }
+
+fn stair() -> (Presentation, usize, usize) {
+    let pres = deck("test16.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "StepDownProcess").expect("a step-down process");
+    (pres, si, i)
+}
+
+#[test]
+fn step_down_relayout_reproduces_the_loaded_drawing() {
+    let (mut pres, si, i) = stair();
+    let ShapeKind::Diagram { data: Some(d), shapes: loaded, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Stair);
+    assert_eq!(loaded.len(), 3 * 3 + 1);
+    let loaded = loaded.clone();
+    // The same four steps with another last one: laid out again, they land where they were.
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(3, Insert::After).unwrap();
+        d.set_text(r, "新的");
+        d.delete(3).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(shapes.len(), loaded.len());
+    for (new, old) in shapes.iter().zip(loaded.iter()) {
+        // Within a hundredth of the frame: the loaded drawing is a hair off its own fit.
+        for (a, b) in [(new.xfrm.x, old.xfrm.x), (new.xfrm.y, old.xfrm.y), (new.xfrm.w, old.xfrm.w), (new.xfrm.h, old.xfrm.h)] {
+            assert!((a - b).abs() <= 6_000, "{:?} vs {:?}", new.xfrm, old.xfrm);
+        }
+        assert_eq!(new.xfrm.rot, old.xfrm.rot);
+    }
+}
+
+#[test]
+fn step_down_adds_and_removes_steps() {
+    let (mut pres, si, i) = stair();
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(1, Insert::After).unwrap();
+        d.set_text(r, "新一步");
+        let r = d.insert(4, Insert::After).unwrap();
+        d.set_text(r, "又一步");
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 6);
+    // Titles come down and to the right, one step after another.
+    let titles: Vec<&ppt_model::Shape> = shapes.iter().filter(|s| s.text.as_ref().is_some_and(|t| !t.is_empty())).collect();
+    assert_eq!(titles.len(), 6);
+    assert!(titles.windows(2).all(|p| p[1].xfrm.x > p[0].xfrm.x && p[1].xfrm.y > p[0].xfrm.y));
+    // Even steps, and all of it inside the frame.
+    let dx: Vec<i64> = titles.windows(2).map(|p| p[1].xfrm.x - p[0].xfrm.x).collect();
+    assert!(dx.iter().all(|d| (d - dx[0]).abs() <= 2));
+    assert!(shapes.iter().all(|s| s.xfrm.x >= -2 && s.xfrm.y >= -2 && s.xfrm.x + s.xfrm.w <= *w + 2 && s.xfrm.y + s.xfrm.h <= *h + 2 || s.xfrm.rot != 0.0));
+    let saved = save_pptx(&pres).unwrap();
+    check_pres_data(&saved, si, 6, "StepDownProcess", "ppt/diagrams/data1.xml", "ParentText", "sibTrans", 5);
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "StepDownProcess")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+    assert_eq!(d2.arrangement(), Arrangement::Stair);
+    // Fewer steps: bigger ones, to fill the frame.
+    let before = shapes.iter().find(|s| s.text.as_ref().is_some_and(|t| !t.is_empty())).unwrap().xfrm.w;
+    edit(&mut pres, si, i, |d| {
+        for _ in 0..3 {
+            d.delete(0).unwrap();
+        }
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert!(shapes.iter().find(|s| s.text.as_ref().is_some_and(|t| !t.is_empty())).unwrap().xfrm.w > before);
+}

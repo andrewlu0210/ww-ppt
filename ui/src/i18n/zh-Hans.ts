@@ -126,6 +126,7 @@ export const zhHans: Messages = {
   "smartArt.chevron2": "垂直 V 形列表",
   "smartArt.hProcess9": "连续块流程",
   "smartArt.radial2": "射线列表",
+  "smartArt.StepDownProcess": "逐步向下流程",
   "group.images": "图像",
   "ribbon.picture": "图片",
   "group.illustrations": "插图",

@@ -128,6 +128,7 @@ export const zhHant = {
   "smartArt.chevron2": "垂直人字形清單",
   "smartArt.hProcess9": "連續區塊流程",
   "smartArt.radial2": "放射狀清單",
+  "smartArt.StepDownProcess": "逐步向下流程",
   "group.images": "影像",
   "ribbon.picture": "圖片",
   "group.illustrations": "圖例",
