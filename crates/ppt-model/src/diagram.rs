@@ -14,6 +14,7 @@ use std::sync::Arc;
 use crate::{Emu, Paragraph, PathCmd, Run, Shape, TextBody, Xfrm};
 
 mod pie;
+mod radial;
 mod tree;
 
 /// Deepest level a node can be demoted to (0 is the top level).
@@ -42,6 +43,8 @@ pub enum Arrangement {
     Tree,
     /// Pie slices around a circle, one per node.
     Pie,
+    /// A hub with the nodes around it on an arc.
+    Radial,
 }
 
 /// A presentation point: one element of the layout, usually one drawn shape.
@@ -86,6 +89,8 @@ pub struct Template {
     pub tapered: bool,
     /// Pie cycle (`cycle8`): what the drawing says about its slices.
     pie: Option<pie::PieTpl>,
+    /// Radial list (`radial2`): what the drawing says about its hub and nodes.
+    radial: Option<radial::RadialTpl>,
     /// Cycle: one arrow around the whole ring of nodes (shape index), and where its tail and
     /// tip sit after the first node, in node spacings (`cycle3`).
     ring: Option<(usize, f64, f64)>,
@@ -402,12 +407,18 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, pie: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, pie: None, radial: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
 
     fn analyze(&mut self) {
+        if let Some(radial) = radial::RadialTpl::detect(self) {
+            self.nests = self.units_show_children();
+            self.radial = Some(radial);
+            self.arrangement = Arrangement::Radial;
+            return;
+        }
         if let Some(pie) = pie::PieTpl::detect(self) {
             self.pie = Some(pie);
             self.arrangement = Arrangement::Pie;
@@ -597,6 +608,11 @@ impl Template {
         self.links.get(id).cloned().unwrap_or_else(|| Links { cxn: derived_id(id, "cxn"), par_trans: derived_id(id, "parTrans"), sib_trans: derived_id(id, "sibTrans") })
     }
 
+    /// Every top-level node has a shape showing its children's text, so children can be edited.
+    fn units_show_children(&self) -> bool {
+        self.nodes.iter().all(|n| (0..self.shapes.len()).any(|i| self.pres[self.shape_pres[i]].assoc == n.id && self.shows(self.shape_pres[i]).1))
+    }
+
     /// Org charts: the loaded node whose look the node `id` at `depth` takes,
     /// and whether it is the node itself (still at the depth it was loaded at).
     pub fn tree_look(&self, id: &str, depth: usize) -> Option<(&str, bool)> {
@@ -722,6 +738,7 @@ impl Diagram {
         let t = self.template.0.clone();
         let (shapes, drawn) = match &t.tree {
             Some(tree) if !t.same_structure(&self.nodes) => tree.layout(&t, &self.nodes),
+            _ if t.radial.is_some() && !t.same_structure(&self.nodes) => t.radial.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.pie.is_some() && !t.same_structure(&self.nodes) => t.pie.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.same_structure(&self.nodes) || t.arrangement == Arrangement::Fixed => self.retext(&t),
             _ => self.rearrange(&t),
@@ -1045,7 +1062,7 @@ impl Geometry {
                     })
                     .collect();
             }
-            Arrangement::Fixed | Arrangement::Tree | Arrangement::Pie => {}
+            Arrangement::Fixed | Arrangement::Tree | Arrangement::Pie | Arrangement::Radial => {}
         }
         g
     }

@@ -68,6 +68,7 @@ const STARTERS: &[Starter] = &[
     starter!("hChevron3", (11087357, 1250423), 3, 0, 0),
     starter!("chevron2", (8292618, 5919250), 3, 1, 2),
     starter!("hProcess9", (4179378, 709735), 3, 0, 0),
+    starter!("radial2", (7008779, 3552395), 3, 1, 1),
 ];
 
 /// Layout ids that can be inserted, as [`new_smartart`] takes them.

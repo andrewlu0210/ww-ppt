@@ -308,6 +308,7 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
         }
     }
     let pie = (d.arrangement() == Arrangement::Pie).then(|| pie_units(&m, t)).flatten();
+    let radial = (d.arrangement() == Arrangement::Radial).then(|| radial_units(&m, t)).flatten();
     let mut rebuilt_pres: HashSet<&str> = t.pres.iter().filter(|p| unit_assocs.contains(&p.assoc)).map(|p| p.id.as_str()).collect();
     if let Some(u) = &pie {
         rebuilt_pres.extend(u.groups.iter().flatten().copied());
@@ -370,7 +371,9 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
         out_pts.push_str(&src[p.el.range()]);
     }
     let rebuilt = |id: &str| rebuilt_pres.contains(id);
-    if let Some(units) = &pie {
+    if let Some(units) = &radial {
+        radial_pres(&PieCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id }, units, &d.nodes, &mut out_pts, &mut out_cxns);
+    } else if let Some(units) = &pie {
         pie_pres(&PieCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id }, units, &d.nodes, &mut out_pts, &mut out_cxns);
     } else if d.arrangement() == Arrangement::Tree {
         let ctx = TreeCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id, all: &all };
@@ -498,6 +501,121 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
     edits.push((pt_lst.range(), format!("<{}>{out_pts}</{}>", qname(src, pt_lst), qname(src, pt_lst))));
     edits.push((cxn_lst.range(), format!("<{}>{out_cxns}</{}>", qname(src, cxn_lst), qname(src, cxn_lst))));
     apply_edits(src, edits)
+}
+
+/// One node's presentation points in a radial list as loaded: its line to the hub,
+/// its pair's point, and what is in that.
+struct RadialUnit<'a> {
+    conn: &'a str,
+    node: &'a str,
+    inner: Vec<&'a str>,
+}
+
+struct RadialUnits<'a> {
+    container: &'a str,
+    /// Where the first node's points sit among the container's.
+    first_ord: usize,
+    /// Whether a node's line comes before its pair.
+    conn_first: bool,
+    nodes: Vec<RadialUnit<'a>>,
+}
+
+fn radial_units<'a>(m: &Model<'a, '_>, t: &'a Template) -> Option<RadialUnits<'a>> {
+    let parent_of = |id: &str| m.cxns.iter().find(|c| c.kind == "presParOf" && c.dest == id);
+    let first = t.nodes.first()?;
+    let top0 = t.pres.iter().find(|p| p.assoc == first.id && parent_of(&p.id).is_some_and(|c| t.pres.iter().all(|q| q.id != c.src || q.assoc != first.id)))?;
+    let container = parent_of(&top0.id)?.src;
+    let mut nodes = Vec::new();
+    for node in &t.nodes {
+        let par = t.links.get(&node.id)?.par_trans.as_str();
+        let under = |assoc: &str| t.pres.iter().find(|p| p.assoc == assoc && parent_of(&p.id).is_some_and(|c| c.src == container));
+        let (top, conn) = (under(&node.id)?, under(par)?);
+        let mut inner: Vec<&Cxn> = m.cxns.iter().filter(|c| c.kind == "presParOf" && c.src == top.id).collect();
+        inner.sort_by_key(|c| c.src_ord);
+        nodes.push(RadialUnit { conn: conn.id.as_str(), node: top.id.as_str(), inner: inner.iter().map(|c| c.dest).collect() });
+    }
+    let ord = |id: &str| parent_of(id).map(|c| c.src_ord as usize);
+    let (c0, n0) = (ord(nodes[0].conn)?, ord(nodes[0].node)?);
+    Some(RadialUnits { container, first_ord: c0.min(n0), conn_first: c0 < n0, nodes })
+}
+
+/// Writes the presentation points of a radial list: each node's line, pair and
+/// what is in it repeat from the loaded node it looks like.
+fn radial_pres(ctx: &PieCtx, units: &RadialUnits, nodes: &[DNode], out_pts: &mut String, out_cxns: &mut String) {
+    let PieCtx { src, m, t, pts, dgm, pres_id } = ctx;
+    let (n, k) = (nodes.len(), t.nodes.len());
+    let links_of = |id: &str| t.links.get(id).cloned().unwrap_or_else(|| Links { cxn: derived_id(id, "cxn"), par_trans: derived_id(id, "parTrans"), sib_trans: derived_id(id, "sibTrans") });
+    let pres_index: HashMap<&str, usize> = t.pres.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+    let link = |parent: &str, dest: &str, ord: usize| format!(r#"<{dgm}cxn modelId="{}" type="presParOf" srcId="{}" destId="{}" srcOrd="{ord}" destOrd="0" presId="{}"/>"#, esc(&derived_id(parent, dest)), esc(parent), esc(dest), esc(pres_id));
+    let in_unit: HashSet<&str> = units.nodes.iter().flat_map(|u| [u.conn, u.node].into_iter().chain(u.inner.iter().copied())).collect();
+    // What stays (the hub and everything above the nodes), where it was.
+    for c in m.cxns.iter().filter(|c| c.kind == "presParOf" && !in_unit.contains(c.src) && !in_unit.contains(c.dest)) {
+        out_cxns.push_str(&src[c.el.range()]);
+    }
+    for (j, node) in nodes.iter().enumerate() {
+        let tt = template_index(j, n, k);
+        let (u, tpl_node) = (&units.nodes[tt], &t.nodes[tt]);
+        let n_links = links_of(&node.id);
+        let l_par = links_of(&tpl_node.id).par_trans;
+        let new_id = |p: &str| derived_id(&node.id, p);
+        let (conn_ord, node_ord) = if units.conn_first { (units.first_ord + 2 * j, units.first_ord + 2 * j + 1) } else { (units.first_ord + 2 * j + 1, units.first_ord + 2 * j) };
+        out_cxns.push_str(&link(units.container, &new_id(u.conn), conn_ord));
+        out_cxns.push_str(&link(units.container, &new_id(u.node), node_ord));
+        for &p in [u.conn, u.node].iter().chain(&u.inner) {
+            let Some(pt) = pts.get(p) else { continue };
+            let mut edits = vec![set_attr(src, pt.el, "modelId", &new_id(p))];
+            if let Some(set) = child(pt.el, "prSet") {
+                let assoc = set.attribute("presAssocID").unwrap_or_default();
+                edits.push(set_attr(src, set, "presAssocID", if assoc == tpl_node.id { &node.id } else { &n_links.par_trans }));
+                let attr = |a: &str| set.attribute(a).and_then(|v| v.parse::<usize>().ok());
+                if attr("presStyleIdx").is_some() && attr("presStyleCnt") == Some(k) {
+                    edits.push(set_attr(src, set, "presStyleIdx", &j.to_string()));
+                    edits.push(set_attr(src, set, "presStyleCnt", &n.to_string()));
+                }
+            }
+            out_pts.push_str(&rewrite(src, pt.el, edits));
+            // Nesting inside the pair.
+            if p == u.node {
+                for c in m.cxns.iter().filter(|c| c.kind == "presParOf" && c.src == p) {
+                    out_cxns.push_str(&link(&new_id(p), &new_id(c.dest), c.src_ord as usize));
+                }
+            }
+            // What it shows: the node, its children, or the line's own point.
+            let (own, desc) = pres_index.get(p).map_or((false, false), |&i| t.shows(i));
+            let emit = |out: &mut String, src_id: &str, src_ord: u32, dest_ord: u32| {
+                out.push_str(&format!(
+                    r#"<{dgm}cxn modelId="{}" type="presOf" srcId="{}" destId="{}" srcOrd="{src_ord}" destOrd="{dest_ord}" presId="{}"/>"#,
+                    esc(&derived_id(src_id, &new_id(p))),
+                    esc(src_id),
+                    esc(&new_id(p)),
+                    esc(pres_id)
+                ));
+            };
+            let template: Vec<&Cxn> = m.cxns.iter().filter(|c| c.kind == "presOf" && c.dest == p).collect();
+            if p == u.conn {
+                for c in &template {
+                    if c.src == l_par {
+                        emit(out_cxns, &n_links.par_trans, c.src_ord, c.dest_ord);
+                    }
+                }
+                continue;
+            }
+            let mut dest_ord = 0;
+            if own {
+                emit(out_cxns, &node.id, template.iter().find(|c| c.src == tpl_node.id).map_or(0, |c| c.src_ord), dest_ord);
+                dest_ord += 1;
+            }
+            if desc {
+                let below_ord = template.iter().find(|c| c.src != tpl_node.id).map_or(0, |c| c.src_ord);
+                let mut below = Vec::new();
+                walk(&node.children, None, &mut below, 0);
+                for (b, ..) in below {
+                    emit(out_cxns, &b.id, below_ord, dest_ord);
+                    dest_ord += 1;
+                }
+            }
+        }
+    }
 }
 
 /// What writing a pie cycle's presentation points needs.

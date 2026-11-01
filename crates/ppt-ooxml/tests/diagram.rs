@@ -207,6 +207,13 @@ fn check_tree_data(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_
 /// The saved data model is consistent, with `links` points named like `link_name`.
 #[allow(clippy::too_many_arguments)]
 fn check_pres_data(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_part: &str, box_name: &str, link_name: &str, links: usize) {
+    check_pres_counts(saved, slide, nodes, layout, data_part, (box_name, nodes), (link_name, links));
+}
+
+/// [`check_pres_data`] with the number of points named like `boxes.0` given.
+fn check_pres_counts(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_part: &str, boxes: (&str, usize), links: (&str, usize)) {
+    let (box_name, box_count) = boxes;
+    let (link_name, links) = links;
     use std::collections::{HashMap, HashSet};
     let pres = parse_pptx(saved).unwrap();
     let ShapeKind::Diagram { data: Some(d), .. } = &pres.slides[slide].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == layout)).unwrap().kind else { panic!() };
@@ -258,7 +265,7 @@ fn check_pres_data(saved: &[u8], slide: usize, nodes: usize, layout: &str, data_
         assert_eq!(at, *roots[0], "{p} is not under the root");
     }
     let boxes = names.values().filter(|n| n.starts_with(box_name)).count();
-    assert_eq!(boxes, nodes, "one box per node");
+    assert_eq!(boxes, box_count, "{box_name} points");
     let found = names.values().filter(|n| n.starts_with(link_name)).count();
     assert_eq!(found, links, "{link_name} points");
 }
@@ -816,4 +823,67 @@ fn pie_cycle_adds_and_removes_nodes() {
     assert_eq!(shapes.len(), 6);
     let (a, b) = pie_angles(shapes.iter().find(|s| matches!(&s.geometry, ppt_model::Geometry::Preset { name, .. } if name == "pie")).unwrap());
     assert!(((b - a).rem_euclid(360.0) - 120.0).abs() < 0.01);
+}
+
+fn radial() -> (Presentation, usize, usize) {
+    let pres = deck("test15.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "radial2").expect("a radial list");
+    (pres, si, i)
+}
+
+#[test]
+fn radial_list_relayout_reproduces_the_loaded_drawing() {
+    let (mut pres, si, i) = radial();
+    let ShapeKind::Diagram { data: Some(d), shapes: loaded, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Radial);
+    assert!(d.can_nest());
+    assert_eq!(loaded.len(), 1 + 3 * 3);
+    let loaded = loaded.clone();
+    // The same three nodes with another last one: laid out again, they land where they were.
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(4, Insert::After).unwrap();
+        d.set_text(r, "新的");
+        d.delete(4).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(shapes.len(), loaded.len());
+    // Every loaded shape has one where it was (the order of the lines differs).
+    for old in loaded.iter() {
+        let near = |a: i64, b: i64| (a - b).abs() <= 6_000;
+        assert!(shapes.iter().any(|new| near(new.xfrm.x, old.xfrm.x) && near(new.xfrm.y, old.xfrm.y) && near(new.xfrm.w, old.xfrm.w) && near(new.xfrm.h, old.xfrm.h) && (new.xfrm.rot - old.xfrm.rot + 180.0).rem_euclid(360.0) - 180.0 < 0.3 && (new.xfrm.rot - old.xfrm.rot + 180.0).rem_euclid(360.0) - 180.0 > -0.3), "nothing like {:?}", old.xfrm);
+    }
+}
+
+#[test]
+fn radial_list_adds_and_removes_nodes() {
+    let (mut pres, si, i) = radial();
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(0, Insert::After).unwrap();
+        d.set_text(r, "新響應");
+        let kid = d.insert(r, Insert::Child).unwrap();
+        d.set_text(kid, "新說明");
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 8);
+    assert_eq!(shapes.len(), 1 + 3 * 4);
+    // Four nodes on an arc (from 45 to 135 degrees): the first is highest, then they go down, and none leaves the frame.
+    let titles: Vec<&ppt_model::Shape> = shapes.iter().filter(|s| matches!(&s.geometry, ppt_model::Geometry::Preset { name, .. } if name == "ellipse")).collect();
+    assert_eq!(titles.len(), 4);
+    assert!(titles.windows(2).all(|p| p[0].xfrm.y < p[1].xfrm.y));
+    assert!(shapes.iter().filter(|s| s.xfrm.rot == 0.0).all(|s| s.xfrm.x >= -2 && s.xfrm.y >= -2 && s.xfrm.x + s.xfrm.w <= *w + 2 && s.xfrm.y + s.xfrm.h <= *h + 2));
+    // The new node's box shows its child's text.
+    assert!(shapes.iter().any(|s| s.text.as_ref().is_some_and(|t| t.plain_text() == "新說明")));
+    let saved = save_pptx(&pres).unwrap();
+    check_pres_counts(&saved, si, 8, "radial2", "ppt/diagrams/data6.xml", ("parentNode", 4), ("Name25", 4));
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "radial2")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+    assert_eq!(d2.arrangement(), Arrangement::Radial);
+    edit(&mut pres, si, i, |d| {
+        d.delete(0).unwrap();
+        d.delete(0).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(shapes.len(), 1 + 3 * 2);
 }
