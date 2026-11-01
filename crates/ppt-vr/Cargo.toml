@@ -7,6 +7,7 @@ description = "Visual regression: renders decks headlessly and compares them wit
 
 [dependencies]
 ppt-model.workspace = true
+ppt-editor.workspace = true
 ppt-ooxml.workspace = true
 ppt-text.workspace = true
 ppt-render.workspace = true

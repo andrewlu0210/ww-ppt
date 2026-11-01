@@ -3088,6 +3088,7 @@ version = "0.1.0"
 dependencies = [
  "image",
  "pollster",
+ "ppt-editor",
  "ppt-fonts",
  "ppt-geometry",
  "ppt-model",
