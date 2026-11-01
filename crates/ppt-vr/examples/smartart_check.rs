@@ -26,8 +26,8 @@ fn main() {
     let mut e = Editor::new(parse_pptx(&template_package()).unwrap());
     let mut rows = Vec::new();
     for (n, kind) in smartart_kinds().into_iter().enumerate() {
-        // The first slide of a new deck is used for the first layout.
-        if n > 0 || !e.pres.slides.is_empty() {
+        // The deck's first slide holds the first layout, one more slide each for the rest.
+        if n > 0 {
             e.add_slide(&mut eng, None);
         }
         assert!(e.insert_smartart(&mut eng, kind), "{kind}");
