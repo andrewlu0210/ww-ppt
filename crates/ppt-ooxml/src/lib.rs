@@ -754,7 +754,8 @@ impl Parser<'_> {
                 }
             });
             let mut body = text_body(tx, cx.master, placeholder.as_ref(), &inherited, font_ref, cx.rels);
-            // SmartArt drawings give the text its own frame (`dsp:txXfrm`): fold it into the insets.
+            // SmartArt drawings give the text its own frame (`dsp:txXfrm`), instead of the
+            // preset's text rectangle: fold it into the insets.
             if let Some(tx_frame) = child(n, "txXfrm").and_then(parse_xfrm).map(|x| group.apply(x))
                 && xfrm.rot == 0.0
             {
@@ -765,6 +766,7 @@ impl Parser<'_> {
                     r + (xfrm.x + xfrm.w - tx_frame.x - tx_frame.w).max(0),
                     b + (xfrm.y + xfrm.h - tx_frame.y - tx_frame.h).max(0),
                 ];
+                body.exact_frame = true;
             }
             body
         });
@@ -1169,6 +1171,7 @@ fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&
         line_spacing_reduction: body.line_spacing_reduction.unwrap_or(0.0),
         auto_grow: body.auto_grow.unwrap_or(false),
         defaults: Some(Arc::new(level_defaults)),
+        exact_frame: false,
     }
 }
 

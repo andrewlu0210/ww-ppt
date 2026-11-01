@@ -1025,7 +1025,7 @@ impl Editor {
             body
         });
         let original = body.clone();
-        let frame = TextFrame::of(shape.xfrm, &shape.geometry);
+        let frame = TextFrame::for_text(shape.xfrm, &shape.geometry, Some(body));
         let width = text_width_pt(&frame, body);
         let rich = RichEdit::new(engine, original.clone(), width);
         self.selection = vec![id];

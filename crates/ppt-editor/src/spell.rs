@@ -67,7 +67,7 @@ impl Editor {
         let (body, frame) = match place {
             FindPlace::Shape(id) => {
                 let shape = slide.shapes.iter().find(|s| s.id == id)?;
-                (shape.text.as_ref()?, TextFrame::of(shape.xfrm, &shape.geometry))
+                (shape.text.as_ref()?, TextFrame::for_text(shape.xfrm, &shape.geometry, shape.text.as_ref()))
             }
             FindPlace::Cell(id, r, c) => {
                 let shape = slide.shapes.iter().find(|s| s.id == id)?;
@@ -84,7 +84,7 @@ impl Editor {
                 let (sx, sy) = (shape.xfrm.w as f64 / (*w).max(1) as f64, shape.xfrm.h as f64 / (*h).max(1) as f64);
                 let at = |v: i64, s: f64, origin: i64| origin + (v as f64 * s).round() as i64;
                 let xf = Xfrm { x: at(child.xfrm.x, sx, shape.xfrm.x), y: at(child.xfrm.y, sy, shape.xfrm.y), w: (child.xfrm.w as f64 * sx).round() as i64, h: (child.xfrm.h as f64 * sy).round() as i64, ..child.xfrm };
-                (child.text.as_ref()?, TextFrame::of(xf, &child.geometry))
+                (child.text.as_ref()?, TextFrame::for_text(xf, &child.geometry, child.text.as_ref()))
             }
             FindPlace::Notes => return None,
         };

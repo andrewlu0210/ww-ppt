@@ -722,3 +722,98 @@ fn block_cycle_gets_an_arc_between_each_pair_of_nodes() {
     let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
     assert_eq!(shapes.len(), 4 + 4);
 }
+
+fn cycle8() -> (Presentation, usize, usize) {
+    let pres = deck("test14.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "cycle8").expect("a pie cycle");
+    (pres, si, i)
+}
+
+fn pie_angles(s: &ppt_model::Shape) -> (f64, f64) {
+    let ppt_model::Geometry::Preset { adjust, .. } = &s.geometry else { panic!("a pie") };
+    let adj = |n: &str| adjust.iter().find(|(k, _)| k == n).unwrap().1 / 60_000.0;
+    (adj("adj1"), adj("adj2"))
+}
+
+#[test]
+fn pie_cycle_relayout_reproduces_the_loaded_drawing() {
+    let (mut pres, si, i) = cycle8();
+    let ShapeKind::Diagram { data: Some(d), shapes: loaded, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Pie);
+    assert_eq!(loaded.len(), 10);
+    let loaded = loaded.clone();
+    // The same five slices with another last one: laid out again, they land where they were.
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(4, Insert::After).unwrap();
+        d.set_text(r, "新的");
+        d.delete(4).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(shapes.len(), 10);
+    for (new, old) in shapes.iter().zip(loaded.iter()) {
+        for (a, b) in [(new.xfrm.x, old.xfrm.x), (new.xfrm.y, old.xfrm.y), (new.xfrm.w, old.xfrm.w), (new.xfrm.h, old.xfrm.h)] {
+            assert!((a - b).abs() <= 2_000, "{:?} vs {:?}", new.xfrm, old.xfrm);
+        }
+    }
+    for (new, old) in shapes.iter().zip(loaded.iter()).take(5) {
+        let (a, b) = (pie_angles(new), pie_angles(old));
+        assert!((a.0 - b.0).abs() < 0.1 && (a.1 - b.1).abs() < 0.1, "{a:?} vs {b:?}");
+        // The text rectangle is where the loaded one was, within a tenth of the slice.
+        let (n, o) = (new.text.as_ref().unwrap().insets, old.text.as_ref().unwrap().insets);
+        for s in 0..4 {
+            assert!((n[s] - o[s]).abs() as f64 <= new.xfrm.w as f64 * 0.1, "inset {s}: {n:?} vs {o:?}");
+        }
+    }
+}
+
+#[test]
+fn pie_cycle_adds_and_removes_nodes() {
+    let (mut pres, si, i) = cycle8();
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(4, Insert::After).unwrap();
+        d.set_text(r, "新階段");
+        let r = d.insert(1, Insert::After).unwrap();
+        d.set_text(r, "又一個");
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 7);
+    assert_eq!(shapes.len(), 14);
+    // Seven slices share the circle: each sweeps a seventh, one after another.
+    let slices: Vec<&ppt_model::Shape> = shapes.iter().filter(|s| matches!(&s.geometry, ppt_model::Geometry::Preset { name, .. } if name == "pie")).collect();
+    assert_eq!(slices.len(), 7);
+    for (k, s) in slices.iter().enumerate() {
+        let (a, b) = pie_angles(s);
+        let sweep = (b - a).rem_euclid(360.0);
+        assert!((sweep - 360.0 / 7.0).abs() < 0.01, "slice {k} sweeps {sweep}");
+        if k > 0 {
+            assert!((a - pie_angles(slices[k - 1]).1).abs() < 0.01);
+        }
+        assert!(s.text.as_ref().is_some_and(|t| !t.is_empty()));
+    }
+    assert!(shapes.iter().all(|s| s.xfrm.x >= -2 && s.xfrm.y >= -2 && s.xfrm.x + s.xfrm.w <= *w + 2 && s.xfrm.y + s.xfrm.h <= *h + 2));
+    let saved = save_pptx(&pres).unwrap();
+    // A slice is four points; arrows are named like the arrow points, dummies come two to a slice.
+    check_pres_data(&saved, si, 7, "cycle8", "ppt/diagrams/data3.xml", "arrowWedge", "dummy", 14);
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "cycle8")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+    assert_eq!(d2.arrangement(), Arrangement::Pie);
+    // The saved text rectangles read back as the same insets.
+    for (a, b) in s2.iter().zip(shapes.iter()).filter(|(_, b)| b.text.is_some()) {
+        let (x, y) = (a.text.as_ref().unwrap().insets, b.text.as_ref().unwrap().insets);
+        for s in 0..4 {
+            assert!((x[s] - y[s]).abs() <= 3_000, "inset {s}: {x:?} vs {y:?}");
+        }
+    }
+    // Fewer: three slices, a third each.
+    edit(&mut pres, si, i, |d| {
+        for _ in 0..4 {
+            d.delete(0).unwrap();
+        }
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(shapes.len(), 6);
+    let (a, b) = pie_angles(shapes.iter().find(|s| matches!(&s.geometry, ppt_model::Geometry::Preset { name, .. } if name == "pie")).unwrap());
+    assert!(((b - a).rem_euclid(360.0) - 120.0).abs() < 0.01);
+}

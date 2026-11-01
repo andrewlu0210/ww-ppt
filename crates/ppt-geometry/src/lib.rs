@@ -34,6 +34,11 @@ impl TextFrame {
         TextFrame { xfrm, inset: [0; 4] }
     }
 
+    /// The frame of a shape's text: the preset's text rectangle, unless the text has a frame of its own.
+    pub fn for_text(xfrm: Xfrm, geometry: &Geometry, body: Option<&TextBody>) -> Self {
+        if body.is_some_and(|b| b.exact_frame) { TextFrame::plain(xfrm) } else { TextFrame::of(xfrm, geometry) }
+    }
+
     pub fn of(xfrm: Xfrm, geometry: &Geometry) -> Self {
         let (w, h) = (xfrm.w as f64, xfrm.h as f64);
         let inset = match geometry {

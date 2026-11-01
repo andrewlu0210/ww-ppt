@@ -515,6 +515,9 @@ pub struct TextBody {
     /// Inherited formatting per list level (from layout, master and theme).
     /// The writer only saves properties that differ from these.
     pub defaults: Option<Arc<Vec<ParaDefaults>>>,
+    /// The insets are measured from the shape's bounds (a SmartArt text frame, `dsp:txXfrm`),
+    /// not from the preset geometry's own text rectangle.
+    pub exact_frame: bool,
 }
 
 /// What a paragraph at one list level looks like with no direct formatting.
@@ -548,6 +551,7 @@ impl Default for TextBody {
             line_spacing_reduction: 0.0,
             auto_grow: false,
             defaults: None,
+            exact_frame: false,
         }
     }
 }

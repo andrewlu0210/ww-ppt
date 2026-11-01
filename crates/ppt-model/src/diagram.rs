@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use crate::{Emu, Paragraph, PathCmd, Run, Shape, TextBody, Xfrm};
 
+mod pie;
 mod tree;
 
 /// Deepest level a node can be demoted to (0 is the top level).
@@ -39,6 +40,8 @@ pub enum Arrangement {
     Cycle,
     /// An org chart: one root, each node's children in a row or hanging below it.
     Tree,
+    /// Pie slices around a circle, one per node.
+    Pie,
 }
 
 /// A presentation point: one element of the layout, usually one drawn shape.
@@ -81,6 +84,8 @@ pub struct Template {
     pub nests: bool,
     /// Levels stacked into one pyramid: each a trapezoid whose top edge is the one above's bottom edge.
     pub tapered: bool,
+    /// Pie cycle (`cycle8`): what the drawing says about its slices.
+    pie: Option<pie::PieTpl>,
     /// Cycle: one arrow around the whole ring of nodes (shape index), and where its tail and
     /// tip sit after the first node, in node spacings (`cycle3`).
     ring: Option<(usize, f64, f64)>,
@@ -397,12 +402,17 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, pie: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
 
     fn analyze(&mut self) {
+        if let Some(pie) = pie::PieTpl::detect(self) {
+            self.pie = Some(pie);
+            self.arrangement = Arrangement::Pie;
+            return;
+        }
         if let Some(tree) = tree::TreeTpl::detect(self) {
             self.tree = Some(tree);
             self.arrangement = Arrangement::Tree;
@@ -712,6 +722,7 @@ impl Diagram {
         let t = self.template.0.clone();
         let (shapes, drawn) = match &t.tree {
             Some(tree) if !t.same_structure(&self.nodes) => tree.layout(&t, &self.nodes),
+            _ if t.pie.is_some() && !t.same_structure(&self.nodes) => t.pie.as_ref().expect("checked").layout(&t, &self.nodes),
             _ if t.same_structure(&self.nodes) || t.arrangement == Arrangement::Fixed => self.retext(&t),
             _ => self.rearrange(&t),
         };
@@ -1034,7 +1045,7 @@ impl Geometry {
                     })
                     .collect();
             }
-            Arrangement::Fixed | Arrangement::Tree => {}
+            Arrangement::Fixed | Arrangement::Tree | Arrangement::Pie => {}
         }
         g
     }

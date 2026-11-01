@@ -470,7 +470,7 @@ pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
     if !body.is_empty() {
         if with_text {
             let numbered = opts.slide_number.and_then(|n| body.with_slide_number(n));
-            draw_body(scene, cx.engine, numbered.as_ref().unwrap_or(body), &TextFrame::of(*xf, &shape.geometry), view);
+            draw_body(scene, cx.engine, numbered.as_ref().unwrap_or(body), &TextFrame::for_text(*xf, &shape.geometry, Some(body)), view);
         }
         return;
     }

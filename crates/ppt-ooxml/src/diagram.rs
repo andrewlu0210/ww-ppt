@@ -307,7 +307,11 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
             unit_assocs.insert(l.par_trans.clone());
         }
     }
-    let rebuilt_pres: HashSet<&str> = t.pres.iter().filter(|p| unit_assocs.contains(&p.assoc)).map(|p| p.id.as_str()).collect();
+    let pie = (d.arrangement() == Arrangement::Pie).then(|| pie_units(&m, t)).flatten();
+    let mut rebuilt_pres: HashSet<&str> = t.pres.iter().filter(|p| unit_assocs.contains(&p.assoc)).map(|p| p.id.as_str()).collect();
+    if let Some(u) = &pie {
+        rebuilt_pres.extend(u.groups.iter().flatten().copied());
+    }
 
     let mut out_pts = String::new();
     let mut out_cxns = String::new();
@@ -366,7 +370,9 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
         out_pts.push_str(&src[p.el.range()]);
     }
     let rebuilt = |id: &str| rebuilt_pres.contains(id);
-    if d.arrangement() == Arrangement::Tree {
+    if let Some(units) = &pie {
+        pie_pres(&PieCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id }, units, &d.nodes, &mut out_pts, &mut out_cxns);
+    } else if d.arrangement() == Arrangement::Tree {
         let ctx = TreeCtx { src, m: &m, t, pts: &pts, dgm, pres_id: &pres_id, all: &all };
         tree_pres(&ctx, &d.nodes, &mut out_pts, &mut out_cxns);
     } else {
@@ -492,6 +498,99 @@ pub(crate) fn data_xml(d: &Diagram, drawing_rel: Option<&str>) -> String {
     edits.push((pt_lst.range(), format!("<{}>{out_pts}</{}>", qname(src, pt_lst), qname(src, pt_lst))));
     edits.push((cxn_lst.range(), format!("<{}>{out_cxns}</{}>", qname(src, cxn_lst), qname(src, cxn_lst))));
     apply_edits(src, edits)
+}
+
+/// What writing a pie cycle's presentation points needs.
+struct PieCtx<'a, 'i> {
+    src: &'a str,
+    m: &'a Model<'a, 'i>,
+    t: &'a Template,
+    pts: &'a HashMap<&'a str, &'a Pt<'a, 'i>>,
+    dgm: &'a str,
+    pres_id: &'a str,
+}
+
+/// The presentation points of a pie cycle as loaded: the point the slices hang
+/// under, each slice's four points, and each node's arrow, in node order.
+struct PieUnits<'a> {
+    container: &'a str,
+    groups: Vec<[&'a str; 4]>,
+    arrows: Vec<&'a str>,
+}
+
+fn pie_units<'a>(m: &Model<'a, '_>, t: &'a Template) -> Option<PieUnits<'a>> {
+    // The slice shapes' points all hang under one container.
+    let slice = (0..t.shapes.len()).find(|&i| matches!(&t.shapes[i].geometry, ppt_model::Geometry::Preset { name, .. } if name == "pie"))?;
+    let first = t.pres[*t.shape_pres.get(slice)?].id.as_str();
+    let container = m.cxns.iter().find(|c| c.kind == "presParOf" && c.dest == first)?.src;
+    let mut kids: Vec<&Cxn> = m.cxns.iter().filter(|c| c.kind == "presParOf" && c.src == container).collect();
+    kids.sort_by_key(|c| c.src_ord);
+    let k = t.nodes.len();
+    if kids.len() != 5 * k {
+        return None;
+    }
+    let groups: Vec<[&str; 4]> = (0..k).map(|i| [kids[4 * i].dest, kids[4 * i + 1].dest, kids[4 * i + 2].dest, kids[4 * i + 3].dest]).collect();
+    let arrows: Vec<&str> = (0..k).map(|i| kids[4 * k + i].dest).collect();
+    // Group i is node i's: its first point presents that node.
+    let ok = groups.iter().zip(&t.nodes).all(|(g, n)| m.cxns.iter().any(|c| c.kind == "presOf" && c.dest == g[0] && c.src == n.id));
+    ok.then_some(PieUnits { container, groups, arrows })
+}
+
+/// Writes the presentation points of a pie cycle: each node's slice (four points)
+/// and arrow repeat from the loaded node it looks like.
+fn pie_pres(ctx: &PieCtx, units: &PieUnits, nodes: &[DNode], out_pts: &mut String, out_cxns: &mut String) {
+    let PieCtx { src, m, t, pts, dgm, pres_id } = ctx;
+    let (n, k) = (nodes.len(), t.nodes.len());
+    let links_of = |id: &str| t.links.get(id).cloned().unwrap_or_else(|| Links { cxn: derived_id(id, "cxn"), par_trans: derived_id(id, "parTrans"), sib_trans: derived_id(id, "sibTrans") });
+    let restyle = |el: Node, edits: &mut Vec<(Range<usize>, String)>, j: usize| {
+        if let Some(set) = child(el, "prSet") {
+            let attr = |a: &str| set.attribute(a).and_then(|v| v.parse::<usize>().ok());
+            if attr("presStyleIdx").is_some() && attr("presStyleCnt") == Some(k) {
+                edits.push(set_attr(src, set, "presStyleIdx", &j.to_string()));
+                edits.push(set_attr(src, set, "presStyleCnt", &n.to_string()));
+            }
+        }
+    };
+    let nest = |parent: &str, dest: &str, ord: usize| format!(r#"<{dgm}cxn modelId="{}" type="presParOf" srcId="{}" destId="{}" srcOrd="{ord}" destOrd="0" presId="{}"/>"#, esc(&derived_id(parent, dest)), esc(parent), esc(dest), esc(pres_id));
+    for (j, node) in nodes.iter().enumerate() {
+        let tt = template_index(j, n, k);
+        for (i, &p) in units.groups[tt].iter().enumerate() {
+            let Some(pt) = pts.get(p) else { continue };
+            let id = derived_id(&node.id, p);
+            let mut edits = vec![set_attr(src, pt.el, "modelId", &id)];
+            restyle(pt.el, &mut edits, j);
+            out_pts.push_str(&rewrite(src, pt.el, edits));
+            out_cxns.push_str(&nest(units.container, &id, 4 * j + i));
+            // What it shows: the node.
+            for c in m.cxns.iter().filter(|c| c.kind == "presOf" && c.dest == p) {
+                out_cxns.push_str(&format!(
+                    r#"<{dgm}cxn modelId="{}" type="presOf" srcId="{}" destId="{}" srcOrd="{}" destOrd="{}" presId="{}"/>"#,
+                    esc(&derived_id(&node.id, &id)),
+                    esc(&node.id),
+                    esc(&id),
+                    c.src_ord,
+                    c.dest_ord,
+                    esc(pres_id)
+                ));
+            }
+        }
+        // The arrow presents the node's transition.
+        let a = units.arrows[tt];
+        if let Some(pt) = pts.get(a) {
+            let id = derived_id(&node.id, a);
+            let mut edits = vec![set_attr(src, pt.el, "modelId", &id)];
+            if let Some(set) = child(pt.el, "prSet") {
+                edits.push(set_attr(src, set, "presAssocID", &links_of(&node.id).sib_trans));
+            }
+            restyle(pt.el, &mut edits, j);
+            out_pts.push_str(&rewrite(src, pt.el, edits));
+            out_cxns.push_str(&nest(units.container, &id, 4 * n + j));
+        }
+    }
+    // Links between points that stay (the container under the layout's own point).
+    for c in m.cxns.iter().filter(|c| c.kind == "presParOf" && c.src != units.container) {
+        out_cxns.push_str(&src[c.el.range()]);
+    }
 }
 
 /// What writing an org chart's presentation points needs.
@@ -691,6 +790,15 @@ pub(crate) fn drawing_xml(d: &Diagram, shapes: &[Shape], sx: f64, sy: f64) -> St
         }
         // The text frame moves and scales with the shape.
         if let Some(tx) = child(*sp, "txXfrm")
+            && let Some(old) = crate::parse_xfrm(tx)
+            && d.arrangement() == Arrangement::Pie
+        {
+            // A pie slice's text rectangle moves with its own insets.
+            let (a, b) = (shape.text.as_ref().map_or([0; 4], |t| t.insets), tpl.text.as_ref().map_or([0; 4], |t| t.insets));
+            let [dl, dt, dr, db] = std::array::from_fn(|i| a[i] - b[i]);
+            let moved = Xfrm { x: new.x + (old.x - tpl.xfrm.x) + dl, y: new.y + (old.y - tpl.xfrm.y) + dt, w: old.w + (new.w - tpl.xfrm.w) - dl - dr, h: old.h + (new.h - tpl.xfrm.h) - dt - db, ..old };
+            edits.push((tx.range(), xfrm_xml(qname(src, tx), &moved)));
+        } else if let Some(tx) = child(*sp, "txXfrm")
             && let Some(old) = crate::parse_xfrm(tx)
         {
             let (fx, fy) = (new.w as f64 / tpl.xfrm.w.max(1) as f64, new.h as f64 / tpl.xfrm.h.max(1) as f64);

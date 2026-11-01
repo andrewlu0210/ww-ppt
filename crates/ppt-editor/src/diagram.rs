@@ -37,7 +37,7 @@ fn scaled(body: &TextBody, k: f64) -> TextBody {
 /// The largest font multiplier (at most 1) at which `shape`'s text fits its height.
 fn fit_scale(engine: &mut TextEngine, shape: &Shape) -> f64 {
     let Some(body) = &shape.text else { return 1.0 };
-    let frame = TextFrame::of(shape.xfrm, &shape.geometry);
+    let frame = TextFrame::for_text(shape.xfrm, &shape.geometry, Some(body));
     let room = (shape.xfrm.h - frame.inset[1] - frame.inset[3] - body.insets[1] - body.insets[3]) as f64 / EMU_PER_PT;
     let fits = |k: f64, engine: &mut TextEngine| {
         let b = scaled(body, k);
@@ -204,7 +204,7 @@ impl Editor {
         let Some(body) = child.text.clone() else { return false };
         let at = |v: i64, s: f64, origin: i64| origin + (v as f64 * s).round() as i64;
         let xf = Xfrm { x: at(child.xfrm.x, sx, shape.xfrm.x), y: at(child.xfrm.y, sy, shape.xfrm.y), w: (child.xfrm.w as f64 * sx).round() as i64, h: (child.xfrm.h as f64 * sy).round() as i64, ..child.xfrm };
-        let frame = TextFrame::of(xf, &child.geometry);
+        let frame = TextFrame::for_text(xf, &child.geometry, Some(&body));
         let rich = RichEdit::new(engine, body.clone(), text_width_pt(&frame, &body));
         let original_xfrm = shape.xfrm;
         self.selection = vec![id];

@@ -114,6 +114,7 @@ export const en: Messages = {
   "smartArt.cycle2": "Basic Cycle",
   "smartArt.cycle3": "Continuous Cycle",
   "smartArt.cycle5": "Block Cycle",
+  "smartArt.cycle8": "Segmented Cycle",
   "smartArt.pyramid1": "Basic Pyramid",
   "smartArt.orgChart1": "Organization Chart",
   "smartArt.hierarchy1": "Hierarchy",
