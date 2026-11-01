@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 
 use super::{Drawn, Node, Rect, Shown, Template, build_text, derived_id, scale_fonts};
+
+mod horizontal;
 use crate::{CustomPath, Emu, Geometry, PathCmd, Shape};
 
 /// How the children of nodes at one depth are arranged, measured on the loaded drawing.
@@ -49,6 +51,8 @@ pub(super) struct TreeTpl {
     hgap: f64,
     /// Everything the loaded drawing covers.
     bounds: Rect,
+    /// A tree growing to the right (`hierarchy2`) instead of down.
+    horizontal: Option<horizontal::Columns>,
 }
 
 fn depth_lists(nodes: &[Node]) -> Vec<Vec<String>> {
@@ -72,7 +76,7 @@ impl TreeTpl {
     /// Recognizes an org chart whose drawing is one box per node and one
     /// connector per parent link.
     pub(super) fn detect(t: &Template) -> Option<TreeTpl> {
-        if !(t.layout.ends_with("/orgChart1") || t.layout.ends_with("/hierarchy1")) || t.nodes.len() != 1 || t.shapes.len() != t.shape_pres.len() {
+        if !(t.layout.ends_with("/orgChart1") || t.layout.ends_with("/hierarchy1") || t.layout.ends_with("/hierarchy2")) || t.nodes.len() != 1 || t.shapes.len() != t.shape_pres.len() {
             return None;
         }
         let depths = depth_lists(&t.nodes);
@@ -90,7 +94,8 @@ impl TreeTpl {
                 boxes.entry(assoc.to_string()).or_insert_with(Vec::new).push(i);
             } else {
                 let child = trans.get(assoc)?;
-                if shape.text.is_some() || conns.insert(child.to_string(), i).is_some() {
+                // A connector may carry an empty text frame (`connTx`), but not text.
+                if shape.text.as_ref().is_some_and(|b| !b.is_empty()) || conns.insert(child.to_string(), i).is_some() {
                     return None;
                 }
             }
@@ -103,8 +108,12 @@ impl TreeTpl {
             return None;
         }
         let bounds = t.shapes.iter().fold(Rect::default(), |r, s| r.union(Rect::of(&s.xfrm)));
-        let mut tree = TreeTpl { boxes, conns, depths, levels: Vec::new(), hgap: 0.0, bounds };
-        tree.measure(t);
+        let mut tree = TreeTpl { boxes, conns, depths, levels: Vec::new(), hgap: 0.0, bounds, horizontal: None };
+        if t.layout.ends_with("/hierarchy2") {
+            tree.horizontal = Some(horizontal::Columns::measure(&tree, t)?);
+        } else {
+            tree.measure(t);
+        }
         Some(tree)
     }
 
@@ -272,6 +281,9 @@ impl TreeTpl {
 
     /// The drawing for `nodes`: connectors, then boxes, and what each one is.
     pub(super) fn layout(&self, t: &Template, nodes: &[Node]) -> (Vec<Shape>, Vec<Drawn>) {
+        if let Some(columns) = &self.horizontal {
+            return columns.layout(self, t, nodes);
+        }
         let node_of: HashMap<String, &Node> = {
             fn walk<'a>(n: &'a Node, out: &mut HashMap<String, &'a Node>) {
                 out.insert(n.id.clone(), n);

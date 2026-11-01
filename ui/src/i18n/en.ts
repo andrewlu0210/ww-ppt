@@ -115,6 +115,7 @@ export const en: Messages = {
   "smartArt.pyramid1": "Basic Pyramid",
   "smartArt.orgChart1": "Organization Chart",
   "smartArt.hierarchy1": "Hierarchy",
+  "smartArt.hierarchy2": "Horizontal Hierarchy",
   "smartArt.process1": "Basic Process",
   "smartArt.process2": "Vertical Process",
   "smartArt.process3": "Process Arrows",

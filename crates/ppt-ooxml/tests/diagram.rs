@@ -419,6 +419,9 @@ fn new_smartarts_of_every_layout_save_and_reopen() {
         let (shape, d) = new_diagram(&pres, kind);
         let ShapeKind::Diagram { shapes, w, h, .. } = &shape.kind else { panic!() };
         assert!(d.can_restructure(), "{kind}");
+        if matches!(kind, "orgChart1" | "hierarchy1" | "hierarchy2") {
+            assert_eq!(d.arrangement(), Arrangement::Tree, "{kind}");
+        }
         let rows = texts(d);
         assert!(rows.len() >= 3, "{kind}: {rows:?}");
         assert!(rows.iter().all(|r| r.trim().starts_with("項目") || r.trim().starts_with("子項目") || r.trim().starts_with("標題")), "{kind}: {rows:?}");
@@ -522,6 +525,64 @@ fn hierarchy_adds_and_removes_nodes() {
     check_tree_data(&saved, si, 12, "hierarchy1", "ppt/diagrams/data2.xml", "text", "Name");
     let back = parse_pptx(&saved).unwrap();
     let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "hierarchy1")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+}
+
+fn horizontal() -> (Presentation, usize, usize) {
+    let pres = deck("test11.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "hierarchy2").expect("a horizontal hierarchy");
+    (pres, si, i)
+}
+
+/// Both ends of a straight connector: from its center, length and turn.
+fn line_ends(s: &ppt_model::Shape) -> ((f64, f64), (f64, f64)) {
+    let x = &s.xfrm;
+    let (cx, cy) = (x.x as f64 + x.w as f64 / 2.0, x.y as f64 + x.h as f64 / 2.0);
+    let (sin, cos) = x.rot.to_radians().sin_cos();
+    let half = x.w as f64 / 2.0;
+    ((cx - half * cos, cy - half * sin), (cx + half * cos, cy + half * sin))
+}
+
+#[test]
+fn horizontal_hierarchy_adds_and_removes_nodes() {
+    let (mut pres, si, i) = horizontal();
+    let ShapeKind::Diagram { data: Some(d), shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Tree);
+    assert_eq!(d.rows().len(), 14);
+    assert_eq!(shapes.len(), 14 + 13);
+    let before = texts(d);
+    edit(&mut pres, si, i, |d| {
+        // A new top-level topic, and a sub-topic under the first one.
+        let r = d.insert(0, Insert::Child).unwrap();
+        d.set_text(r, "新主題");
+        let kid = d.insert(1, Insert::Child).unwrap();
+        d.set_text(kid, "新子題");
+        d.delete(3).unwrap();
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 15);
+    assert_eq!(shapes.len(), 15 + 14);
+    let b = boxes(shapes);
+    let frame = |name: &str| b.iter().find(|(t, _)| t == name).unwrap().1;
+    // Children are in a column to the right of their parent, new topics at the bottom of the column.
+    let (root, topic, kid) = (frame(&before[0]), frame("新主題"), frame("新子題"));
+    assert!(topic.x > root.x + root.w && kid.x > topic.x - 1);
+    assert!(topic.y > root.y, "the new top-level topic is below the root's middle");
+    assert!(b.iter().all(|(_, x)| x.x >= 0 && x.y >= 0 && x.x + x.w <= *w && x.y + x.h <= *h));
+    // Each connector joins a parent's right edge to a child's left edge.
+    let lines: Vec<_> = shapes.iter().filter(|s| s.xfrm.h < 100_000 && s.xfrm.w > s.xfrm.h * 3).collect();
+    let boxes_: Vec<_> = shapes.iter().filter(|s| s.xfrm.h >= 100_000).collect();
+    for l in lines {
+        let (a, z) = line_ends(l);
+        let near = |p: (f64, f64), edge: &dyn Fn(&ppt_model::Xfrm) -> f64| boxes_.iter().any(|s| (edge(&s.xfrm) - p.0).abs() <= 3.0 && (s.xfrm.y as f64 + s.xfrm.h as f64 / 2.0 - p.1).abs() <= 3.0);
+        assert!(near(a, &|x| (x.x + x.w) as f64), "starts at a box's right edge: {a:?}");
+        assert!(near(z, &|x| x.x as f64), "ends at a box's left edge: {z:?}");
+    }
+    let saved = save_pptx(&pres).unwrap();
+    check_tree_data(&saved, si, 15, "hierarchy2", "ppt/diagrams/data12.xml", "Level", "connTx");
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "hierarchy2")).unwrap().kind else { panic!() };
     assert_eq!(texts(d2), texts(d));
     assert_eq!(s2.len(), shapes.len());
 }

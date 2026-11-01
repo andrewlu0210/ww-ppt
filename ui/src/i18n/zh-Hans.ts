@@ -115,6 +115,7 @@ export const zhHans: Messages = {
   "smartArt.pyramid1": "基本棱锥图",
   "smartArt.orgChart1": "组织结构图",
   "smartArt.hierarchy1": "层次结构",
+  "smartArt.hierarchy2": "水平层次结构",
   "smartArt.process1": "基本流程",
   "smartArt.process2": "垂直流程",
   "smartArt.process3": "流程箭头",

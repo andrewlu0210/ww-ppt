@@ -117,6 +117,7 @@ export const zhHant = {
   "smartArt.pyramid1": "基本金字塔圖",
   "smartArt.orgChart1": "組織圖",
   "smartArt.hierarchy1": "階層結構",
+  "smartArt.hierarchy2": "水平層次結構",
   "smartArt.process1": "基本流程",
   "smartArt.process2": "垂直流程",
   "smartArt.process3": "流程箭號",
