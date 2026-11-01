@@ -237,7 +237,7 @@ impl Editor {
         let rich = RichEdit::new(engine, original.clone(), text_width_pt(&frame, &original));
         let original_xfrm = shape.xfrm;
         self.selection = vec![id];
-        self.text = Some(TextEdit { shape: id, cell: Some((row, col)), frame, rich, original, original_xfrm, remove_if_empty: false });
+        self.text = Some(TextEdit { shape: id, cell: Some((row, col)), frame, rich, original, original_xfrm, remove_if_empty: false, diagram: None });
     }
 
     /// Writes the live cell text into the table so rows grow while typing.

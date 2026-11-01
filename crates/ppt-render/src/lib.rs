@@ -306,6 +306,8 @@ pub struct DrawOptions {
     pub skip_text: Option<ShapeId>,
     /// With `skip_text` on a table: the (row, column) of the cell being edited.
     pub skip_cell: Option<(usize, usize)>,
+    /// With `skip_text` on a SmartArt: the drawn shape (index) whose text is being edited in place.
+    pub skip_child: Option<usize>,
     /// Editing view: show prompts in empty placeholders and frames for unsupported content.
     pub editing: bool,
     /// Slide units (EMU) per device pixel, for hairlines and dashes.
@@ -396,8 +398,9 @@ pub fn draw_shape(scene: &mut dyn Canvas, cx: &mut RenderCtx, pres: &Presentatio
     if let ShapeKind::Diagram { shapes, w: dw, h: dh, .. } = &shape.kind {
         // The stored drawing, moved and stretched with the frame.
         let place = view * Affine::translate((xf.x as f64, xf.y as f64)) * Affine::scale_non_uniform(w / (*dw).max(1) as f64, h / (*dh).max(1) as f64);
-        for child in shapes.iter() {
-            draw_shape(scene, cx, pres, child, place, &DrawOptions { editing: false, ..*opts });
+        for (k, child) in shapes.iter().enumerate() {
+            let skip_text = if opts.skip_text == Some(shape.id) && opts.skip_child == Some(k) { Some(child.id) } else { None };
+            draw_shape(scene, cx, pres, child, place, &DrawOptions { editing: false, skip_text, skip_child: None, skip_cell: None, ..*opts });
         }
         return;
     }

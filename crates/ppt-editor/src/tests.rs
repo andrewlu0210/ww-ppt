@@ -1451,21 +1451,63 @@ fn smartart_text_pane_edits_with_undo() {
     assert!(!e.diagram_shift(&mut eng, 1, true));
 }
 
-#[test]
-fn double_clicking_a_smartart_asks_for_its_text_pane() {
-    let mut eng = engine();
-    let (mut e, id) = smartart_editor(&mut eng, "/vList2");
+/// Slide point at the middle of drawn shape `k` of SmartArt `id`.
+fn smartart_point(e: &Editor, id: ShapeId, k: usize) -> (f64, f64) {
     let shape = e.pres.shape(e.slide, id).unwrap();
     let ShapeKind::Diagram { shapes, w, h, .. } = &shape.kind else { panic!() };
-    // The middle of the third node's box, in slide coordinates.
-    let third = &shapes[2].xfrm;
+    let r = &shapes[k].xfrm;
     let (sx, sy) = (shape.xfrm.w as f64 / *w as f64, shape.xfrm.h as f64 / *h as f64);
-    let x = shape.xfrm.x as f64 + (third.x + third.w / 2) as f64 * sx;
-    let y = shape.xfrm.y as f64 + (third.y + third.h / 2) as f64 * sy;
+    (shape.xfrm.x as f64 + (r.x + r.w / 2) as f64 * sx, shape.xfrm.y as f64 + (r.y + r.h / 2) as f64 * sy)
+}
+
+#[test]
+fn double_clicking_a_smartart_node_edits_its_text_in_place() {
+    let mut eng = engine();
+    let (mut e, id) = smartart_editor(&mut eng, "/vList2");
+    let before = e.diagram_info().unwrap().rows[2].text.clone();
+    let (x, y) = smartart_point(&e, id, 2);
     e.selection.clear();
     click(&mut e, &mut eng, x, y, 2);
+    // Editing on the canvas, not in the text pane.
+    assert_eq!(e.diagram_requests, 0);
+    assert_eq!(e.selection, vec![id]);
+    let edit = e.text.as_ref().expect("editing");
+    assert_eq!(edit.diagram, Some((2, 2)));
+    assert_eq!(edit.rich.body.plain_text(), before);
+    e.text.as_mut().unwrap().rich.select_all();
+    assert!(e.insert_text(&mut eng, "直接編輯"));
+    // The node and its drawing change when editing ends, as one undo step.
+    assert_eq!(e.diagram_info().unwrap().rows[2].text, before);
+    e.end_text_edit(&mut eng);
+    assert!(e.text.is_none());
+    assert_eq!(e.diagram_info().unwrap().rows[2].text, "直接編輯");
+    let ShapeKind::Diagram { shapes, .. } = &e.pres.shape(e.slide, id).unwrap().kind else { panic!() };
+    assert!(shapes.iter().any(|s| s.text.as_ref().is_some_and(|t| t.plain_text() == "直接編輯")));
+    assert!(e.undo(&mut eng));
+    assert_eq!(e.diagram_info().unwrap().rows[2].text, before);
+    // Leaving the text as it was changes nothing.
+    let undo_depth = e.undo.len();
+    click(&mut e, &mut eng, x, y, 2);
+    assert!(e.text.is_some());
+    e.end_text_edit(&mut eng);
+    assert_eq!(e.undo.len(), undo_depth);
+}
+
+#[test]
+fn double_clicking_text_that_shows_children_asks_for_the_text_pane() {
+    let mut eng = engine();
+    let (mut e, id) = smartart_editor(&mut eng, "/hList1");
+    let shape = e.pres.shape(e.slide, id).unwrap();
+    let ShapeKind::Diagram { shapes, data: Some(d), .. } = &shape.kind else { panic!() };
+    // A shape with text that is a node's but not only its own.
+    let k = (0..shapes.len()).find(|&k| shapes[k].text.is_some() && d.row_of_shape(k).is_some() && d.row_of_own_text(k).is_none()).expect("a list shape");
+    let want = d.row_of_shape(k);
+    let (x, y) = smartart_point(&e, id, k);
+    e.selection.clear();
+    click(&mut e, &mut eng, x, y, 2);
+    assert!(e.text.is_none());
     assert_eq!(e.diagram_requests, 1);
-    assert_eq!(e.diagram_focus, Some(2));
+    assert_eq!(e.diagram_focus, want);
     assert_eq!(e.selection, vec![id]);
 }
 

@@ -787,6 +787,17 @@ impl Diagram {
         Some(if up { a } else { a + (c - b) })
     }
 
+    /// The row of the node whose own text, and nothing else, drawn shape
+    /// `shape` shows (so editing that text edits the node).
+    pub fn row_of_own_text(&self, shape: usize) -> Option<usize> {
+        let t = &self.template.0;
+        let p = *t.shape_pres.get(self.drawn.get(shape)?.template)?;
+        if t.shows(p) != (true, false) {
+            return None;
+        }
+        self.row_of_shape(shape)
+    }
+
     /// The node a drawn shape belongs to, as a row.
     pub fn row_of_shape(&self, shape: usize) -> Option<usize> {
         let id = self.drawn.get(shape)?.node.as_ref()?;

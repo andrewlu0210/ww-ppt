@@ -222,6 +222,8 @@ pub struct TextEdit {
     original_xfrm: Xfrm,
     /// Remove the shape when editing ends with no text (new text boxes).
     remove_if_empty: bool,
+    /// SmartArt: (index of the drawn shape, row of its node) when editing a node's text in place.
+    pub diagram: Option<(usize, usize)>,
 }
 
 /// What the host needs to draw the text being edited.
@@ -676,7 +678,15 @@ impl Editor {
                 }
                 let shape = self.pres.shape(self.slide, id).expect("hit shape exists");
                 if ev.clicks >= 2 && matches!(shape.kind, ShapeKind::Diagram { data: Some(_), .. }) {
-                    // SmartArt text is edited in the text pane, at the node clicked.
+                    // A node's own text is edited in place; the rest in the text pane, at the node clicked.
+                    if self.begin_diagram_text_edit(engine, id, ev.x, ev.y) {
+                        if let Some((x, y)) = self.to_text_space(ev.x, ev.y)
+                            && let Some(edit) = &mut self.text
+                        {
+                            edit.rich.pointer_down(x, y, ev.clicks - 1, false);
+                        }
+                        return true;
+                    }
                     self.diagram_focus = self.diagram_row_at(id, ev.x, ev.y);
                     self.diagram_range = None;
                     self.diagram_requests += 1;
@@ -1019,7 +1029,7 @@ impl Editor {
         let width = text_width_pt(&frame, body);
         let rich = RichEdit::new(engine, original.clone(), width);
         self.selection = vec![id];
-        self.text = Some(TextEdit { shape: id, cell: None, frame, rich, original, original_xfrm: shape.xfrm, remove_if_empty });
+        self.text = Some(TextEdit { shape: id, cell: None, frame, rich, original, original_xfrm: shape.xfrm, remove_if_empty, diagram: None });
     }
 
     /// Commits the edited text into the model and leaves text mode.
@@ -1027,6 +1037,15 @@ impl Editor {
         let Some(mut edit) = self.text.take() else { return };
         edit.rich.clear_compose(engine);
         let body = edit.rich.body;
+        if let Some((_, row)) = edit.diagram {
+            // The node keeps plain text; the drawing is laid out again from it.
+            let text = body.plain_text();
+            if self.node_text(self.slide, edit.shape, row).is_some_and(|old| old != text) {
+                self.diagram_undo = None;
+                self.diagram_set_text_of(engine, edit.shape, row, &text);
+            }
+            return;
+        }
         if edit.remove_if_empty && body.is_empty() {
             if let Some(slide) = self.pres.slides.get_mut(self.slide) {
                 slide.shapes.retain(|s| s.id != edit.shape);
@@ -1136,6 +1155,9 @@ impl Editor {
             return self.fit_edited_cell(engine);
         }
         let Some(edit) = &mut self.text else { return };
+        if edit.diagram.is_some() {
+            return;
+        }
         let id = edit.shape;
         let Some(shape) = self.pres.slides.get_mut(self.slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) else { return };
         edit.frame = TextFrame::of(shape.xfrm, &shape.geometry);

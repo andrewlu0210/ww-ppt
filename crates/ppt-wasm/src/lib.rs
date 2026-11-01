@@ -461,7 +461,7 @@ impl App {
         {
             let pres = &self.editor.pres;
             if let Some(slide) = pres.slides.get(self.editor.slide) {
-                let opts = DrawOptions { skip_text: self.editor.text.as_ref().map(|t| t.shape), skip_cell: self.editor.text.as_ref().and_then(|t| t.cell), editing: true, emu_per_px: 1.0 / s, slide_number: None };
+                let opts = DrawOptions { skip_text: self.editor.text.as_ref().map(|t| t.shape), skip_cell: self.editor.text.as_ref().and_then(|t| t.cell), skip_child: self.editor.text.as_ref().and_then(|t| t.diagram.map(|d| d.0)), editing: true, emu_per_px: 1.0 / s, slide_number: None };
                 let mut cx = RenderCtx { engine: &mut self.engine, images: &mut self.images };
                 draw_slide(&mut self.scene, &mut cx, pres, slide, view, &opts);
             }

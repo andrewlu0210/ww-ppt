@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use ppt_geometry::{TextFrame, text_width_pt};
 use ppt_model::diagram::{Diagram, Insert, Row};
-use ppt_model::{EMU_PER_PT, Shape, ShapeId, ShapeKind, TextBody};
+use ppt_model::{EMU_PER_PT, Shape, ShapeId, ShapeKind, TextBody, Xfrm};
 use ppt_text::TextEngine;
 
-use crate::Editor;
+use crate::{Editor, RichEdit, TextEdit};
 
 /// The selected SmartArt as the text pane shows it.
 pub struct DiagramInfo {
@@ -133,8 +133,12 @@ impl Editor {
     /// Applies `f` to a copy of the selected SmartArt; when it reports a change,
     /// that copy (with its drawing rebuilt) replaces the original as one undo step.
     fn edit_diagram<R>(&mut self, engine: &mut TextEngine, merge_typing: Option<usize>, f: impl FnOnce(&mut Diagram) -> Option<R>) -> Option<R> {
-        let (id, d) = self.selected_diagram()?;
-        let mut d = d.clone();
+        let (id, _) = self.selected_diagram()?;
+        self.edit_diagram_of(engine, id, merge_typing, f)
+    }
+
+    fn edit_diagram_of<R>(&mut self, engine: &mut TextEngine, id: ShapeId, merge_typing: Option<usize>, f: impl FnOnce(&mut Diagram) -> Option<R>) -> Option<R> {
+        let mut d = data(&self.pres.shape(self.slide, id)?.kind)?.as_ref().clone();
         let result = f(&mut d)?;
         let key = merge_typing.map(|row| (id, row));
         if key.is_some() && self.diagram_undo == key {
@@ -152,6 +156,35 @@ impl Editor {
     /// Replaces row `row`'s text; typing into one row is one undo step.
     pub fn diagram_set_text(&mut self, engine: &mut TextEngine, row: usize, text: &str) -> bool {
         self.edit_diagram(engine, Some(row), |d| d.set_text(row, text).then_some(())).is_some()
+    }
+
+    /// Replaces row `row`'s text of SmartArt `id` (one undo step).
+    pub(crate) fn diagram_set_text_of(&mut self, engine: &mut TextEngine, id: ShapeId, row: usize, text: &str) -> bool {
+        self.edit_diagram_of(engine, id, None, |d| d.set_text(row, text).then_some(())).is_some()
+    }
+
+    /// Starts editing, on the canvas, the text of the node drawn at slide point
+    /// (`x`, `y`) in SmartArt `id`. False when that text cannot be edited in place
+    /// (it shows more than the node's own text, or the frame is turned or stretched).
+    pub(crate) fn begin_diagram_text_edit(&mut self, engine: &mut TextEngine, id: ShapeId, x: f64, y: f64) -> bool {
+        let Some(shape) = self.pres.shape(self.slide, id) else { return false };
+        let ShapeKind::Diagram { shapes, w, h, data: Some(d) } = &shape.kind else { return false };
+        let (sx, sy) = (shape.xfrm.w as f64 / (*w).max(1) as f64, shape.xfrm.h as f64 / (*h).max(1) as f64);
+        if shape.xfrm.rot != 0.0 || shape.xfrm.flip_h || shape.xfrm.flip_v || (sx - 1.0).abs() > 0.02 || (sy - 1.0).abs() > 0.02 {
+            return false;
+        }
+        let Some(index) = self.diagram_shape_at(id, x, y) else { return false };
+        let Some(row) = d.row_of_own_text(index) else { return false };
+        let child = &shapes[index];
+        let Some(body) = child.text.clone() else { return false };
+        let at = |v: i64, s: f64, origin: i64| origin + (v as f64 * s).round() as i64;
+        let xf = Xfrm { x: at(child.xfrm.x, sx, shape.xfrm.x), y: at(child.xfrm.y, sy, shape.xfrm.y), w: (child.xfrm.w as f64 * sx).round() as i64, h: (child.xfrm.h as f64 * sy).round() as i64, ..child.xfrm };
+        let frame = TextFrame::of(xf, &child.geometry);
+        let rich = RichEdit::new(engine, body.clone(), text_width_pt(&frame, &body));
+        let original_xfrm = shape.xfrm;
+        self.selection = vec![id];
+        self.text = Some(TextEdit { shape: id, cell: None, frame, rich, original: body, original_xfrm, remove_if_empty: false, diagram: Some((index, row)) });
+        true
     }
 
     /// Adds a node after, before or below row `row`. Returns the new row.
@@ -176,15 +209,21 @@ impl Editor {
 
     /// The row of the node drawn at slide point (`x`, `y`) in SmartArt `id`.
     pub(crate) fn diagram_row_at(&self, id: ShapeId, x: f64, y: f64) -> Option<usize> {
+        let index = self.diagram_shape_at(id, x, y)?;
+        data(&self.pres.shape(self.slide, id)?.kind)?.row_of_shape(index)
+    }
+
+    /// The (topmost) drawn shape with text at slide point (`x`, `y`) in SmartArt `id`.
+    fn diagram_shape_at(&self, id: ShapeId, x: f64, y: f64) -> Option<usize> {
         let shape = self.pres.shape(self.slide, id)?;
-        let ShapeKind::Diagram { shapes, w, h, data: Some(d) } = &shape.kind else { return None };
+        let ShapeKind::Diagram { shapes, w, h, data: Some(_) } = &shape.kind else { return None };
         let (lx, ly) = shape.xfrm.to_local(x, y);
         // Into the drawing's own frame.
         let (dx, dy) = (lx * *w as f64 / shape.xfrm.w.max(1) as f64, ly * *h as f64 / shape.xfrm.h.max(1) as f64);
         // Topmost first.
         shapes.iter().enumerate().rev().filter(|(_, s)| s.text.is_some()).find_map(|(i, s)| {
             let (sx, sy) = s.xfrm.to_local(dx, dy);
-            (sx >= 0.0 && sy >= 0.0 && sx <= s.xfrm.w as f64 && sy <= s.xfrm.h as f64).then(|| d.row_of_shape(i)).flatten()
+            (sx >= 0.0 && sy >= 0.0 && sx <= s.xfrm.w as f64 && sy <= s.xfrm.h as f64).then_some(i)
         })
     }
 }
