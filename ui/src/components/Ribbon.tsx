@@ -77,6 +77,9 @@ const NUMBERINGS: [string, string][] = [
 /** Keeps keyboard focus on the canvas input while clicking ribbon controls. */
 const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
+/** Layouts of the Insert > SmartArt menu (`ppt_ooxml::smartart_kinds`). */
+const SMARTART_LAYOUTS = ["vList2", "chevron1", "hList1", "cycle2", "pyramid1", "orgChart1"] as const;
+
 function Button(props: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean; large?: boolean; active?: boolean; iconOnly?: boolean }) {
   const cls = ["rb-btn", props.large && "large", props.active && "active", props.iconOnly && "icon-only"].filter(Boolean).join(" ");
   return (
@@ -457,6 +460,27 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 onPick={(rows, cols) => run({ kind: "insertTable", rows, cols })}
                 button={(open, toggle) => <Button large active={open} icon={icons.table} label={t("ribbon.table")} onClick={toggle} />}
               />
+            </Group>
+            <Group label={t("ribbon.smartArt")}>
+              <Popover button={(open, toggle) => <Button large active={open} icon={icons.smartArt} label={t("ribbon.smartArt")} onClick={toggle} />}>
+                {(close) => (
+                  <div className="menu-panel">
+                    {SMARTART_LAYOUTS.map((layout) => (
+                      <button
+                        key={layout}
+                        className="menu-item"
+                        onMouseDown={keepFocus}
+                        onClick={() => {
+                          run({ kind: "insertSmartArt", layout });
+                          close();
+                        }}
+                      >
+                        {t(`smartArt.${layout}`)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Popover>
             </Group>
             <Group label={t("group.images")}>
               <Button large icon={icons.picture} label={t("ribbon.picture")} onClick={() => run({ kind: "picture" })} />

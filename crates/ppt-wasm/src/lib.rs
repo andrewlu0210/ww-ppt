@@ -1898,6 +1898,14 @@ impl App {
             .collect()
     }
 
+    /// Inserts a new SmartArt of layout `kind` (`vList2`, `chevron1`, `hList1`,
+    /// `cycle2`, `pyramid1` or `orgChart1`) on the current slide.
+    #[wasm_bindgen(js_name = insertSmartArt)]
+    pub fn insert_smart_art(&mut self, kind: &str) -> bool {
+        let changed = self.editor.insert_smartart(&mut self.engine, kind);
+        self.touch(changed)
+    }
+
     #[wasm_bindgen(js_name = insertTable)]
     pub fn insert_table(&mut self, rows: usize, cols: usize) -> bool {
         let changed = self.editor.insert_table(&mut self.engine, rows, cols);

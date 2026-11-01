@@ -358,6 +358,14 @@ export const icons: Record<string, ReactNode> = {
       <path d="M3.5 9.5h17M3.5 14.5h17M9.5 4.5v15M15 4.5v15" />
     </Svg>
   ),
+  smartArt: (
+    <Svg>
+      <rect x="9" y="3.5" width="6" height="5" rx="1" />
+      <rect x="3.5" y="15.5" width="6" height="5" rx="1" />
+      <rect x="14.5" y="15.5" width="6" height="5" rx="1" />
+      <path d="M12 8.5v3.5M6.5 15.5V12h11v3.5" />
+    </Svg>
+  ),
   rowAbove: (
     <Svg>
       <rect x="4" y="11" width="16" height="9" rx="1" />

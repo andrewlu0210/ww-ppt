@@ -7,6 +7,7 @@ mod anim;
 mod chart;
 pub mod design;
 mod diagram;
+mod smartart;
 mod notes;
 mod package;
 mod style;
@@ -33,6 +34,8 @@ use ppt_model::{
 use ppt_model::table::TableStyle;
 use roxmltree::{Document, Node};
 use style::{BodyProps, ColorCtx, LevelStyle, ListStyle, Theme, attr_bool, attr_f64, attr_i64, child, children, path};
+
+pub use smartart::{Labels, new_smartart, smartart_kinds};
 
 #[derive(Debug)]
 pub enum Error {

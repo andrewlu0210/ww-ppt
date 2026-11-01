@@ -338,11 +338,12 @@ fn placed(shape: &Shape, from: Rect, to: Rect, font: f64) -> Shape {
     s
 }
 
-/// `shape` turned by `angle` (radians, clockwise) around `c` and scaled by `k` about its own center.
-fn turned(shape: &Shape, c: (f64, f64), angle: f64, k: f64) -> Shape {
+/// `shape` turned by `angle` (radians, clockwise) around `c`, brought `rho` times
+/// as far from it, and scaled by `k` about its own center.
+fn turned(shape: &Shape, c: (f64, f64), angle: f64, k: f64, rho: f64) -> Shape {
     let r = Rect::of(&shape.xfrm);
     let (cx, cy) = r.center();
-    let (dx, dy) = (cx - c.0, cy - c.1);
+    let (dx, dy) = ((cx - c.0) * rho, (cy - c.1) * rho);
     let (sin, cos) = angle.sin_cos();
     let center = (c.0 + dx * cos - dy * sin, c.1 + dx * sin + dy * cos);
     let mut s = placed(shape, r, Rect::around(center, r.w * k, r.h * k), k.min(1.0));
@@ -831,12 +832,14 @@ struct Geometry {
     n: usize,
     /// Pyramid: how far each level's top edge is inset from its bottom edge, per side.
     taper: Option<f64>,
+    /// Cycle: how much closer to the center than loaded the nodes sit, to stay inside the frame.
+    rho: f64,
 }
 
 impl Geometry {
     fn new(t: &Template, n: usize) -> Geometry {
         let m = t.units.len();
-        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n, taper: None };
+        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n, taper: None, rho: 1.0 };
         match t.arrangement {
             Arrangement::Line { vertical } => {
                 let r: Vec<_> = t.units.iter().map(|u| u.rect.axis(vertical)).collect();
@@ -891,6 +894,20 @@ impl Geometry {
                 // Growing (fewer nodes) stops at the frame; the loaded size always fits.
                 let fit = if size > 0.0 { (2.0 * (room - r) / size).max(1.0) } else { 1.0 };
                 g.along = chord.min(fit);
+                // Another count puts nodes where the loaded ring did not reach: pull them in until they fit.
+                let half = size * g.along / 2.0;
+                let reach = |room: f64, d: f64| if d.abs() > 1e-6 { room / d.abs() } else { f64::INFINITY };
+                g.rho = (0..n)
+                    .map(|j| {
+                        let a = g.angle0 + dir * 2.0 * PI * j as f64 / n as f64;
+                        let (cx, cy) = (a.cos(), a.sin());
+                        let x = if cx > 0.0 { t.w as f64 - c.0 - half } else { c.0 - half };
+                        let y = if cy > 0.0 { t.h as f64 - c.1 - half } else { c.1 - half };
+                        reach(x, cx).min(reach(y, cy)) / r
+                    })
+                    .fold(1.0, f64::min)
+                    .max(0.3);
+                let r = r * g.rho;
                 g.rects = (0..n)
                     .map(|j| {
                         let a = g.angle0 + dir * 2.0 * PI * j as f64 / n as f64;
@@ -956,7 +973,7 @@ impl Geometry {
                 // Turn it from its gap (after loaded node tt) to the new gap.
                 let old = self.angle0 + self.dir * 2.0 * PI * (tt as f64 + 0.5) / self.m as f64;
                 let new = self.angle0 + self.dir * 2.0 * PI * (j as f64 + 0.5) / self.n as f64;
-                turned(shape, self.center, new - old, self.along)
+                turned(shape, self.center, new - old, self.along, self.rho)
             }
         }
     }

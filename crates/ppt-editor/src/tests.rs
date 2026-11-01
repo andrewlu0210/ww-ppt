@@ -1547,3 +1547,35 @@ fn find_and_replace_reach_smartart_nodes() {
     });
     assert!(saved.flatten().any(|r| r.text.contains("替換")));
 }
+
+#[test]
+fn inserting_a_smartart_selects_it_and_undoes() {
+    let mut eng = engine();
+    let deck = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&deck).unwrap());
+    let shapes = e.pres.slides[0].shapes.len();
+    let package = e.pres.package.clone();
+    for kind in ppt_ooxml::smartart_kinds() {
+        assert!(e.insert_smartart(&mut eng, kind), "{kind}");
+        let id = *e.selection.last().unwrap();
+        let info = e.diagram_info().expect("selected SmartArt has a text pane");
+        assert!(info.restructure && info.rows.len() >= 3, "{kind}");
+        assert!(matches!(&e.pres.shape(e.slide, id).unwrap().kind, ShapeKind::Diagram { data: Some(_), .. }));
+    }
+    assert!(!e.insert_smartart(&mut eng, "noSuchLayout"));
+    assert_eq!(e.pres.slides[0].shapes.len(), shapes + ppt_ooxml::smartart_kinds().len());
+    // Undo takes the last one away and brings back the deck's package of before it.
+    let n = ppt_ooxml::smartart_kinds().len();
+    for _ in 0..n {
+        assert!(e.undo(&mut eng));
+    }
+    assert_eq!(e.pres.slides[0].shapes.len(), shapes);
+    assert!(std::sync::Arc::ptr_eq(e.pres.package.as_ref().unwrap(), package.as_ref().unwrap()));
+    // Redo puts them back, with their parts: the deck saves with six SmartArts.
+    for _ in 0..n {
+        assert!(e.redo(&mut eng));
+    }
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    let back = ppt_ooxml::parse_pptx(&saved).unwrap();
+    assert_eq!(back.slides[0].shapes.iter().filter(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(_), .. })).count(), n);
+}

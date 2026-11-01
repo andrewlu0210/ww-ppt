@@ -19,6 +19,7 @@ export type Command =
   | { kind: "shape"; preset: string }
   | { kind: "picture" }
   | { kind: "insertTable"; rows: number; cols: number }
+  | { kind: "insertSmartArt"; layout: string }
   | { kind: "group"; on: boolean }
   | { kind: "link"; url: string }
   | { kind: "tableMerge" }

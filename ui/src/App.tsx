@@ -1006,6 +1006,9 @@ export function App() {
         case "insertTable":
           engine.insertTable(c.rows, c.cols);
           break;
+        case "insertSmartArt":
+          engine.insertSmartArt(c.layout);
+          break;
         case "table":
           engine.tableCommand(c.command);
           break;

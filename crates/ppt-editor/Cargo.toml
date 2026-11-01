@@ -9,7 +9,7 @@ ppt-model.workspace = true
 ppt-text.workspace = true
 parley.workspace = true
 ppt-geometry.workspace = true
+ppt-ooxml.workspace = true
 
 [dev-dependencies]
-ppt-ooxml.workspace = true
 zip.workspace = true

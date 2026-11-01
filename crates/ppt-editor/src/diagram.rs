@@ -163,6 +163,31 @@ impl Editor {
         self.edit_diagram_of(engine, id, None, |d| d.set_text(row, text).then_some(())).is_some()
     }
 
+    /// Adds a new SmartArt of layout `kind` (see `ppt_ooxml::smartart_kinds`) to
+    /// the current slide, centered, and selects it.
+    pub fn insert_smartart(&mut self, engine: &mut TextEngine, kind: &str) -> bool {
+        self.end_text_edit(engine);
+        if self.pres.slides.is_empty() {
+            return false;
+        }
+        let l = ppt_model::lang();
+        let labels = ppt_ooxml::Labels { root: l.pick("標題", "标题", "Title"), top: l.pick("項目 {}", "项目 {}", "Item {}"), child: l.pick("子項目 {}", "子项目 {}", "Sub-item {}") };
+        let Ok((mut shape, package)) = ppt_ooxml::new_smartart(&self.pres, kind, (self.pres.slide_width, self.pres.slide_height), &labels) else { return false };
+        let before = self.snapshot();
+        let id = self.pres.alloc_id();
+        shape.id = id;
+        let data = data(&shape.kind).map(|d| d.as_ref().clone());
+        self.pres.package = Some(package);
+        self.pres.slides[self.slide].shapes.push(shape);
+        // The new texts may not fit their shapes as the starter's did.
+        if let Some(d) = data {
+            self.store_diagram(engine, self.slide, id, d);
+        }
+        self.selection = vec![id];
+        self.push_undo(before);
+        true
+    }
+
     /// Starts editing, on the canvas, the text of the node drawn at slide point
     /// (`x`, `y`) in SmartArt `id`. False when that text cannot be edited in place
     /// (it shows more than the node's own text, or the frame is turned or stretched).

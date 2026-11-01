@@ -383,3 +383,86 @@ fn pyramid_levels_follow_the_count() {
     let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
     check_pyramid(shapes, 4);
 }
+
+/// A deck that is in the repository, with a new SmartArt of `kind` added to its first slide.
+fn with_new_smartart(kind: &str) -> Presentation {
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap();
+    let mut pres = parse_pptx(&bytes).unwrap();
+    let labels = ppt_ooxml::Labels { root: "標題", top: "項目 {}", child: "子項目 {}" };
+    let (mut shape, package) = ppt_ooxml::new_smartart(&pres, kind, (pres.slide_width, pres.slide_height), &labels).unwrap();
+    shape.id = pres.alloc_id();
+    pres.package = Some(package);
+    pres.slides[0].shapes.push(shape);
+    pres
+}
+
+fn new_diagram<'a>(pres: &'a Presentation, kind: &str) -> (&'a ppt_model::Shape, &'a Diagram) {
+    pres.slides[0]
+        .shapes
+        .iter()
+        .find_map(|s| match &s.kind {
+            ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == kind => Some((s, d.as_ref())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a {kind} SmartArt"))
+}
+
+#[test]
+fn new_smartarts_of_every_layout_save_and_reopen() {
+    for kind in ppt_ooxml::smartart_kinds() {
+        let pres = with_new_smartart(kind);
+        let (shape, d) = new_diagram(&pres, kind);
+        let ShapeKind::Diagram { shapes, w, h, .. } = &shape.kind else { panic!() };
+        assert!(d.can_restructure(), "{kind}");
+        let rows = texts(d);
+        assert!(rows.len() >= 3, "{kind}: {rows:?}");
+        assert!(rows.iter().all(|r| r.trim().starts_with("項目") || r.trim().starts_with("子項目") || r.trim().starts_with("標題")), "{kind}: {rows:?}");
+        // Drawn in its own frame, which is on the slide.
+        assert_eq!((*w, *h), (shape.xfrm.w, shape.xfrm.h));
+        assert!(shapes.iter().any(|s| s.text.as_ref().is_some_and(|t| !t.is_empty())), "{kind}");
+        assert!(shapes.iter().all(|s| s.xfrm.x >= -2 && s.xfrm.y >= -2 && s.xfrm.x + s.xfrm.w <= *w + 2 && s.xfrm.y + s.xfrm.h <= *h + 2), "{kind}: inside its frame");
+        assert!(shape.xfrm.x >= 0 && shape.xfrm.x + shape.xfrm.w <= pres.slide_width && shape.xfrm.y >= 0 && shape.xfrm.y + shape.xfrm.h <= pres.slide_height, "{kind}: on the slide");
+
+        // Saved, it is a real SmartArt: five parts, related and typed.
+        let saved = save_pptx(&pres).unwrap();
+        let zip = zip::ZipArchive::new(Cursor::new(saved.as_slice())).unwrap();
+        let names: Vec<String> = zip.file_names().filter_map(Result::ok).map(|n| n.into_owned()).collect();
+        for p in ["data", "layout", "quickStyle", "colors", "drawing"] {
+            assert!(names.iter().any(|n| n.starts_with(&format!("ppt/diagrams/{p}")) && n.ends_with(".xml")), "{kind}: {p}");
+        }
+        let types = part(&saved, "[Content_Types].xml");
+        assert!(types.contains("diagramData+xml") && types.contains("diagramLayout+xml") && types.contains("diagramStyle+xml") && types.contains("diagramColors+xml") && types.contains("diagramDrawing+xml"), "{kind}");
+        drop(zip);
+        let back = parse_pptx(&saved).unwrap();
+        let (_, d2) = new_diagram(&back, kind);
+        assert_eq!(texts(d2), rows, "{kind}");
+
+        // And it edits like any other: add a node, save, reopen.
+        let mut pres = back;
+        let i = pres.slides[0].shapes.iter().position(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == kind)).unwrap();
+        edit(&mut pres, 0, i, |d| {
+            let r = d.insert(0, Insert::Child).or_else(|| d.insert(0, Insert::After)).unwrap();
+            d.set_text(r, "新增");
+        });
+        let again = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
+        let (_, d3) = new_diagram(&again, kind);
+        assert_eq!(d3.rows().len(), rows.len() + 1, "{kind}");
+        assert!(texts(d3).iter().any(|r| r.trim() == "新增"), "{kind}");
+    }
+}
+
+#[test]
+fn two_new_smartarts_get_parts_of_their_own() {
+    let mut pres = with_new_smartart("vList2");
+    let labels = ppt_ooxml::Labels { root: "標題", top: "項目 {}", child: "子項目 {}" };
+    let (mut shape, package) = ppt_ooxml::new_smartart(&pres, "vList2", (pres.slide_width, pres.slide_height), &labels).unwrap();
+    shape.id = pres.alloc_id();
+    pres.package = Some(package);
+    pres.slides[0].shapes.push(shape);
+    let saved = save_pptx(&pres).unwrap();
+    let zip = zip::ZipArchive::new(Cursor::new(saved.as_slice())).unwrap();
+    let data: Vec<String> = zip.file_names().filter_map(Result::ok).map(|n| n.into_owned()).filter(|n| n.starts_with("ppt/diagrams/data")).collect();
+    assert_eq!(data.len(), 2, "{data:?}");
+    let back = parse_pptx(&saved).unwrap();
+    assert_eq!(back.slides[0].shapes.iter().filter(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(_), .. })).count(), 2);
+}
