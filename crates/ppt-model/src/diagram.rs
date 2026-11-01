@@ -632,6 +632,12 @@ impl Template {
         })
     }
 
+    /// The loaded nodes differ in color (each has its own), so new nodes should too.
+    fn colorful(&self) -> bool {
+        let fill = |u: &Unit| u.shapes.first().map(|&i| self.shapes[i].fill.clone());
+        self.units.len() >= 2 && self.units.windows(2).any(|w| fill(&w[0]) != fill(&w[1]))
+    }
+
     fn links_of(&self, id: &str) -> Links {
         self.links.get(id).cloned().unwrap_or_else(|| Links { cxn: derived_id(id, "cxn"), par_trans: derived_id(id, "parTrans"), sib_trans: derived_id(id, "sibTrans") })
     }
@@ -810,9 +816,16 @@ impl Diagram {
             let tu = template_index(j, n, m);
             let (unit_pres, trans_pres) = t.plan(&node.id, j, n);
             let ids: HashMap<usize, &String> = unit_pres.iter().chain(&trans_pres).map(|(id, p)| (*p, id)).collect();
-            for &i in &t.units[tu].shapes {
+            for (pos, &i) in t.units[tu].shapes.iter().enumerate() {
                 let p = t.shape_pres[i];
                 let mut s = geometry.unit_shape(t, i, tu, j);
+                // PowerPoint colors nodes by position, round and round: node j takes the look of loaded node j (mod their count).
+                if t.colorful()
+                    && let Some(&from) = t.units[j % m].shapes.get(pos)
+                    && t.units[j % m].shapes.len() == t.units[tu].shapes.len()
+                {
+                    s.fill = t.shapes[from].fill.clone();
+                }
                 let (own, desc) = t.shows(p);
                 if own || desc {
                     let old = shown(&t.nodes[tu], own, desc);

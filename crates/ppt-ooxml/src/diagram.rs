@@ -1056,6 +1056,12 @@ pub(crate) fn drawing_xml(d: &Diagram, shapes: &[Shape], sx: f64, sy: f64) -> St
         if let Some(x) = sp.descendants().find(|n| n.tag_name().name() == "xfrm" && n.parent().is_some_and(|p| p.tag_name().name() == "spPr")) {
             edits.push((x.range(), xfrm_xml(qname(src, x), &new)));
         }
+        // A node that takes another's color (nodes are colored by position).
+        if shape.fill != tpl.fill
+            && let Some(f) = sp.descendants().find(|n| n.is_element() && n.parent().is_some_and(|p| p.tag_name().name() == "spPr") && matches!(n.tag_name().name(), "noFill" | "solidFill" | "gradFill" | "blipFill" | "pattFill" | "grpFill"))
+        {
+            edits.push((f.range(), crate::writer::fill_xml(&shape.fill)));
+        }
         // Connectors are redrawn between their boxes; a pyramid's levels change slant.
         if shape.geometry != tpl.geometry
             && let Some(geom) = sp.descendants().find(|n| matches!(n.tag_name().name(), "custGeom" | "prstGeom") && n.parent().is_some_and(|p| p.tag_name().name() == "spPr"))

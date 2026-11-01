@@ -154,7 +154,7 @@ fn src_rect_xml(crop: &Crop) -> String {
     format!(r#"<a:srcRect l="{}" t="{}" r="{}" b="{}"/>"#, v(crop.left), v(crop.top), v(crop.right), v(crop.bottom))
 }
 
-fn fill_xml(fill: &Option<Paint>) -> String {
+pub(crate) fn fill_xml(fill: &Option<Paint>) -> String {
     match fill {
         Some(Paint::Solid(c)) => format!("<a:solidFill>{}</a:solidFill>", color_xml(*c)),
         Some(Paint::Gradient(g)) => {
