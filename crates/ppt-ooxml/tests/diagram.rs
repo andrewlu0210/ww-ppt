@@ -655,3 +655,70 @@ fn continuous_cycle_respaces_nodes_and_its_arrow() {
     let saved = save_pptx(&pres).unwrap();
     check_pres_data(&saved, si, 6, "cycle3", "ppt/diagrams/data8.xml", "node", "sibTrans", 1);
 }
+
+fn cycle5() -> (Presentation, usize, usize) {
+    let pres = deck("test13.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "cycle5").expect("a block cycle");
+    (pres, si, i)
+}
+
+/// (start, end) of an arc shape's path in the drawing's coordinates.
+fn arc_ends(s: &ppt_model::Shape) -> ((f64, f64), (f64, f64)) {
+    let ppt_model::Geometry::Custom(paths) = &s.geometry else { panic!("an arc") };
+    let cmds = &paths[0].cmds;
+    let ppt_model::PathCmd::MoveTo(x0, y0) = cmds[0] else { panic!() };
+    let ppt_model::PathCmd::CubicTo(.., x1, y1) = *cmds.last().unwrap() else { panic!() };
+    let scale = if paths[0].w > 0.0 { s.xfrm.w as f64 / paths[0].w } else { 1.0 };
+    ((s.xfrm.x as f64 + x0 * scale, s.xfrm.y as f64 + y0 * scale), (s.xfrm.x as f64 + x1 * scale, s.xfrm.y as f64 + y1 * scale))
+}
+
+#[test]
+fn block_cycle_gets_an_arc_between_each_pair_of_nodes() {
+    let (mut pres, si, i) = cycle5();
+    let ShapeKind::Diagram { data: Some(d), shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.arrangement(), Arrangement::Cycle);
+    assert_eq!(shapes.len(), 5 + 5);
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(4, Insert::After).unwrap();
+        d.set_text(r, "新階段");
+        let r = d.insert(0, Insert::After).unwrap();
+        d.set_text(r, "又一個");
+    });
+    let ShapeKind::Diagram { data: Some(d), shapes, w, h } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(d.rows().len(), 7);
+    assert_eq!(shapes.len(), 7 + 7);
+    let nodes: Vec<&ppt_model::Shape> = shapes.iter().filter(|s| s.text.is_some()).collect();
+    let arcs: Vec<&ppt_model::Shape> = shapes.iter().filter(|s| s.text.is_none()).collect();
+    let center = |s: &ppt_model::Shape| (s.xfrm.x as f64 + s.xfrm.w as f64 / 2.0, s.xfrm.y as f64 + s.xfrm.h as f64 / 2.0);
+    let c = (nodes.iter().map(|s| center(s).0).sum::<f64>() / 7.0, nodes.iter().map(|s| center(s).1).sum::<f64>() / 7.0);
+    let radius = ((center(nodes[0]).0 - c.0).powi(2) + (center(nodes[0]).1 - c.1).powi(2)).sqrt();
+    let angle = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0).to_degrees().rem_euclid(360.0);
+    for (k, arc) in arcs.iter().enumerate() {
+        let (s, e) = arc_ends(arc);
+        // On the ring, going clockwise from just after node k to just before the next one.
+        for p in [s, e] {
+            let dist = ((p.0 - c.0).powi(2) + (p.1 - c.1).powi(2)).sqrt();
+            assert!((dist - radius).abs() <= radius * 0.01, "arc {k} off the ring: {dist} vs {radius}");
+        }
+        let from = angle(center(nodes[k]));
+        let (a, b) = ((angle(s) - from).rem_euclid(360.0), (angle(e) - from).rem_euclid(360.0));
+        let spacing = 360.0 / 7.0;
+        assert!(a > 0.0 && a < b && b < spacing, "arc {k} runs {a:.1}..{b:.1} of the {spacing:.1} spacing");
+    }
+    assert!(shapes.iter().all(|s| s.xfrm.x >= -2 && s.xfrm.y >= -2 && s.xfrm.x + s.xfrm.w <= *w + 2 && s.xfrm.y + s.xfrm.h <= *h + 2));
+    let saved = save_pptx(&pres).unwrap();
+    check_pres_data(&saved, si, 7, "cycle5", "ppt/diagrams/data4.xml", "node", "sibTrans", 7);
+    let back = parse_pptx(&saved).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "cycle5")).unwrap().kind else { panic!() };
+    assert_eq!(texts(d2), texts(d));
+    assert_eq!(s2.len(), shapes.len());
+    assert_eq!(d2.arrangement(), Arrangement::Cycle);
+    // And fewer nodes: still one arc each.
+    edit(&mut pres, si, i, |d| {
+        d.delete(0).unwrap();
+        d.delete(0).unwrap();
+        d.delete(0).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert_eq!(shapes.len(), 4 + 4);
+}

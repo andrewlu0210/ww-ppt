@@ -113,6 +113,7 @@ export const en: Messages = {
   "smartArt.hList1": "Horizontal Bullet List",
   "smartArt.cycle2": "Basic Cycle",
   "smartArt.cycle3": "Continuous Cycle",
+  "smartArt.cycle5": "Block Cycle",
   "smartArt.pyramid1": "Basic Pyramid",
   "smartArt.orgChart1": "Organization Chart",
   "smartArt.hierarchy1": "Hierarchy",

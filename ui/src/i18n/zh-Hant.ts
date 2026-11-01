@@ -115,6 +115,7 @@ export const zhHant = {
   "smartArt.hList1": "水平項目符號清單",
   "smartArt.cycle2": "基本循環",
   "smartArt.cycle3": "連續循環",
+  "smartArt.cycle5": "區塊循環",
   "smartArt.pyramid1": "基本金字塔圖",
   "smartArt.orgChart1": "組織圖",
   "smartArt.hierarchy1": "階層結構",

@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::sync::Arc;
 
-use crate::{Emu, Paragraph, Run, Shape, TextBody, Xfrm};
+use crate::{Emu, Paragraph, PathCmd, Run, Shape, TextBody, Xfrm};
 
 mod tree;
 
@@ -84,6 +84,9 @@ pub struct Template {
     /// Cycle: one arrow around the whole ring of nodes (shape index), and where its tail and
     /// tip sit after the first node, in node spacings (`cycle3`).
     ring: Option<(usize, f64, f64)>,
+    /// Cycle: an arc along the ring from each node to the next (`cycle5`), and how far it
+    /// stops short of each node, along the ring (EMU).
+    arcs: Option<f64>,
     /// What the drawing says about an org chart's layout.
     tree: Option<tree::TreeTpl>,
     /// The original parts, for saving.
@@ -187,6 +190,42 @@ impl Rect {
     fn from_axis(vertical: bool, a: f64, al: f64, c: f64, cl: f64) -> Rect {
         if vertical { Rect { x: c, y: a, w: cl, h: al } } else { Rect { x: a, y: c, w: al, h: cl } }
     }
+}
+
+/// The angle at which the circle (center `c`, radius `r`) leaves `rect` going on from
+/// `from` (an angle inside it) in direction `dir` (1 clockwise, -1 the other way).
+fn leave_angle(rect: Rect, c: (f64, f64), r: f64, from: f64, dir: f64) -> f64 {
+    let inside = |a: f64| {
+        let (x, y) = (c.0 + r * a.cos(), c.1 + r * a.sin());
+        x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h
+    };
+    let step = 0.002;
+    let mut a = from;
+    for _ in 0..(PI / step) as usize {
+        if !inside(a + dir * step) {
+            break;
+        }
+        a += dir * step;
+    }
+    a
+}
+
+/// Commands of the arc of radius `r` around `c` from angle `from` (radians, clockwise) sweeping `by`,
+/// as a move and cubic segments.
+fn arc_path(c: (f64, f64), r: f64, from: f64, by: f64) -> Vec<PathCmd> {
+    let segments = (by.abs() / (PI / 2.0)).ceil().max(1.0) as usize;
+    let step = by / segments as f64;
+    let point = |a: f64| (c.0 + r * a.cos(), c.1 + r * a.sin());
+    let tangent = |a: f64| (-a.sin(), a.cos());
+    let k = 4.0 / 3.0 * (step / 4.0).tan();
+    let start = point(from);
+    let mut cmds = vec![PathCmd::MoveTo(start.0, start.1)];
+    for s in 0..segments {
+        let (a, b) = (from + s as f64 * step, from + (s + 1) as f64 * step);
+        let (p0, p3, ta, tb) = (point(a), point(b), tangent(a), tangent(b));
+        cmds.push(PathCmd::CubicTo(p0.0 + k * r * ta.0, p0.1 + k * r * ta.1, p3.0 - k * r * tb.0, p3.1 - k * r * tb.1, p3.0, p3.1));
+    }
+    cmds
 }
 
 /// A GUID-shaped id derived from two strings (FNV-1a), so the writer and the
@@ -358,7 +397,7 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, ring: None, arcs: None, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
@@ -410,8 +449,10 @@ impl Template {
             return;
         }
         let ring = self.find_ring();
-        self.arrangement = if self.is_cycle(ring.map(|r| r.0)) {
+        let arcs = self.find_arcs();
+        self.arrangement = if self.is_cycle(ring.map(|r| r.0), arcs.is_some()) {
             self.ring = ring;
+            self.arcs = arcs;
             Arrangement::Cycle
         } else if let Some(vertical) = self.line_axis() {
             Arrangement::Line { vertical }
@@ -488,10 +529,55 @@ impl Template {
         Some((i, (tail - first).rem_euclid(360.0) / step, ((tip - first + 180.0).rem_euclid(360.0) - 180.0) / step))
     }
 
-    fn is_cycle(&self, ring: Option<usize>) -> bool {
+    /// Arcs along the ring, one from each node to the next, each ending short of the nodes:
+    /// how short, along the ring.
+    fn find_arcs(&self) -> Option<f64> {
+        let m = self.units.len();
+        let Circle { center: c, radius: r, dir, .. } = self.cycle_geometry()?;
+        if dir < 0.0 || self.units.iter().any(|u| u.trans.len() != 1 || u.shapes.len() != 1) {
+            return None;
+        }
+        let arc = |u: &Unit| -> Option<((f64, f64), (f64, f64))> {
+            let s = &self.shapes[u.trans[0]];
+            let crate::Geometry::Custom(paths) = &s.geometry else { return None };
+            let [path] = &paths[..] else { return None };
+            if s.xfrm.rot != 0.0 || path.w < 0.0 || path.h < 0.0 {
+                return None;
+            }
+            // Path coordinates are in EMU when the path has no size of its own.
+            let (sx, sy) = (if path.w > 0.0 { s.xfrm.w as f64 / path.w } else { 1.0 }, if path.h > 0.0 { s.xfrm.h as f64 / path.h } else { 1.0 });
+            let (PathCmd::MoveTo(x0, y0), Some(end)) = (path.cmds.first()?, path.cmds.last()) else { return None };
+            let (x1, y1) = match end {
+                PathCmd::CubicTo(.., x, y) => (*x, *y),
+                _ => return None,
+            };
+            let o = (s.xfrm.x as f64, s.xfrm.y as f64);
+            Some(((o.0 + x0 * sx, o.1 + y0 * sy), (o.0 + x1 * sx, o.1 + y1 * sy)))
+        };
+        let angle = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+        let ahead = |from: f64, to: f64| (to - from).rem_euclid(2.0 * PI);
+        let mut margins = Vec::new();
+        for (j, u) in self.units.iter().enumerate() {
+            let ((s, e), next) = (arc(u)?, &self.units[(j + 1) % m]);
+            // The arc has to sit on the ring through the node centers.
+            let on_ring = |p: (f64, f64)| (((p.0 - c.0).powi(2) + (p.1 - c.1).powi(2)).sqrt() - r).abs() <= r * 0.03;
+            if !on_ring(s) || !on_ring(e) {
+                return None;
+            }
+            let (here, there) = (u.rect.center(), next.rect.center());
+            let leave = leave_angle(u.rect, c, r, angle(here), 1.0);
+            let enter = leave_angle(next.rect, c, r, angle(there), -1.0);
+            margins.push(ahead(leave, angle(s)) * r);
+            margins.push(ahead(angle(e), enter) * r);
+        }
+        let mean = margins.iter().sum::<f64>() / margins.len() as f64;
+        (margins.iter().all(|&g| g >= -r * 0.02 && g <= r * 0.5) && mean >= 0.0).then_some(mean)
+    }
+
+    fn is_cycle(&self, ring: Option<usize>, arcs: bool) -> bool {
         let Some(Circle { radius: r, .. }) = self.cycle_geometry() else { return false };
         // Connectors between nodes must be small (not arcs around the whole circle).
-        self.units.iter().flat_map(|u| &u.trans).filter(|&&i| Some(i) != ring).all(|&i| {
+        self.units.iter().flat_map(|u| &u.trans).filter(|&&i| Some(i) != ring && !arcs).all(|&i| {
             let x = &self.shapes[i].xfrm;
             (x.w.max(x.h) as f64) < r
         })
@@ -860,12 +946,14 @@ struct Geometry {
     rho: f64,
     /// Cycle: the ring arrow's shape and offsets (see [`Template::ring`]).
     ring: Option<(usize, f64, f64)>,
+    /// Cycle: how far arcs between nodes stop short of them, along the ring.
+    arcs: Option<f64>,
 }
 
 impl Geometry {
     fn new(t: &Template, n: usize) -> Geometry {
         let m = t.units.len();
-        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n, taper: None, rho: 1.0, ring: t.ring };
+        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n, taper: None, rho: 1.0, ring: t.ring, arcs: t.arcs };
         match t.arrangement {
             Arrangement::Line { vertical } => {
                 let r: Vec<_> = t.units.iter().map(|u| u.rect.axis(vertical)).collect();
@@ -982,6 +1070,30 @@ impl Geometry {
         }
     }
 
+    /// The arc along the ring from new node `j` to the next one (`shape` is any of the loaded arcs).
+    fn arc_between(&self, t: &Template, shape: &Shape, j: usize) -> Shape {
+        let margin = self.arcs.expect("arcs");
+        let (c, r) = (self.center, self.rects.first().map_or(0.0, |p| ((p.center().0 - self.center.0).powi(2) + (p.center().1 - self.center.1).powi(2)).sqrt()));
+        let node = |k: usize| {
+            let tu = template_index(k % self.n, self.n, self.m);
+            let u = t.units[tu].rect;
+            let center = self.rects[k % self.n].center();
+            Rect::around(center, u.w * self.along, u.h * self.along)
+        };
+        // Angles keep counting past the last node, so the last arc runs on to the first.
+        let angle = |k: usize| self.angle0 + self.dir * 2.0 * PI * k as f64 / self.n as f64;
+        let a = leave_angle(node(j), c, r, angle(j), 1.0) + margin * self.rho / r;
+        let b = leave_angle(node(j + 1), c, r, angle(j + 1), -1.0) - margin * self.rho / r;
+        let sweep = b - a;
+        let mut s = shape.clone();
+        // A square around the ring, with the path in its own coordinates.
+        let side = 2.0 * r;
+        s.xfrm = Xfrm { x: (c.0 - r).round() as Emu, y: (c.1 - r).round() as Emu, w: side.round() as Emu, h: side.round() as Emu, ..shape.xfrm };
+        let cmds = if sweep > 0.0 { arc_path((r, r), r, a, sweep) } else { Vec::new() };
+        s.geometry = crate::Geometry::Custom(vec![crate::CustomPath { w: side.round(), h: side.round(), cmds, fill: false, stroke: true }]);
+        s
+    }
+
     /// Transition shape `i` (after loaded node `tt`) for the gap after new node `j`.
     fn trans_shape(&self, t: &Template, i: usize, tt: usize, j: usize) -> Shape {
         let shape = &t.shapes[i];
@@ -1000,6 +1112,7 @@ impl Geometry {
                 let to = Rect::from_axis(vertical, center_a - ral * k / 2.0, ral * k, center_c - rcl * k / 2.0, rcl * k);
                 placed(shape, r, to, self.font())
             }
+            _ if self.arcs.is_some() => self.arc_between(t, shape, j),
             _ if self.ring.is_some_and(|r| r.0 == i) => {
                 // The arrow around the ring starts and ends next to the first node, as far from it as a share of the spacing.
                 let (_, tail, tip) = self.ring.expect("checked");
