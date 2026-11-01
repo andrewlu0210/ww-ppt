@@ -79,6 +79,8 @@ pub struct Template {
     /// Children are shown as paragraphs of their parent's shapes, so they can
     /// be added, removed and moved between levels.
     pub nests: bool,
+    /// Levels stacked into one pyramid: each a trapezoid whose top edge is the one above's bottom edge.
+    pub tapered: bool,
     /// What the drawing says about an org chart's layout.
     tree: Option<tree::TreeTpl>,
     /// The original parts, for saving.
@@ -352,7 +354,7 @@ impl Template {
     /// Builds a template, working out how its drawing arranges the nodes.
     #[allow(clippy::too_many_arguments)]
     pub fn new(layout: String, nodes: Vec<Node>, pres: Vec<PresPoint>, links: HashMap<String, Links>, shapes: Vec<Shape>, shape_pres: Vec<usize>, w: Emu, h: Emu, data_xml: Arc<str>, drawing_xml: Arc<str>) -> Template {
-        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
+        let mut t = Template { layout, nodes, pres, links, shapes, shape_pres, w, h, arrangement: Arrangement::Fixed, nests: false, tapered: false, tree: None, data_xml, drawing_xml, units: Vec::new(), fixed_before: Vec::new(), fixed_after: Vec::new() };
         t.analyze();
         t
     }
@@ -410,6 +412,7 @@ impl Template {
         } else {
             Arrangement::Fixed
         };
+        self.tapered = self.arrangement == (Arrangement::Line { vertical: true }) && self.is_pyramid();
     }
 
     /// The axis the units are evenly spaced along, if they are.
@@ -427,6 +430,17 @@ impl Template {
         let even = mean > 0.0 && steps.iter().all(|s| (s - mean).abs() <= mean * 0.1);
         let aligned = rects.iter().all(|r| ((r.2 + r.3 / 2.0) - (rects[0].2 + rects[0].3 / 2.0)).abs() <= cross * 0.1);
         (even && aligned).then_some(vertical)
+    }
+
+    /// One trapezoid per node, each as wide at its bottom as the level's number
+    /// times the top one's, centered on one axis.
+    fn is_pyramid(&self) -> bool {
+        let one: Option<Vec<&Shape>> = self.units.iter().map(|u| (u.shapes.len() == 1 && u.trans.is_empty()).then(|| &self.shapes[u.shapes[0]])).collect();
+        let Some(shapes) = one else { return false };
+        let trapezoid = |s: &&Shape| matches!(&s.geometry, crate::Geometry::Preset { name, .. } if name == "trapezoid");
+        let w0 = shapes[0].xfrm.w as f64;
+        let cx = Rect::of(&shapes[0].xfrm).center().0;
+        shapes.iter().all(trapezoid) && w0 > 0.0 && shapes.iter().enumerate().all(|(j, s)| (s.xfrm.w as f64 - w0 * (j + 1) as f64).abs() <= w0 * 0.03 && (Rect::of(&s.xfrm).center().0 - cx).abs() <= w0 * 0.03)
     }
 
     fn cycle_geometry(&self) -> Option<Circle> {
@@ -804,12 +818,14 @@ struct Geometry {
     dir: f64,
     m: usize,
     n: usize,
+    /// Pyramid: how far each level's top edge is inset from its bottom edge, per side.
+    taper: Option<f64>,
 }
 
 impl Geometry {
     fn new(t: &Template, n: usize) -> Geometry {
         let m = t.units.len();
-        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n };
+        let mut g = Geometry { kind: t.arrangement, rects: Vec::new(), along: 1.0, across: 1.0, cross0: (0.0, 0.0), center: (0.0, 0.0), angle0: 0.0, dir: 1.0, m, n, taper: None };
         match t.arrangement {
             Arrangement::Line { vertical } => {
                 let r: Vec<_> = t.units.iter().map(|u| u.rect.axis(vertical)).collect();
@@ -819,6 +835,22 @@ impl Geometry {
                 let span = r[m - 1].0 + r[m - 1].1 - start;
                 let c0 = r.iter().map(|r| r.2).fold(f64::MAX, f64::min);
                 let extent = r.iter().map(|r| r.2 + r.3).fold(f64::MIN, f64::max) - c0;
+                if t.tapered {
+                    // Levels share the height and widen by one step each.
+                    let (top, bottom) = (r[0].0, r[m - 1].0 + r[m - 1].1);
+                    let (cx, width) = (t.units[m - 1].rect.center().0, t.units[m - 1].rect.w);
+                    let level = (bottom - top) / n as f64;
+                    g.along = (m as f64 / n as f64).min(1.0);
+                    g.across = g.along;
+                    g.rects = (0..n)
+                        .map(|j| {
+                            let w = width * (j + 1) as f64 / n as f64;
+                            Rect { x: cx - w / 2.0, y: top + j as f64 * level, w, h: level }
+                        })
+                        .collect();
+                    g.taper = Some(width / (2.0 * n as f64));
+                    return g;
+                }
                 let frame = if vertical { t.w } else { t.h } as f64;
                 let total = n as f64 * size + (n as f64 - 1.0) * gap;
                 let fit = if total > 0.0 { span / total } else { 1.0 };
@@ -870,7 +902,19 @@ impl Geometry {
     fn unit_shape(&self, t: &Template, i: usize, tu: usize, j: usize) -> Shape {
         let from = t.units[tu].rect;
         match self.kind {
-            Arrangement::Line { .. } => placed(&t.shapes[i], from, self.rects[j], self.font()),
+            Arrangement::Line { .. } => {
+                let mut s = placed(&t.shapes[i], from, self.rects[j], self.font());
+                if let (Some(inset), crate::Geometry::Preset { adjust, .. }) = (self.taper, &mut s.geometry) {
+                    // Trapezoid `adj` is the inset as a share of the shorter side.
+                    let r = self.rects[j];
+                    let value = inset / r.w.min(r.h).max(1.0) * 100_000.0;
+                    match adjust.iter_mut().find(|(k, _)| k == "adj") {
+                        Some(a) => a.1 = value,
+                        None => adjust.push(("adj".into(), value)),
+                    }
+                }
+                s
+            }
             _ => {
                 let k = self.along;
                 let to = Rect::around(self.rects[j].center(), from.w * k, from.h * k);
@@ -1155,6 +1199,43 @@ mod tests {
         // The first level cannot be left: the root stays alone.
         assert!(!d.shift(1, false));
         assert!(d.delete(0).is_none());
+    }
+
+
+    /// Three stacked trapezoids, each one step wider than the one above (like `pyramid1`).
+    fn pyramid() -> Arc<Template> {
+        let nodes = vec![node("a", "A", vec![]), node("b", "B", vec![]), node("c", "C", vec![])];
+        let mut links = HashMap::new();
+        let mut pres_pts = Vec::new();
+        let mut shapes = Vec::new();
+        for (k, id) in ["a", "b", "c"].iter().enumerate() {
+            links.insert(id.to_string(), Links { cxn: format!("{id}-cxn"), par_trans: format!("{id}-par"), sib_trans: format!("{id}-sib") });
+            pres_pts.push(pres(&format!("p{id}"), "level", id, &[id]));
+            let (w, h) = (100 * (k as i64 + 1), 90);
+            let mut s = text_shape(150 - w / 2, 90 * k as i64, w, h, &id.to_uppercase());
+            s.geometry = crate::Geometry::Preset { name: "trapezoid".into(), adjust: vec![("adj".into(), 50_000.0 * 100.0 / h as f64)] };
+            shapes.push(s);
+        }
+        Arc::new(Template::new("urn:x/layout/pyramid1".into(), nodes, pres_pts, links, shapes, vec![0, 1, 2], 300, 270, "".into(), "".into()))
+    }
+
+    #[test]
+    fn pyramid_levels_share_the_height() {
+        let t = pyramid();
+        assert!(t.tapered);
+        let mut d = Diagram::new(t);
+        let r = d.insert(2, Insert::After).unwrap();
+        d.set_text(r, "D");
+        let shapes = d.layout();
+        assert_eq!(shapes.len(), 4);
+        for (j, s) in shapes.iter().enumerate() {
+            let near = |a: i64, b: f64| (a as f64 - b).abs() <= 1.0;
+            assert!(near(s.xfrm.h, 67.5) && near(s.xfrm.y, 67.5 * j as f64) && near(s.xfrm.w, 75.0 * (j as f64 + 1.0)));
+            // Each level slants half a step per side.
+            let crate::Geometry::Preset { adjust, .. } = &s.geometry else { panic!() };
+            let inset = adjust[0].1 * s.xfrm.w.min(s.xfrm.h) as f64 / 100_000.0;
+            assert!((inset - 37.5).abs() < 1.0, "inset {inset}");
+        }
     }
 
 }

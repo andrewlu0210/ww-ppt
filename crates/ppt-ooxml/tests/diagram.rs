@@ -320,3 +320,66 @@ fn org_chart_levels_follow_depth() {
     let saved = save_pptx(&pres).unwrap();
     check_org_data(&saved, si, 12);
 }
+
+fn pyramid() -> (Presentation, usize, usize) {
+    let pres = deck("test9.pptx");
+    let (si, i, _) = diagrams(&pres).into_iter().find(|(.., d)| layout_name(d) == "pyramid1").expect("a pyramid");
+    (pres, si, i)
+}
+
+fn adj(s: &ppt_model::Shape) -> f64 {
+    let ppt_model::Geometry::Preset { adjust, .. } = &s.geometry else { panic!("a preset trapezoid") };
+    adjust.iter().find(|(k, _)| k == "adj").map_or(0.0, |a| a.1)
+}
+
+/// Levels share the height, widen by one step each, and each one's top edge
+/// is the bottom edge of the one above.
+fn check_pyramid(shapes: &[ppt_model::Shape], n: usize) {
+    let levels: Vec<_> = shapes.iter().filter(|s| s.text.is_some()).collect();
+    assert_eq!(levels.len(), n);
+    let step = levels[0].xfrm.w;
+    for (j, s) in levels.iter().enumerate() {
+        assert!((s.xfrm.w - step * (j as i64 + 1)).abs() <= n as i64, "level {j} is {} wide, step {step}", s.xfrm.w);
+        assert_eq!(s.xfrm.h, levels[0].xfrm.h);
+        if j > 0 {
+            assert!((s.xfrm.y - (levels[j - 1].xfrm.y + levels[j - 1].xfrm.h)).abs() <= 1);
+            // The slant: inset per side is half a step.
+            let inset = adj(s) * s.xfrm.w.min(s.xfrm.h) as f64 / 100_000.0;
+            assert!((inset - step as f64 / 2.0).abs() <= step as f64 * 0.01, "level {j} inset {inset}");
+        }
+    }
+    // The top level is a triangle.
+    let top = levels[0];
+    assert!((adj(top) * top.xfrm.w.min(top.xfrm.h) as f64 / 100_000.0 - top.xfrm.w as f64 / 2.0).abs() <= top.xfrm.w as f64 * 0.01);
+}
+
+#[test]
+fn pyramid_levels_follow_the_count() {
+    let (mut pres, si, i) = pyramid();
+    let ShapeKind::Diagram { data: Some(d), shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert!(d.template.0.tapered && d.can_restructure());
+    check_pyramid(shapes, 4);
+    edit(&mut pres, si, i, |d| {
+        let r = d.insert(3, Insert::After).unwrap();
+        d.set_text(r, "新層");
+        let r = d.insert(0, Insert::Before).unwrap();
+        d.set_text(r, "頂");
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    check_pyramid(shapes, 6);
+    // Its bottom stays as wide as it was, and inside the frame.
+    let ShapeKind::Diagram { w, h, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    assert!(shapes.iter().all(|s| s.xfrm.x >= 0 && s.xfrm.y >= 0 && s.xfrm.x + s.xfrm.w <= *w && s.xfrm.y + s.xfrm.h <= *h));
+    // Saved and reopened, still a pyramid of six.
+    let back = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
+    let ShapeKind::Diagram { data: Some(d2), shapes: s2, .. } = &back.slides[si].shapes.iter().find(|s| matches!(&s.kind, ShapeKind::Diagram { data: Some(d), .. } if layout_name(d) == "pyramid1")).unwrap().kind else { panic!() };
+    assert_eq!(d2.rows().len(), 6);
+    check_pyramid(s2, 6);
+    // And with a level removed.
+    edit(&mut pres, si, i, |d| {
+        d.delete(0).unwrap();
+        d.delete(0).unwrap();
+    });
+    let ShapeKind::Diagram { shapes, .. } = &pres.slides[si].shapes[i].kind else { panic!() };
+    check_pyramid(shapes, 4);
+}

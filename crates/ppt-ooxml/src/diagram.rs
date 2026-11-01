@@ -683,9 +683,9 @@ pub(crate) fn drawing_xml(d: &Diagram, shapes: &[Shape], sx: f64, sy: f64) -> St
         if let Some(x) = sp.descendants().find(|n| n.tag_name().name() == "xfrm" && n.parent().is_some_and(|p| p.tag_name().name() == "spPr")) {
             edits.push((x.range(), xfrm_xml(qname(src, x), &new)));
         }
-        // Connectors are redrawn between their boxes.
+        // Connectors are redrawn between their boxes; a pyramid's levels change slant.
         if shape.geometry != tpl.geometry
-            && let Some(geom) = sp.descendants().find(|n| n.tag_name().name() == "custGeom" && n.parent().is_some_and(|p| p.tag_name().name() == "spPr"))
+            && let Some(geom) = sp.descendants().find(|n| matches!(n.tag_name().name(), "custGeom" | "prstGeom") && n.parent().is_some_and(|p| p.tag_name().name() == "spPr"))
         {
             edits.push((geom.range(), crate::writer::geometry_xml(&shape.geometry)));
         }
