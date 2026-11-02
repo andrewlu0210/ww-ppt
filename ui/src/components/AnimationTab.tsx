@@ -168,7 +168,6 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             <span>{t("anim.preview")}</span>
           </button>
         </div>
-        <div className="rb-label">{t("anim.preview")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-items">
@@ -207,7 +206,6 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             </label>
           </div>
         </div>
-        <div className="rb-label">{t("anim.animation")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
@@ -253,7 +251,6 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             />
           </label>
         </div>
-        <div className="rb-label">{t("anim.timing")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
@@ -267,7 +264,6 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             {t("anim.remove")}
           </button>
         </div>
-        <div className="rb-label">{t("anim.reorder")}</div>
       </div>
       <div className="rb-group anim-list-group">
         <div className="anim-list" role="listbox" aria-label={t("anim.list")}>
@@ -286,7 +282,6 @@ export function AnimationTab({ status, run, presets }: { status: Status; run: (c
             </div>
           ))}
         </div>
-        <div className="rb-label">{t("anim.list")}</div>
       </div>
     </>
   );

@@ -103,7 +103,6 @@ export function TransitionTab({ status, run }: { status: Status; run: (c: Comman
             <span>{t("anim.preview")}</span>
           </button>
         </div>
-        <div className="rb-label">{t("anim.preview")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-items transition-gallery">
@@ -119,7 +118,6 @@ export function TransitionTab({ status, run }: { status: Status; run: (c: Comman
             </span>
           )}
         </div>
-        <div className="rb-label">{t("trans.toThisSlide")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
@@ -152,7 +150,6 @@ export function TransitionTab({ status, run }: { status: Status; run: (c: Comman
             {t("trans.applyAll")}
           </button>
         </div>
-        <div className="rb-label">{t("anim.timing")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-col">
@@ -182,7 +179,6 @@ export function TransitionTab({ status, run }: { status: Status; run: (c: Comman
             {t("trans.secondsUnit")}
           </label>
         </div>
-        <div className="rb-label">{t("trans.advance")}</div>
       </div>
     </>
   );

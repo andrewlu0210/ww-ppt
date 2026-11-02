@@ -358,7 +358,6 @@ export function DesignTab({ theme, colorSchemes, fontSchemes, slideSize, loadBac
           <ColorsMenu theme={theme} schemes={colorSchemes} run={run} />
           <FontsMenu theme={theme} schemes={fontSchemes} run={run} />
         </div>
-        <div className="rb-label">{t("design.variants")}</div>
       </div>
       <div className="rb-group">
         <div className="rb-items">
@@ -370,7 +369,6 @@ export function DesignTab({ theme, colorSchemes, fontSchemes, slideSize, loadBac
             }}
           </Popover>
         </div>
-        <div className="rb-label">{t("design.customize")}</div>
       </div>
     </>
   );
