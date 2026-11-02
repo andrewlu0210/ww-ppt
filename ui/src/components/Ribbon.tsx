@@ -80,7 +80,7 @@ const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 /** Layouts of the Insert > SmartArt menu (`ppt_ooxml::smartart_kinds`). */
 const SMARTART_LAYOUTS = ["vList2", "hList1", "lProcess2", "process1", "process2", "process3", "hProcess9", "StepDownProcess", "radial2", "chevron1", "hChevron3", "chevron2", "cycle2", "cycle3", "cycle5", "cycle8", "pyramid1", "orgChart1", "hierarchy1", "hierarchy2"] as const;
 
-function Button(props: { icon: ReactNode; label: string; onClick: () => void; disabled?: boolean; large?: boolean; active?: boolean; iconOnly?: boolean }) {
+function Button(props: { icon: ReactNode; label: string; onClick: (e: React.MouseEvent) => void; disabled?: boolean; large?: boolean; active?: boolean; iconOnly?: boolean }) {
   const cls = ["rb-btn", props.large && "large", props.active && "active", props.iconOnly && "icon-only"].filter(Boolean).join(" ");
   return (
     <button className={cls} onClick={props.onClick} disabled={props.disabled} title={props.label} aria-label={props.iconOnly ? props.label : undefined} aria-pressed={props.active} onMouseDown={keepFocus}>
@@ -107,6 +107,8 @@ interface Props {
   run: (c: Command) => void;
   /** Bumped by the ⌘K menu item to open the link panel. */
   linkRequest: number;
+  /** The format painter is waiting for a target. */
+  painter: "once" | "sticky" | null;
   tableStyles: TableStyleInfo[];
   notesOpen: boolean;
   usePresenter: boolean;
@@ -134,7 +136,7 @@ interface Props {
   appearance: Appearance;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -228,6 +230,14 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               <div className="rb-col">
                 <Button icon={icons.cut} label={t("ribbon.cut")} disabled={!status.hasSelection} onClick={() => run({ kind: "cut" })} />
                 <Button icon={icons.copy} label={t("ribbon.copy")} disabled={!status.hasSelection} onClick={() => run({ kind: "copy" })} />
+                {/* A click paints once; a double click stays on until Esc or another click. */}
+                <Button
+                  icon={icons.formatPainter}
+                  label={t("ribbon.formatPainter")}
+                  active={painter !== null}
+                  disabled={!status.hasSelection && painter === null && !status.editingText}
+                  onClick={(e) => run({ kind: "formatPainter", mode: e.detail >= 2 ? "sticky" : painter ? "off" : "once" })}
+                />
               </div>
             </Group>
             <Group label={t("group.slides")}>

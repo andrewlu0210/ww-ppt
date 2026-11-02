@@ -16,6 +16,9 @@ interface Props {
   onChange: () => void;
   /** Scroll bars `[x ratio, x position, y ratio, y position]`; a ratio of 1 hides that bar. */
   scroll?: number[];
+  /** The format painter is waiting for a target; `onPainterDone` ends it. */
+  painter?: "once" | "sticky" | null;
+  onPainterDone?: () => void;
 }
 
 const DOUBLE_CLICK_MS = 450;
@@ -26,7 +29,11 @@ const DOUBLE_CLICK_PX = 5;
  * IME input. The textarea follows the text caret so the macOS candidate window
  * appears next to the text being composed.
  */
-export function CanvasHost({ onReady, onError, onChange, scroll }: Props) {
+export function CanvasHost({ onReady, onError, onChange, scroll, painter = null, onPainterDone }: Props) {
+  const painterRef = useRef(painter);
+  painterRef.current = painter;
+  const painterDoneRef = useRef(onPainterDone);
+  painterDoneRef.current = onPainterDone;
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -163,6 +170,8 @@ export function CanvasHost({ onReady, onError, onChange, scroll }: Props) {
         dragging = false;
         const { x, y } = local(e);
         app.pointerUp(x, y, e.shiftKey, e.altKey, e.metaKey);
+        // Format painter: the click or drag just made the target; paint it.
+        if (painterRef.current && app.pasteFormat() && painterRef.current === "once") painterDoneRef.current?.();
         showGuideLabel("", 0, 0);
         changed();
       };
@@ -220,6 +229,19 @@ export function CanvasHost({ onReady, onError, onChange, scroll }: Props) {
       const onKeyDown = (e: KeyboardEvent) => {
         // Keys pressed while composing belong to the IME (e.g. Enter picks a candidate).
         if (e.isComposing || e.keyCode === 229) return;
+        if (painterRef.current && e.key === "Escape") {
+          e.preventDefault();
+          painterDoneRef.current?.();
+          return;
+        }
+        // Copy / paste format (⌘⌥C / ⌘⌥V), by physical key since ⌥ changes the character.
+        if (e.metaKey && e.altKey && (e.code === "KeyC" || e.code === "KeyV")) {
+          e.preventDefault();
+          if (e.code === "KeyC") app.copyFormat();
+          else app.pasteFormat();
+          changed();
+          return;
+        }
         if (app.keyDown(e.key, e.shiftKey, e.altKey, e.metaKey, e.ctrlKey)) {
           e.preventDefault();
           changed();
@@ -314,7 +336,7 @@ export function CanvasHost({ onReady, onError, onChange, scroll }: Props) {
   };
 
   return (
-    <div className="canvas-host" ref={containerRef}>
+    <div className={painter ? "canvas-host painting" : "canvas-host"} ref={containerRef}>
       {/* Read through the slide layer (A11yMirror) instead. */}
       <canvas ref={canvasRef} aria-hidden="true" />
       <div ref={labelRef} className="guide-label" hidden />

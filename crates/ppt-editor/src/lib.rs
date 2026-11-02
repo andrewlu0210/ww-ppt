@@ -15,6 +15,7 @@ mod footer;
 mod format;
 mod group;
 mod layout;
+mod painter;
 mod richedit;
 mod spell;
 pub mod show;
@@ -252,6 +253,8 @@ pub struct Editor {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     clipboard: Vec<Shape>,
+    /// What the format painter copied.
+    copied_format: Option<painter::CopiedFormat>,
     /// How many times the clipboard was pasted onto its source slide (for offsets).
     paste_count: i64,
     clipboard_slide: Option<usize>,
@@ -309,6 +312,7 @@ impl Editor {
             undo: Vec::new(),
             redo: Vec::new(),
             clipboard: Vec::new(),
+            copied_format: None,
             paste_count: 0,
             clipboard_slide: None,
             revision: 0,

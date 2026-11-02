@@ -70,6 +70,7 @@ export const en: Messages = {
   "group.clipboard": "Clipboard",
   "ribbon.paste": "Paste",
   "ribbon.cut": "Cut",
+  "ribbon.formatPainter": "Format Painter",
   "ribbon.copy": "Copy",
   "group.slides": "Slides",
   "ribbon.layoutMenu": "Layout ▾",

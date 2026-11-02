@@ -1614,3 +1614,49 @@ fn smartart_nodes_are_spell_checked_where_they_are_drawn() {
     let (layout, _) = e.text_geometry(&mut eng, FindPlace::Node(id, 2)).expect("live geometry");
     assert!(!crate::range_rects(&layout, 0..4).is_empty());
 }
+
+#[test]
+fn format_painter_copies_shape_and_text_format_in_one_undo_step() {
+    let (mut e, src) = editor();
+    let dst = add_rect(&mut e, 3 * IN, IN);
+    let mut eng = engine();
+    // Source: a filled shape with an outline, bold red text, centered.
+    e.selection = vec![src];
+    e.set_line_color(Some(Color::rgb(0, 0, 255)));
+    e.pres.slides[0].shapes[0].text = Some({
+        let mut b = TextBody::default();
+        b.set_plain_text("abc");
+        b
+    });
+    e.apply_text_style(&mut eng, |s| {
+        s.bold = true;
+        s.color = Color::rgb(255, 0, 0);
+    });
+    e.apply_paragraph(&mut eng, |p| p.align = Align::Center);
+    assert!(e.copy_format());
+
+    // Target: another shape with text; painting needs a target first.
+    e.pres.slides[0].shapes[1].text = Some({
+        let mut b = TextBody::default();
+        b.set_plain_text("xyz");
+        b
+    });
+    e.selection.clear();
+    assert!(!e.paste_format(&mut eng));
+    e.selection = vec![dst];
+    let undo_len = e.undo.len();
+    assert!(e.paste_format(&mut eng));
+    assert_eq!(e.undo.len(), undo_len + 1);
+    let shape = e.pres.shape(0, dst).unwrap();
+    assert!(matches!(shape.fill, Some(Paint::Solid(c)) if c == Color::BLACK));
+    assert_eq!(shape.line.map(|l| l.color), Some(Color::rgb(0, 0, 255)));
+    let text = shape.text.as_ref().unwrap();
+    assert!(text.style_at(0).bold);
+    assert_eq!(text.style_at(0).color, Color::rgb(255, 0, 0));
+    assert_eq!(text.paragraphs[0].align, Align::Center);
+
+    assert!(e.undo(&mut eng));
+    let shape = e.pres.shape(0, dst).unwrap();
+    assert!(shape.fill.is_none() && shape.line.is_none());
+    assert!(!shape.text.as_ref().unwrap().style_at(0).bold);
+}

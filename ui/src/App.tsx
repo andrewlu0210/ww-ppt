@@ -214,6 +214,8 @@ export function App() {
   // SmartArt text pane: open, the row being edited (shared with the ribbon), and focus requests.
   const [videoOpen, setVideoOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
+  // Format painter: copied a format and waiting for the target to apply it to.
+  const [painter, setPainter] = useState<"once" | "sticky" | null>(null);
   const [diagramPane, setDiagramPane] = useState(false);
   const [diagramRow, setDiagramRow] = useState(0);
   const diagramRowRef = useRef(0);
@@ -897,6 +899,11 @@ export function App() {
         setViewPrefs((p) => ({ ...p, checker: c.open ?? !p.checker }));
         return;
       }
+      if (c.kind === "formatPainter") {
+        if (c.mode === "off") setPainter(null);
+        else setPainter(engineRef.current?.copyFormat() ? c.mode : null);
+        return;
+      }
       if (c.kind === "showGrid") {
         setViewPrefs((p) => ({ ...p, grid: c.on }));
         return;
@@ -1391,7 +1398,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title={t("title.unsaved")} />}
         </span>
       </header>
-      <Ribbon status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
+      <Ribbon painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
         theme={theme}
         colorSchemes={schemes.colors}
         fontSchemes={schemes.fonts}
@@ -1441,7 +1448,7 @@ export function App() {
         />
         <section className={showing ? "editor-area showing" : "editor-area"}>
           <div className={viewPrefs.ruler && !showing ? "canvas-area with-ruler" : "canvas-area"} onContextMenu={onCanvasContextMenu}>
-            <CanvasHost onReady={onReady} onError={setError} onChange={refresh} scroll={status.scroll} />
+            <CanvasHost onReady={onReady} onError={setError} onChange={refresh} scroll={status.scroll} painter={painter} onPainterDone={() => setPainter(null)} />
             {viewPrefs.ruler && !showing && <Rulers engine={engineRef.current} slideSize={slideSize} />}
             {!showing && viewMode === "normal" && <A11yMirror engine={engineRef.current} version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}|${status.zoom}|${viewPrefs.ruler}|${viewPrefs.pane}|${notesPrefs.open}`} />}
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}

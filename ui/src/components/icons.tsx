@@ -421,6 +421,12 @@ export const icons: Record<string, ReactNode> = {
       <path d="M8.8 15.2 17 4M15.2 15.2 7 4" />
     </Svg>
   ),
+  formatPainter: (
+    <Svg>
+      <path d="M20 4l-7.5 7.5" />
+      <path d="M10.5 9.5l4 4c-.8 3.2-3.2 5-8.5 5 1.8-1.7 1.2-3.7 2.2-5.2z" />
+    </Svg>
+  ),
   copy: (
     <Svg>
       <rect x="8" y="8" width="11" height="12" rx="1" />

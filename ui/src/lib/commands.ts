@@ -77,6 +77,8 @@ export type Command =
   | { kind: "reorder"; order: "front" | "forward" | "backward" | "back" }
   | { kind: "alignShapes"; to: "left" | "center" | "right" | "top" | "middle" | "bottom" }
   | { kind: "zoom"; factor: number | "fit" }
+  /** Format painter: "once" and "sticky" copy the current format and wait for a target; "off" cancels. */
+  | { kind: "formatPainter"; mode: "once" | "sticky" | "off" }
   | { kind: "slideShow"; fromBeginning: boolean; presenter?: boolean; forceAudience?: boolean }
   | { kind: "usePresenter"; on: boolean }
   | { kind: "setTransition"; id: string; option: string; durationMs: number; onClick: boolean; afterMs: number; all: boolean }

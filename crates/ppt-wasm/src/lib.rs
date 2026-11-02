@@ -1110,6 +1110,19 @@ impl App {
     }
 
     /// Copies the selected shapes; returns how many.
+    /// Format painter: remembers the format of the current text selection or shape.
+    #[wasm_bindgen(js_name = copyFormat)]
+    pub fn copy_format(&mut self) -> bool {
+        self.editor.copy_format()
+    }
+
+    /// Format painter: applies the remembered format; false when there is no target yet.
+    #[wasm_bindgen(js_name = pasteFormat)]
+    pub fn paste_format(&mut self) -> bool {
+        let done = self.editor.paste_format(&mut self.engine);
+        self.touch(done)
+    }
+
     #[wasm_bindgen(js_name = copyShapes)]
     pub fn copy_shapes(&mut self) -> u32 {
         self.editor.copy() as u32

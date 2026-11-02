@@ -70,6 +70,7 @@ export const zhHans: Messages = {
   "group.clipboard": "剪贴板",
   "ribbon.paste": "粘贴",
   "ribbon.cut": "剪切",
+  "ribbon.formatPainter": "格式刷",
   "ribbon.copy": "复制",
   "group.slides": "幻灯片",
   "ribbon.layoutMenu": "版式 ▾",

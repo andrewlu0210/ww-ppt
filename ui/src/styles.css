@@ -2420,3 +2420,8 @@ input:focus-visible,
   left: 3px;
   right: 3px;
 }
+
+/* Format painter waiting for a target: a brush cursor over the canvas. */
+.canvas-host.painting canvas {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M20 4l-7.5 7.5'/><path d='M10.5 9.5l4 4c-.8 3.2-3.2 5-8.5 5 1.8-1.7 1.2-3.7 2.2-5.2z' fill='white'/></svg>") 4 20, copy !important;
+}
