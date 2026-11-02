@@ -211,6 +211,7 @@ export function App() {
   }, [usePresenter]);
   const [notesPrefs, setNotesPrefs] = useState(loadNotesPrefs);
   const [viewPrefs, setViewPrefs] = useState(loadViewPrefs);
+  const refreshRef = useRef<() => void>(() => {});
   // SmartArt text pane: open, the row being edited (shared with the ribbon), and focus requests.
   const [videoOpen, setVideoOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
@@ -251,6 +252,8 @@ export function App() {
       // Not remembered; the defaults apply next time.
     }
     engineRef.current?.setShowGrid(viewPrefs.grid);
+    // The "gridlines" checkbox reads its state from the status, which must follow.
+    refreshRef.current();
   }, [viewPrefs]);
   const [appearance, setAppearance] = useState(loadAppearance);
   useEffect(() => applyAppearance(appearance, () => engineRef.current?.setWorkspaceColor(cssColor("--workspace"))), [appearance]);
@@ -512,6 +515,8 @@ export function App() {
       if (s.revision !== thumbState.current.revision) scheduleThumbs(false);
     });
   }, [scheduleThumbs]);
+
+  refreshRef.current = refresh;
 
   const findChanged = useCallback(
     (all: boolean) => {
