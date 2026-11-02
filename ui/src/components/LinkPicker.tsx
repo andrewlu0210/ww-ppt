@@ -10,16 +10,16 @@ export function LinkPicker(props: { current?: string; disabled?: boolean; reques
   const [url, setUrl] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const first = useRef(true);
+  // Last handled request; only a changed `request` opens the panel, never a change of `disabled`.
+  const handled = useRef(props.request);
+  const disabled = useRef(props.disabled);
+  disabled.current = props.disabled;
 
   useEffect(() => {
-    // Ignore the initial render; react to later ⌘K requests.
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    if (!props.disabled) setOpen(true);
-  }, [props.request, props.disabled]);
+    if (props.request === handled.current) return;
+    handled.current = props.request;
+    if (!disabled.current) setOpen(true);
+  }, [props.request]);
   useEffect(() => {
     if (!open) return;
     setUrl(props.current ?? "");
