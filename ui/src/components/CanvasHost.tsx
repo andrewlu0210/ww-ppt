@@ -89,6 +89,8 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
         const { w, h, dpr } = sizeCanvas();
         app.resize(w, h, dpr);
         placeInput();
+        // The absolute zoom shown in the status bar follows the window size.
+        onChange();
       });
       ro.observe(container);
       cleanups.push(() => ro.disconnect());

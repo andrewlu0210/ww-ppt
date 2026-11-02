@@ -24,6 +24,8 @@ export interface Status {
   canRedo: boolean;
   canPaste: boolean;
   zoom: number;
+  /** Absolute zoom in percent (100 = one slide point per CSS pixel). */
+  zoomPercent: number;
   frameMs: number;
   revision: number;
   selectionName: string;
@@ -134,6 +136,7 @@ export const EMPTY_STATUS: Status = {
   canRedo: false,
   canPaste: false,
   zoom: 1,
+  zoomPercent: 100,
   frameMs: 0,
   revision: 0,
   selectionName: "",

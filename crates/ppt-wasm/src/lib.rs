@@ -2527,6 +2527,8 @@ impl App {
         set("animations", self.animations().into());
         set("canAnimate", e.can_animate().into());
         set("zoom", self.zoom.into());
+        // Absolute zoom like PowerPoint's: 100% shows one slide point (1/72 in) per CSS pixel.
+        set("zoomPercent", (self.scale() / self.dpr.max(0.01) * 12700.0 * 100.0).into());
         set("frameMs", self.last_frame_ms.into());
         set("sceneMs", self.last_scene_ms.into());
         set("revision", (e.revision() as f64).into());

@@ -1,6 +1,7 @@
 import type { Status } from "../lib/status";
 import type { Command } from "../lib/commands";
 import { t } from "../i18n";
+import { icons } from "./icons";
 
 interface Props {
   status: Status;
@@ -36,14 +37,20 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoo
       </button>
       {view("normal", t("status.normal"))}
       {view("sorter", t("status.sorter"))}
+      <button className="icon-btn" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} onMouseDown={(e) => e.preventDefault()} title={t("ribbon.fromCurrent")} aria-label={t("ribbon.fromCurrent")}>
+        {icons.playCurrent}
+      </button>
       <button onClick={() => run({ kind: "zoom", factor: 0.8 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomOut")}>
         −
       </button>
       <button className="zoom-value" onClick={() => run({ kind: "zoom", factor: "fit" })} onMouseDown={(e) => e.preventDefault()} title={t("status.fit")}>
-        {Math.round((viewMode === "sorter" ? sorterZoom : status.zoom) * 100)}%
+        {Math.round(viewMode === "sorter" ? sorterZoom * 100 : status.zoomPercent)}%
       </button>
       <button onClick={() => run({ kind: "zoom", factor: 1.25 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomIn")}>
         +
+      </button>
+      <button className="icon-btn" onClick={() => run({ kind: "zoom", factor: "fit" })} onMouseDown={(e) => e.preventDefault()} title={t("status.fit")} aria-label={t("status.fit")}>
+        {icons.fit}
       </button>
     </footer>
   );
