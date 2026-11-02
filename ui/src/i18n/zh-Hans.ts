@@ -17,6 +17,9 @@ export const zhHans: Messages = {
   "status.zoomOut": "缩小",
   "status.zoomIn": "放大",
   "status.fit": "适应窗口",
+  "zoom.title": "缩放",
+  "zoom.fit": "最合适大小",
+  "zoom.percent": "百分比",
 
   "file.pptxFilter": "PowerPoint 演示文稿",
   "file.imageFilter": "图片",

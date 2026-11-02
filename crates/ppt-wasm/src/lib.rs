@@ -55,8 +55,10 @@ pub struct App {
     width: u32,
     height: u32,
     dpr: f64,
-    /// Multiplier on top of fit-to-window.
-    zoom: f64,
+    /// A manual zoom as CSS pixels per EMU; `None` fits the slide to the window (and follows its size).
+    zoom_fixed: Option<f64>,
+    /// How far a zoomed-in slide is scrolled, in CSS pixels (0 = centered).
+    pan: (f64, f64),
     caret_on: bool,
     dirty: bool,
     last_frame_ms: f64,
@@ -225,7 +227,8 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         width,
         height,
         dpr,
-        zoom: 1.0,
+        zoom_fixed: None,
+        pan: (0.0, 0.0),
         caret_on: true,
         dirty: true,
         last_frame_ms: 0.0,
@@ -251,10 +254,21 @@ impl App {
         if let (Some(_), Some(r)) = (&self.show, self.show_viewport) {
             return (r.width() / pres.slide_width as f64).min(r.height() / pres.slide_height as f64);
         }
-        let (margin, zoom) = if self.show.is_some() { (0.0, 1.0) } else { (FIT_MARGIN * self.dpr, self.zoom) };
+        if self.show.is_none() {
+            if let Some(css) = self.zoom_fixed {
+                return css * self.dpr;
+            }
+        }
+        self.fit_scale()
+    }
+
+    /// Device pixels per EMU when the slide is fitted to the window.
+    fn fit_scale(&self) -> f64 {
+        let pres = &self.editor.pres;
+        let margin = if self.show.is_some() { 0.0 } else { FIT_MARGIN * self.dpr };
         let sx = (self.width as f64 - 2.0 * margin).max(1.0) / pres.slide_width as f64;
         let sy = (self.height as f64 - 2.0 * margin).max(1.0) / pres.slide_height as f64;
-        sx.min(sy) * zoom
+        sx.min(sy)
     }
 
     /// Slide space (EMU) → canvas device pixels.
@@ -268,9 +282,27 @@ impl App {
         }
         let s = self.scale();
         let pres = &self.editor.pres;
-        let ox = (self.width as f64 - pres.slide_width as f64 * s) / 2.0;
-        let oy = (self.height as f64 - pres.slide_height as f64 * s) / 2.0;
+        let (px, py) = self.clamped_pan();
+        let ox = (self.width as f64 - pres.slide_width as f64 * s) / 2.0 + px * self.dpr;
+        let oy = (self.height as f64 - pres.slide_height as f64 * s) / 2.0 + py * self.dpr;
         Affine::translate(Vec2::new(ox, oy)) * Affine::scale(s)
+    }
+
+    /// The scroll offset (CSS px) limited so the slide edge, with the usual margin, can reach
+    /// the window edge but not go further; a slide that fits is always centered.
+    fn clamped_pan(&self) -> (f64, f64) {
+        if self.show.is_some() {
+            return (0.0, 0.0);
+        }
+        let pres = &self.editor.pres;
+        let s = self.scale();
+        let limit = |slide: f64, window: f64| ((slide * s - window) / 2.0 + FIT_MARGIN * self.dpr).max(0.0) / self.dpr.max(0.01);
+        let (lx, ly) = (limit(pres.slide_width as f64, self.width as f64), limit(pres.slide_height as f64, self.height as f64));
+        // A slide smaller than the window minus its margins stays centered.
+        let fits = |slide: f64, window: f64| slide * s <= window - 2.0 * FIT_MARGIN * self.dpr + 0.5;
+        let x = if fits(pres.slide_width as f64, self.width as f64) { 0.0 } else { self.pan.0.clamp(-lx, lx) };
+        let y = if fits(pres.slide_height as f64, self.height as f64) { 0.0 } else { self.pan.1.clamp(-ly, ly) };
+        (x, y)
     }
 
     /// Gridlines over the slide and drawing guides across the canvas.
@@ -563,7 +595,8 @@ impl App {
         self.editor.load(pres);
         self.editor.refresh_tables(&mut self.engine);
         self.images.clear();
-        self.zoom = 1.0;
+        self.zoom_fixed = None;
+        self.pan = (0.0, 0.0);
         self.dirty = true;
     }
 }
@@ -667,13 +700,73 @@ impl App {
     }
 
     #[wasm_bindgen(js_name = setZoom)]
+    /// Sets the zoom relative to the fitted size. 1 fits the slide to the window and keeps
+    /// following the window size; any other value fixes the absolute size, so resizing the
+    /// window no longer changes it.
     pub fn set_zoom(&mut self, zoom: f64) {
-        self.zoom = zoom.clamp(0.1, 8.0);
+        let zoom = zoom.clamp(0.1, 8.0);
+        self.zoom_fixed = if (zoom - 1.0).abs() < 1e-6 { None } else { Some(zoom * self.fit_scale() / self.dpr.max(0.01)) };
+        if self.zoom_fixed.is_none() {
+            self.pan = (0.0, 0.0);
+        }
         self.dirty = true;
     }
 
+    /// Zooms by `factor` around the point (`x`, `y`) in CSS px (a pinch), keeping the slide point
+    /// under it in place.
+    #[wasm_bindgen(js_name = zoomAt)]
+    pub fn zoom_at(&mut self, factor: f64, x: f64, y: f64) {
+        if self.show.is_some() || !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let anchor = self.view().inverse() * Point::new(x * self.dpr, y * self.dpr);
+        self.set_zoom(self.zoom() * factor);
+        if self.zoom_fixed.is_none() {
+            return;
+        }
+        let pres = &self.editor.pres;
+        let s = self.scale();
+        let dpr = self.dpr.max(0.01);
+        let centered_x = (self.width as f64 - pres.slide_width as f64 * s) / 2.0;
+        let centered_y = (self.height as f64 - pres.slide_height as f64 * s) / 2.0;
+        self.pan = ((x * self.dpr - anchor.x * s - centered_x) / dpr, (y * self.dpr - anchor.y * s - centered_y) / dpr);
+    }
+
+    /// Scroll bar state `[x ratio, x position, y ratio, y position]`: ratio is the visible share
+    /// of the scrollable extent (1 = no bar), position the thumb start (0–1). Empty during a show.
+    #[wasm_bindgen(js_name = scrollInfo)]
+    pub fn scroll_info(&self) -> Vec<f64> {
+        if self.show.is_some() {
+            return Vec::new();
+        }
+        let pres = &self.editor.pres;
+        let (s, dpr) = (self.scale(), self.dpr.max(0.01));
+        let (px, py) = self.clamped_pan();
+        let axis = |slide: f64, window: f64, pan: f64| {
+            let content = slide * s / dpr + 2.0 * FIT_MARGIN;
+            let view = window / dpr;
+            if content <= view + 0.5 {
+                return (1.0, 0.0);
+            }
+            (view / content, (((content - view) / 2.0 - pan) / (content - view)).clamp(0.0, 1.0))
+        };
+        let (rx, ox) = axis(pres.slide_width as f64, self.width as f64, px);
+        let (ry, oy) = axis(pres.slide_height as f64, self.height as f64, py);
+        vec![rx, ox, ry, oy]
+    }
+
+    /// Scrolls a zoomed-in slide by a wheel or trackpad delta (CSS px; content follows the fingers).
+    #[wasm_bindgen(js_name = scrollBy)]
+    pub fn scroll_by(&mut self, dx: f64, dy: f64) {
+        let (x, y) = self.clamped_pan();
+        self.pan = (x - dx, y - dy);
+        self.pan = self.clamped_pan();
+        self.dirty = true;
+    }
+
+    /// The zoom relative to the fitted size (1 = fit).
     pub fn zoom(&self) -> f64 {
-        self.zoom
+        self.scale() / self.fit_scale()
     }
 
     pub fn invalidate(&mut self) {
@@ -2526,7 +2619,9 @@ impl App {
         set("slideLayout", e.pres.slides.get(e.slide).and_then(|s| s.layout).map_or(-1, |l| l as i32).into());
         set("animations", self.animations().into());
         set("canAnimate", e.can_animate().into());
-        set("zoom", self.zoom.into());
+        set("zoom", self.zoom().into());
+        set("zoomFit", self.zoom_fixed.is_none().into());
+        set("scroll", Array::from_iter(self.scroll_info().into_iter().map(JsValue::from)).into());
         // Absolute zoom like PowerPoint's: 100% shows one slide point (1/72 in) per CSS pixel.
         set("zoomPercent", (self.scale() / self.dpr.max(0.01) * 12700.0 * 100.0).into());
         set("frameMs", self.last_frame_ms.into());

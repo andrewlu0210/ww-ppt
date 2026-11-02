@@ -14,6 +14,8 @@ interface Props {
   onError: (message: string) => void;
   /// Called after any interaction that may change UI state.
   onChange: () => void;
+  /** Scroll bars `[x ratio, x position, y ratio, y position]`; a ratio of 1 hides that bar. */
+  scroll?: number[];
 }
 
 const DOUBLE_CLICK_MS = 450;
@@ -24,7 +26,7 @@ const DOUBLE_CLICK_PX = 5;
  * IME input. The textarea follows the text caret so the macOS candidate window
  * appears next to the text being composed.
  */
-export function CanvasHost({ onReady, onError, onChange }: Props) {
+export function CanvasHost({ onReady, onError, onChange, scroll }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -88,6 +90,13 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
       const ro = new ResizeObserver(() => {
         const { w, h, dpr } = sizeCanvas();
         app.resize(w, h, dpr);
+        // Draw right away: resizing clears the canvas, and waiting for the next frame shows
+        // stale or blank content while the window is dragged.
+        try {
+          app.render();
+        } catch (e) {
+          console.error(e);
+        }
         placeInput();
         // The absolute zoom shown in the status bar follows the window size.
         onChange();
@@ -157,6 +166,45 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
         showGuideLabel("", 0, 0);
         changed();
       };
+      // Scrolls a zoomed-in slide with the wheel or a two-finger swipe.
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1;
+        app.scrollBy(e.deltaX * unit, e.deltaY * unit);
+        onChange();
+      };
+      // A trackpad pinch arrives as a wheel event with ctrl held (and as WebKit gesture events).
+      const pinch = (factor: number, x: number, y: number) => {
+        const r = canvas.getBoundingClientRect();
+        app.zoomAt(factor, x - r.left, y - r.top);
+        onChange();
+      };
+      const onWheelPinch = (e: WheelEvent) => {
+        if (!e.ctrlKey) return onWheel(e);
+        e.preventDefault();
+        pinch(Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+      };
+      let gestureScale = 1;
+      const onGestureStart = (e: Event) => {
+        e.preventDefault();
+        gestureScale = 1;
+      };
+      const onGestureChange = (e: Event) => {
+        e.preventDefault();
+        const g = e as unknown as { scale: number; clientX: number; clientY: number };
+        pinch(g.scale / gestureScale, g.clientX, g.clientY);
+        gestureScale = g.scale;
+      };
+      canvas.addEventListener("wheel", onWheelPinch, { passive: false });
+      canvas.addEventListener("gesturestart", onGestureStart);
+      canvas.addEventListener("gesturechange", onGestureChange);
+      canvas.addEventListener("gestureend", onGestureStart);
+      cleanups.push(() => {
+        canvas.removeEventListener("wheel", onWheelPinch);
+        canvas.removeEventListener("gesturestart", onGestureStart);
+        canvas.removeEventListener("gesturechange", onGestureChange);
+        canvas.removeEventListener("gestureend", onGestureStart);
+      });
       canvas.addEventListener("pointerdown", onDown);
       canvas.addEventListener("pointermove", onMove);
       canvas.addEventListener("pointerup", onUp);
@@ -259,11 +307,23 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Scroll bar drag: `dx`/`dy` in CSS px of slide content. */
+  const scrollApp = (dx: number, dy: number) => {
+    appRef.current?.scrollBy(dx, dy);
+    onChange();
+  };
+
   return (
     <div className="canvas-host" ref={containerRef}>
       {/* Read through the slide layer (A11yMirror) instead. */}
       <canvas ref={canvasRef} aria-hidden="true" />
       <div ref={labelRef} className="guide-label" hidden />
+      {scroll && scroll.length === 4 && (
+        <>
+          {scroll[0] < 1 && <ScrollBar axis="x" ratio={scroll[0]} position={scroll[1]} scrollBy={(d) => scrollApp(d, 0)} />}
+          {scroll[2] < 1 && <ScrollBar axis="y" ratio={scroll[2]} position={scroll[3]} scrollBy={(d) => scrollApp(0, d)} />}
+        </>
+      )}
       <textarea
         ref={inputRef}
         className="ime-input"
@@ -272,6 +332,42 @@ export function CanvasHost({ onReady, onError, onChange }: Props) {
         autoCapitalize="off"
         spellCheck={false}
       />
+    </div>
+  );
+}
+
+/** An overlay scroll bar; dragging the thumb scrolls the zoomed-in slide. */
+function ScrollBar({ axis, ratio, position, scrollBy }: { axis: "x" | "y"; ratio: number; position: number; scrollBy: (content: number) => void }) {
+  const track = useRef<HTMLDivElement>(null);
+  const horizontal = axis === "x";
+  const onDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = track.current;
+    if (!el) return;
+    const length = horizontal ? el.clientWidth : el.clientHeight;
+    let last = horizontal ? e.clientX : e.clientY;
+    const target = e.currentTarget as HTMLElement;
+    target.setPointerCapture(e.pointerId);
+    const move = (m: PointerEvent) => {
+      const now = horizontal ? m.clientX : m.clientY;
+      // Moving the thumb by the whole free track length scrolls the whole content range.
+      scrollBy(((now - last) / Math.max(1, length * (1 - ratio))) * (length / ratio - length));
+      last = now;
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", up);
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+    target.addEventListener("pointercancel", up);
+  };
+  const style = horizontal ? { left: `${position * (1 - ratio) * 100}%`, width: `${ratio * 100}%` } : { top: `${position * (1 - ratio) * 100}%`, height: `${ratio * 100}%` };
+  return (
+    <div ref={track} className={`scrollbar scrollbar-${axis}`} aria-hidden="true">
+      <div className="scrollbar-thumb" style={style} onPointerDown={onDown} />
     </div>
   );
 }

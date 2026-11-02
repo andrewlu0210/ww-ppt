@@ -19,6 +19,9 @@ export const zhHant = {
   "status.zoomOut": "縮小",
   "status.zoomIn": "放大",
   "status.fit": "符合視窗",
+  "zoom.title": "縮放",
+  "zoom.fit": "最適大小",
+  "zoom.percent": "百分比",
 
   "file.pptxFilter": "PowerPoint 簡報",
   "file.imageFilter": "圖片",

@@ -17,6 +17,9 @@ export const en: Messages = {
   "status.zoomOut": "Zoom Out",
   "status.zoomIn": "Zoom In",
   "status.fit": "Fit to Window",
+  "zoom.title": "Zoom",
+  "zoom.fit": "Fit",
+  "zoom.percent": "Percent",
 
   "file.pptxFilter": "PowerPoint Presentation",
   "file.imageFilter": "Images",

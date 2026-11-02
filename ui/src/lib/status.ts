@@ -26,6 +26,10 @@ export interface Status {
   zoom: number;
   /** Absolute zoom in percent (100 = one slide point per CSS pixel). */
   zoomPercent: number;
+  /** The slide follows the window size (no manual zoom). */
+  zoomFit: boolean;
+  /** Scroll bars `[x ratio, x position, y ratio, y position]`; empty during a show. */
+  scroll: number[];
   frameMs: number;
   revision: number;
   selectionName: string;
@@ -137,6 +141,8 @@ export const EMPTY_STATUS: Status = {
   canPaste: false,
   zoom: 1,
   zoomPercent: 100,
+  zoomFit: true,
+  scroll: [],
   frameMs: 0,
   revision: 0,
   selectionName: "",

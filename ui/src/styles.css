@@ -2321,7 +2321,8 @@ input:focus-visible,
   background: rgba(0, 0, 0, 0.25);
 }
 
-.video-dialog {
+.video-dialog,
+.zoom-dialog {
   width: 380px;
   background: var(--surface);
   border-radius: 8px;
@@ -2367,4 +2368,55 @@ input:focus-visible,
 
 .video-error {
   color: var(--danger);
+}
+
+.zoom-dialog {
+  width: 260px;
+}
+
+.zoom-percent {
+  width: 80px;
+}
+
+/* Scroll bars over the canvas when the slide is zoomed in. */
+.scrollbar {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.scrollbar-x {
+  left: 0;
+  right: 12px;
+  bottom: 0;
+  height: 12px;
+}
+
+.scrollbar-y {
+  top: 0;
+  bottom: 12px;
+  right: 0;
+  width: 12px;
+}
+
+.scrollbar-thumb {
+  position: absolute;
+  pointer-events: auto;
+  border-radius: 4px;
+  background: var(--muted);
+  opacity: 0.45;
+}
+
+.scrollbar-thumb:hover {
+  opacity: 0.7;
+}
+
+.scrollbar-x .scrollbar-thumb {
+  top: 3px;
+  bottom: 3px;
+}
+
+.scrollbar-y .scrollbar-thumb {
+  left: 3px;
+  right: 3px;
 }

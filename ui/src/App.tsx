@@ -49,6 +49,7 @@ import type { AltTextInfo } from "./components/AltTextDialog";
 import { SelectionPane } from "./components/SelectionPane";
 import { DiagramPane } from "./components/DiagramPane";
 import { VideoDialog } from "./components/VideoDialog";
+import { ZoomDialog } from "./components/ZoomDialog";
 import { CheckerPane, type A11yIssue } from "./components/CheckerPane";
 import { A11yMirror } from "./components/A11yMirror";
 import { announce } from "./lib/announce";
@@ -212,6 +213,7 @@ export function App() {
   const [viewPrefs, setViewPrefs] = useState(loadViewPrefs);
   // SmartArt text pane: open, the row being edited (shared with the ribbon), and focus requests.
   const [videoOpen, setVideoOpen] = useState(false);
+  const [zoomOpen, setZoomOpen] = useState(false);
   const [diagramPane, setDiagramPane] = useState(false);
   const [diagramRow, setDiagramRow] = useState(0);
   const diagramRowRef = useRef(0);
@@ -1439,7 +1441,7 @@ export function App() {
         />
         <section className={showing ? "editor-area showing" : "editor-area"}>
           <div className={viewPrefs.ruler && !showing ? "canvas-area with-ruler" : "canvas-area"} onContextMenu={onCanvasContextMenu}>
-            <CanvasHost onReady={onReady} onError={setError} onChange={refresh} />
+            <CanvasHost onReady={onReady} onError={setError} onChange={refresh} scroll={status.scroll} />
             {viewPrefs.ruler && !showing && <Rulers engine={engineRef.current} slideSize={slideSize} />}
             {!showing && viewMode === "normal" && <A11yMirror engine={engineRef.current} version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}|${status.zoom}|${viewPrefs.ruler}|${viewPrefs.pane}|${notesPrefs.open}`} />}
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
@@ -1516,8 +1518,9 @@ export function App() {
           </div>
         )}
       </main>
+      {zoomOpen && <ZoomDialog percent={status.zoomPercent} relative={status.zoom} fit={status.zoomFit} run={run} onClose={() => { setZoomOpen(false); focusCanvas(); }} />}
       {videoOpen && <VideoDialog engine={engineRef.current} name={doc.name} onClose={() => setVideoOpen(false)} />}
-      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} />
+      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} onZoomDialog={() => setZoomOpen(true)} />
     </div>
   );
 }
