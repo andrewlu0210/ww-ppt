@@ -53,8 +53,18 @@ impl Editor {
     }
 
     /// Shows or hides guides, as one undo step (the setting is saved with the deck).
+    /// Showing guides in a deck that has none adds a vertical and a horizontal one through
+    /// the slide's center, so there is something to see and drag.
     pub fn set_show_guides(&mut self, engine: &mut TextEngine, show: bool) -> bool {
-        self.edit_view(engine, |v| v.show_guides = show)
+        let snap = |p: i64| ((p as f64 / GUIDE_UNIT).round() * GUIDE_UNIT).round() as Emu;
+        let (cx, cy) = (snap(self.pres.slide_width / 2), snap(self.pres.slide_height / 2));
+        self.edit_view(engine, |v| {
+            v.show_guides = show;
+            if show && v.guides.is_empty() {
+                v.guides.push(DrawGuide { vertical: true, pos: cx });
+                v.guides.push(DrawGuide { vertical: false, pos: cy });
+            }
+        })
     }
 
     pub fn set_snap_to_grid(&mut self, engine: &mut TextEngine, snap: bool) -> bool {
@@ -109,5 +119,25 @@ mod tests {
         let c = w as f64 / 2.0;
         assert_eq!(e.grid_round(c + 100_000.0, w), c);
         assert_eq!(e.grid_round(c + 200_000.0, w), c + 360_000.0);
+    }
+
+    #[test]
+    fn showing_guides_adds_two_when_there_are_none() {
+        let mut pres = Presentation::default();
+        pres.slides.push(Slide::default());
+        let mut e = Editor::new(pres);
+        let mut engine = ppt_text::TextEngine::new(false);
+        assert!(e.set_show_guides(&mut engine, true));
+        assert_eq!(e.pres.view.guides.len(), 2);
+        assert!(e.pres.view.guides.iter().any(|g| g.vertical) && e.pres.view.guides.iter().any(|g| !g.vertical));
+        // Hiding keeps them; showing again adds nothing.
+        assert!(e.set_show_guides(&mut engine, false));
+        assert!(e.set_show_guides(&mut engine, true));
+        assert_eq!(e.pres.view.guides.len(), 2);
+        // Undoing the three steps takes back the setting and the guides together.
+        for _ in 0..3 {
+            assert!(e.undo(&mut engine));
+        }
+        assert!(e.pres.view.guides.is_empty() && !e.pres.view.show_guides);
     }
 }
