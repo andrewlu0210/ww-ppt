@@ -71,6 +71,7 @@ export const zhHans: Messages = {
   "ribbon.paste": "粘贴",
   "ribbon.cut": "剪切",
   "ribbon.formatPainter": "格式刷",
+  "ribbon.fontSize": "字号",
   "ribbon.copy": "复制",
   "group.slides": "幻灯片",
   "ribbon.layoutMenu": "版式 ▾",

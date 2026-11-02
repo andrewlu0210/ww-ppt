@@ -547,6 +547,67 @@ button {
   width: 52px;
 }
 
+/* A text field with a drop-down list (font name and size). */
+.combo {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.combo input {
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.combo-arrow {
+  width: 18px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 0 4px 4px 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  padding: 0;
+  cursor: default;
+}
+
+.combo-arrow:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.combo-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 60;
+  min-width: 100%;
+  width: max-content;
+  max-width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.16);
+  padding: 4px 0;
+}
+
+.combo-option {
+  padding: 3px 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.combo-option.current {
+  font-weight: 600;
+}
+
+.combo-option.active {
+  background: var(--row-active);
+}
+
 .rb-field {
   display: flex;
   flex-direction: column;

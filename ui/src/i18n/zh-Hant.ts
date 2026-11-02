@@ -73,6 +73,7 @@ export const zhHant = {
   "ribbon.paste": "貼上",
   "ribbon.cut": "剪下",
   "ribbon.formatPainter": "複製格式",
+  "ribbon.fontSize": "字型大小",
   "ribbon.copy": "複製",
   "group.slides": "投影片",
   "ribbon.layoutMenu": "版面配置 ▾",

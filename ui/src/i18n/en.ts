@@ -71,6 +71,7 @@ export const en: Messages = {
   "ribbon.paste": "Paste",
   "ribbon.cut": "Cut",
   "ribbon.formatPainter": "Format Painter",
+  "ribbon.fontSize": "Font Size",
   "ribbon.copy": "Copy",
   "group.slides": "Slides",
   "ribbon.layoutMenu": "Layout ▾",

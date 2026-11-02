@@ -15,6 +15,7 @@ import { HeaderFooterDialog, type HeaderFooterInfo } from "./HeaderFooterDialog"
 import { SymbolPicker } from "./SymbolPicker";
 import { AltTextDialog, type AltTextInfo } from "./AltTextDialog";
 import { DesignTab, type BackgroundInfo, type ColorSchemeInfo, type FontSchemeInfo, type ThemeInfo } from "./DesignTab";
+import { Combobox } from "./Combobox";
 import { LinkPicker } from "./LinkPicker";
 import { focusables, moveFocus, ownsArrows } from "../lib/keyboard";
 import { focusCanvas } from "./CanvasHost";
@@ -146,8 +147,6 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
   }, [linkRequest]);
   const text = status.hasText;
   const shapes = status.hasSelection && !status.editingText;
-  const [sizeDraft, setSizeDraft] = useState<string | null>(null);
-  const [fontDraft, setFontDraft] = useState<string | null>(null);
 
   const newSlide = (large: boolean) => (
     <LayoutPicker
@@ -257,63 +256,24 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
             <Group label={t("group.font")}>
               <div className="rb-col">
                 <div className="rb-row">
-                  <input
+                  <Combobox
                     className="font-family"
-                    list="font-list"
-                    value={fontDraft ?? status.fontFamily ?? ""}
+                    value={status.fontFamily ?? ""}
+                    options={fonts}
+                    previewFonts
                     disabled={!text}
                     placeholder={t("group.font")}
-                    onFocus={(e) => setFontDraft(e.target.value)}
-                    onChange={(e) => {
-                      setFontDraft(e.target.value);
-                      // Picking from the list applies immediately.
-                      if (fonts.includes(e.target.value)) {
-                        run({ kind: "fontFamily", family: e.target.value });
-                        setFontDraft(null);
-                      }
-                    }}
-                    onBlur={() => setFontDraft(null)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && e.currentTarget.value) {
-                        run({ kind: "fontFamily", family: e.currentTarget.value });
-                        setFontDraft(null);
-                      }
-                    }}
+                    ariaLabel={t("group.font")}
+                    onCommit={(family) => run({ kind: "fontFamily", family })}
                   />
-                  <datalist id="font-list">
-                    {fonts.map((f) => (
-                      <option key={f} value={f} />
-                    ))}
-                  </datalist>
-                  <input
+                  <Combobox
                     className="font-size"
-                    list="size-list"
+                    value={status.fontSize ? String(Math.round(status.fontSize * 10) / 10) : ""}
+                    options={FONT_SIZES.map(String)}
                     disabled={!text}
-                    value={sizeDraft ?? (status.fontSize ? String(Math.round(status.fontSize * 10) / 10) : "")}
-                    onFocus={(e) => setSizeDraft(e.target.value)}
-                    onChange={(e) => {
-                      setSizeDraft(e.target.value);
-                      const n = Number(e.target.value);
-                      if (FONT_SIZES.includes(n)) {
-                        run({ kind: "fontSize", size: n });
-                        setSizeDraft(null);
-                      }
-                    }}
-                    onBlur={() => setSizeDraft(null)}
-                    onKeyDown={(e) => {
-                      const n = Number(e.currentTarget.value);
-                      if (e.key === "Enter" && n > 0) {
-                        run({ kind: "fontSize", size: n });
-                        setSizeDraft(null);
-                        e.currentTarget.blur();
-                      }
-                    }}
+                    ariaLabel={t("ribbon.fontSize")}
+                    onCommit={(v) => Number(v) > 0 && run({ kind: "fontSize", size: Number(v) })}
                   />
-                  <datalist id="size-list">
-                    {FONT_SIZES.map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
                   <Button iconOnly icon={<b className="glyph">A⁺</b>} label={t("ribbon.growFont")} disabled={!text} onClick={() => run({ kind: "fontStep", up: true })} />
                   <Button iconOnly icon={<b className="glyph">A⁻</b>} label={t("ribbon.shrinkFont")} disabled={!text} onClick={() => run({ kind: "fontStep", up: false })} />
                 </div>
