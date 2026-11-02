@@ -715,6 +715,8 @@ export const zhHans: Messages = {
   "ctx.layout": "版式",
   "ctx.background": "设置背景格式…",
   "ctx.altText": "替换文字…",
+  "ctx.lock": "锁定",
+  "ctx.unlock": "解除锁定",
 
   // NotesPane.tsx
   "notes.resize": "调整备注高度",

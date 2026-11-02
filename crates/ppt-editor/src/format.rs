@@ -13,6 +13,9 @@ impl Editor {
     /// Moves and resizes the single selected shape, or the selected group as a
     /// whole, to `to` (rotation applies to single shapes).
     pub fn set_selection_frame(&mut self, to: Xfrm) -> bool {
+        if self.selection_locked() {
+            return false;
+        }
         let Some(from) = self.selection_frame() else { return false };
         let to = Xfrm { w: to.w.max(1), h: to.h.max(1), ..to };
         if (from.x, from.y, from.w, from.h, from.rot) == (to.x, to.y, to.w, to.h, to.rot) {
@@ -26,6 +29,9 @@ impl Editor {
 
     /// Turns the selection by `degrees` (clockwise); a group turns about its center.
     pub fn rotate_selection(&mut self, degrees: f64) -> bool {
+        if self.selection_locked() {
+            return false;
+        }
         let Some(frame) = self.selection_frame() else { return false };
         let group = self.selected_shape().is_none();
         let (cx, cy) = frame.center();
@@ -44,6 +50,9 @@ impl Editor {
 
     /// Mirrors the selection left-right (or top-bottom); a group mirrors as a whole.
     pub fn flip_selection(&mut self, horizontal: bool) -> bool {
+        if self.selection_locked() {
+            return false;
+        }
         let Some(frame) = self.selection_frame() else { return false };
         let group = self.selected_shape().is_none();
         let (cx, cy) = frame.center();

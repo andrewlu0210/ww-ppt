@@ -1045,6 +1045,9 @@ export function App() {
         case "group":
           engine.groupShapes(c.on);
           break;
+        case "lock":
+          engine.setLocked(c.on);
+          break;
         case "insertTable":
           engine.insertTable(c.rows, c.cols);
           break;

@@ -14,6 +14,8 @@ export interface Status {
   diagramFocus?: number;
   /** UTF-16 range to select in that row (a find match). */
   diagramRange?: [number, number];
+  /** Every selected shape is locked. */
+  locked?: boolean;
   canGroup?: boolean;
   canMerge?: boolean;
   tableStyle?: string;

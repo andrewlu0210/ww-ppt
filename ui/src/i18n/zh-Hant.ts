@@ -717,6 +717,8 @@ export const zhHant = {
   "ctx.layout": "版面配置",
   "ctx.background": "背景格式…",
   "ctx.altText": "替代文字…",
+  "ctx.lock": "鎖定",
+  "ctx.unlock": "解除鎖定",
 
   // NotesPane.tsx
   "notes.resize": "調整備忘稿高度",

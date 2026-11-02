@@ -144,6 +144,23 @@ impl Editor {
         })
     }
 
+    /// Whether any selected shape is locked against moving, resizing and rotating.
+    pub fn selection_locked(&self) -> bool {
+        self.selected_shapes().iter().any(|s| s.access.locked)
+    }
+
+    /// Whether every selected shape is locked (and something is selected).
+    pub fn selection_all_locked(&self) -> bool {
+        let shapes = self.selected_shapes();
+        !shapes.is_empty() && shapes.iter().all(|s| s.access.locked)
+    }
+
+    /// Locks or unlocks the selected shapes (a whole group at a time), as one undo step.
+    pub fn set_locked(&mut self, engine: &mut TextEngine, locked: bool) -> bool {
+        let ids = self.selection.clone();
+        self.edit_access(engine, &ids, |a| a.locked = locked)
+    }
+
     /// Moves a pane row one step up (towards the front) or down, as one undo step.
     pub fn move_in_pane(&mut self, engine: &mut TextEngine, id: ShapeId, up: bool) -> bool {
         if !self.select_in_pane(engine, id, false) {

@@ -1695,6 +1695,13 @@ impl App {
         o.into()
     }
 
+    /// Locks or unlocks the selection against moving, resizing and rotating.
+    #[wasm_bindgen(js_name = setLocked)]
+    pub fn set_locked(&mut self, on: bool) -> bool {
+        let changed = self.editor.set_locked(&mut self.engine, on);
+        self.touch(changed)
+    }
+
     #[wasm_bindgen(js_name = setAltText)]
     pub fn set_alt_text(&mut self, text: &str, decorative: bool) -> bool {
         let changed = self.editor.set_alt_text(&mut self.engine, text, decorative);
@@ -2621,6 +2628,7 @@ impl App {
             };
             set("cellAnchor", a.into());
         }
+        set("locked", e.selection_all_locked().into());
         set("canGroup", (e.selection.len() > 1 && e.selection_group().is_none()).into());
         set("canUngroup", (e.selection_group().is_some() || e.selected_shape().is_some_and(|s| s.group.is_some())).into());
         set("canUndo", e.can_undo().into());

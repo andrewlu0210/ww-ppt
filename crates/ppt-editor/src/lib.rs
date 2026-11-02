@@ -526,6 +526,10 @@ impl Editor {
 
     /// Handle positions of the single selected shape, in slide space.
     pub fn handles(&self, tol: &Tolerance) -> Vec<(Handle, (f64, f64))> {
+        // A locked shape has no handles: it can't be resized or rotated.
+        if self.selection_locked() {
+            return Vec::new();
+        }
         if let Some(shape) = self.selected_shape() {
             let points = handle_points(&shape.xfrm, shape.geometry.is_line(), tol.rotate_offset);
             // A picture being cropped doesn't rotate.
@@ -739,7 +743,9 @@ impl Editor {
                     }
                     return true;
                 }
-                self.drag = Some(Drag { kind: DragKind::Move, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+                if !self.selection_locked() {
+                    self.drag = Some(Drag { kind: DragKind::Move, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+                }
             }
             None => {
                 let additive = ev.shift || ev.meta;
@@ -1647,6 +1653,9 @@ impl Editor {
     }
 
     pub fn nudge(&mut self, dx: i64, dy: i64) -> bool {
+        if self.selection_locked() {
+            return false;
+        }
         self.modify_selected(|s| {
             s.xfrm.x += dx;
             s.xfrm.y += dy;
@@ -1746,6 +1755,9 @@ impl Editor {
 
     /// Aligns the selection: to each other when several shapes are selected, else to the slide.
     pub fn align(&mut self, to: AlignTo) -> bool {
+        if self.selection_locked() {
+            return false;
+        }
         let shapes = self.selected_shapes();
         if shapes.is_empty() {
             return false;

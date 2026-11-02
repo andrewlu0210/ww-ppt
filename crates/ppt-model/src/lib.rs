@@ -669,6 +669,8 @@ pub struct Access {
     pub decorative: bool,
     /// Hidden in the editor and in shows (`hidden="1"`), shown again from the selection pane.
     pub hidden: bool,
+    /// Locked against moving, resizing and rotating (`a:spLocks noMove noResize`, PowerPoint's Lock).
+    pub locked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -21,6 +21,8 @@ export type Command =
   | { kind: "insertTable"; rows: number; cols: number }
   | { kind: "insertSmartArt"; layout: string }
   | { kind: "group"; on: boolean }
+  /** Lock or unlock the selection against moving, resizing and rotating. */
+  | { kind: "lock"; on: boolean }
   | { kind: "link"; url: string }
   | { kind: "tableMerge" }
   | { kind: "tableSplit"; rows: number; cols: number }

@@ -696,6 +696,80 @@ fn patch_c_nv_pr(src: &str, n: Node, shape: &Shape) -> String {
     if inner.is_empty() { format!("{tag}/>") } else { format!("{tag}>{inner}{close}>") }
 }
 
+/// Attributes PowerPoint's Lock sets on a shape's locks element (graphic frames only take some of them).
+fn lock_attrs(locks: &str) -> Vec<&'static str> {
+    const ALL: [&str; 8] = ["noGrp", "noRot", "noMove", "noResize", "noEditPoints", "noAdjustHandles", "noChangeArrowheads", "noChangeShapeType"];
+    match locks {
+        "graphicFrameLocks" => vec!["noGrp", "noMove", "noResize"],
+        "grpSpLocks" => vec!["noGrp", "noRot", "noMove", "noResize"],
+        _ => ALL.to_vec(),
+    }
+}
+
+/// `cNvSpPr` / `cNvPicPr` / ... → the name of its locks element.
+fn locks_name(owner: &str) -> &'static str {
+    match owner {
+        "cNvPicPr" => "picLocks",
+        "cNvGraphicFramePr" => "graphicFrameLocks",
+        "cNvGrpSpPr" => "grpSpLocks",
+        "cNvCxnSpPr" => "cxnSpLocks",
+        _ => "spLocks",
+    }
+}
+
+/// The locks element of a generated shape: `base` attributes (e.g. `noChangeAspect="1"`) plus the lock
+/// attributes when locked; empty when there is nothing to say.
+fn locks_xml(name: &str, base: &str, locked: bool) -> String {
+    let lock: String = if locked { lock_attrs(name).iter().filter(|a| !base.contains(**a)).map(|a| format!(r#" {a}="1""#)).collect() } else { String::new() };
+    let attrs = format!("{}{lock}", if base.is_empty() { String::new() } else { format!(" {base}") });
+    if attrs.is_empty() { String::new() } else { format!("<a:{name}{attrs}/>") }
+}
+
+/// The non-visual `cNvSpPr` (or `cNvPicPr`, ...) next to `cNvPr` rewritten to lock or unlock the shape;
+/// other attributes and children are kept.
+fn patch_locks(src: &str, c_nv_pr: Node, locked: bool) -> Option<(Range<usize>, String)> {
+    let owner = c_nv_pr.next_siblings().skip(1).find(|n| n.is_element() && n.tag_name().name().starts_with("cNv"))?;
+    let name = locks_name(owner.tag_name().name());
+    let attrs = lock_attrs(name);
+    let mut inner = String::new();
+    let mut found = false;
+    for c in owner.children().filter(|c| c.is_element()) {
+        if !c.tag_name().name().ends_with("Locks") {
+            inner.push_str(&src[c.range()]);
+            continue;
+        }
+        found = true;
+        let mut tag = open_tag(src, c);
+        for a in &attrs {
+            if *a == "noGrp" && !locked {
+                continue;
+            }
+            let key = format!(" {a}=\"");
+            if let Some(i) = tag.find(&key) {
+                let end = tag[i + key.len()..].find('"').map_or(tag.len(), |j| i + key.len() + j + 1);
+                tag.replace_range(i..end, "");
+            }
+            if locked {
+                tag.push_str(&format!(r#" {a}="1""#));
+            }
+        }
+        let kids: String = c.children().filter(|k| k.is_element()).map(|k| src[k.range()].to_string()).collect();
+        if kids.is_empty() {
+            inner.push_str(&format!("{tag}/>"));
+        } else {
+            let close = tag.split_whitespace().next().unwrap_or("<a:spLocks").replacen('<', "</", 1);
+            inner.push_str(&format!("{tag}>{kids}{close}>"));
+        }
+    }
+    if !found && locked {
+        inner.push_str(&locks_xml(name, "", true));
+    }
+    let open = open_tag(src, owner);
+    let close = open.split_whitespace().next().unwrap_or("<p:cNvSpPr").replacen('<', "</", 1);
+    let new = if inner.is_empty() { format!("{open}/>") } else { format!("{open}>{inner}{close}>") };
+    Some((owner.range(), new))
+}
+
 /// Rewrites a loaded shape's XML for `out`, touching only what changed.
 fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut SlideOut) -> String {
     out.need_namespaces(&src.namespaces);
@@ -766,6 +840,11 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
     let mut edits = Vec::new();
     if names_changed && let Some(c) = el.descendants().find(|n| n.tag_name().name() == "cNvPr") {
         edits.push((c.range(), patch_c_nv_pr(&wrapped, c, shape)));
+        if shape.access.locked != p.access.locked
+            && let Some(edit) = patch_locks(&wrapped, c, shape.access.locked)
+        {
+            edits.push(edit);
+        }
     }
     match el.tag_name().name() {
         "sp" | "cxnSp" | "pic" => {
@@ -938,12 +1017,15 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
                 sp_pr.push_str(&format!("<a:effectLst>{}</a:effectLst>", shadow_xml(sh)));
             }
             sp_pr.push_str("</p:spPr>");
-            let c_nv_sp_pr = if text_box { r#"<p:cNvSpPr txBox="1"/>"# } else { "<p:cNvSpPr/>" };
+            let locks = locks_xml("spLocks", "", shape.access.locked);
+            let tx_box = if text_box { r#" txBox="1""# } else { "" };
+            let c_nv_sp_pr = if locks.is_empty() { format!("<p:cNvSpPr{tx_box}/>") } else { format!("<p:cNvSpPr{tx_box}>{locks}</p:cNvSpPr>") };
             let tx = shape.text.as_ref().map(|t| new_tx_body_xml(t, out)).unwrap_or_default();
             Some(format!(r#"<p:sp><p:nvSpPr>{c_nv_pr}{c_nv_sp_pr}{nv_pr}</p:nvSpPr>{sp_pr}{tx}</p:sp>"#))
         }
         ShapeKind::Table(table) => Some(format!(
-            r#"<p:graphicFrame><p:nvGraphicFramePr>{c_nv_pr}<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>{}<a:graphic><a:graphicData uri="{TABLE_URI}">{}</a:graphicData></a:graphic></p:graphicFrame>"#,
+            r#"<p:graphicFrame><p:nvGraphicFramePr>{c_nv_pr}<p:cNvGraphicFramePr>{}</p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>{}<a:graphic><a:graphicData uri="{TABLE_URI}">{}</a:graphicData></a:graphic></p:graphicFrame>"#,
+            locks_xml("graphicFrameLocks", r#"noGrp="1""#, shape.access.locked),
             xfrm_xml("p:xfrm", &shape.xfrm),
             table_xml(table, None, &mut |l| link_rel(out, l))
         )),
@@ -951,7 +1033,8 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             let part = out.media.part_for(out.pres, key)?;
             let rid = out.rel_for(&format!("{REL_BASE}image"), &part, false);
             Some(format!(
-                r#"<p:pic><p:nvPicPr>{c_nv_pr}<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>{nv_pr}</p:nvPicPr><p:blipFill><a:blip r:embed="{rid}"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}{}{}</p:spPr></p:pic>"#,
+                r#"<p:pic><p:nvPicPr>{c_nv_pr}<p:cNvPicPr>{}</p:cNvPicPr>{nv_pr}</p:nvPicPr><p:blipFill><a:blip r:embed="{rid}"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}{}{}</p:spPr></p:pic>"#,
+                locks_xml("picLocks", r#"noChangeAspect="1""#, shape.access.locked),
                 src_rect_xml(crop),
                 xfrm_xml("a:xfrm", &shape.xfrm),
                 geometry_xml(&shape.geometry),

@@ -68,6 +68,7 @@ export function buildContextMenu(kind: ContextKind, env: ContextEnv): MenuItem[]
       { label: t("ctx.order"), items: order.map(([label, o]) => ({ label, onSelect: () => run({ kind: "reorder", order: o }) })) },
       { label: t("group.align"), items: align.map(([to, label]) => ({ label, onSelect: () => run({ kind: "alignShapes", to }) })) },
       SEP,
+      { label: status.locked ? t("ctx.unlock") : t("ctx.lock"), onSelect: () => run({ kind: "lock", on: !status.locked }) },
       formatShape,
       { label: t("ctx.altText"), disabled: !status.frame || status.selectionCount !== 1, onSelect: env.openAltText },
     );

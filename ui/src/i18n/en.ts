@@ -715,6 +715,8 @@ export const en: Messages = {
   "ctx.layout": "Layout",
   "ctx.background": "Format Background…",
   "ctx.altText": "Alt Text…",
+  "ctx.lock": "Lock",
+  "ctx.unlock": "Unlock",
 
   // NotesPane.tsx
   "notes.resize": "Resize notes",

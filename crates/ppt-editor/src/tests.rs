@@ -1679,3 +1679,48 @@ fn right_click_selects_the_object_under_the_pointer() {
     assert_eq!(e.context_target(&mut eng, &at(0, 0), &TOL), ContextTarget::Blank);
     assert!(e.selection.is_empty());
 }
+
+#[test]
+fn locked_shapes_cannot_move_resize_or_rotate_and_the_lock_is_saved() {
+    let mut eng = engine();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    let id = e.pres.slides[0].shapes[0].id;
+    e.selection = vec![id];
+    let at = e.pres.slides[0].shapes[0].xfrm;
+    assert!(!e.selection_all_locked());
+    assert!(!e.handles(&TOL).is_empty());
+
+    let undo_len = e.undo.len();
+    assert!(e.set_locked(&mut eng, true));
+    assert_eq!(e.undo.len(), undo_len + 1);
+    assert!(e.selection_all_locked());
+    assert!(!e.set_locked(&mut eng, true), "already locked");
+    // Nothing that moves, resizes or turns the shape works any more.
+    assert!(e.handles(&TOL).is_empty());
+    assert!(!e.nudge(10, 10));
+    assert!(!e.rotate_selection(90.0));
+    assert!(!e.flip_selection(true));
+    assert!(!e.set_selection_frame(Xfrm { x: at.x + 5, ..at }));
+    assert!(!e.align(AlignTo::Left));
+    assert_eq!(e.pres.slides[0].shapes[0].xfrm, at);
+    // Dragging it does nothing either.
+    let (cx, cy) = (at.x + at.w / 2, at.y + at.h / 2);
+    let ev = |x: i64, y: i64| PointerEvent { x: x as f64, y: y as f64, shift: false, alt: false, meta: false, clicks: 1 };
+    e.pointer_down(&mut eng, &ev(cx, cy), &TOL);
+    e.pointer_move(&mut eng, &ev(cx + IN, cy + IN), &TOL);
+    e.pointer_up(&mut eng, &ev(cx + IN, cy + IN));
+    assert_eq!(e.pres.slides[0].shapes[0].xfrm, at);
+
+    // The lock survives saving, and a second save keeps it.
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    let xml = zip_part(&saved, "ppt/slides/slide1.xml");
+    assert!(xml.contains(r#"noMove="1""#) && xml.contains(r#"noResize="1""#), "{xml}");
+    let mut re = Editor::new(ppt_ooxml::parse_pptx(&saved).unwrap());
+    assert!(re.pres.slides[0].shapes[0].access.locked);
+    // Unlocking removes the lock attributes again (a placeholder keeps its own noGrp).
+    re.selection = vec![re.pres.slides[0].shapes[0].id];
+    assert!(re.set_locked(&mut eng, false));
+    let xml = zip_part(&ppt_ooxml::save_pptx(&re.pres).unwrap(), "ppt/slides/slide1.xml");
+    assert!(!xml.contains("noMove") && !xml.contains("noResize"), "{xml}");
+    assert!(re.nudge(10, 10));
+}

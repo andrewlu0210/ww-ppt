@@ -805,7 +805,18 @@ fn access(c_nv_pr: Node) -> Access {
         .flat_map(|l| l.descendants())
         .find(|n| n.tag_name().name() == "decorative")
         .is_some_and(|d| attr_bool(d, "val").unwrap_or(true));
-    Access { alt_text: c_nv_pr.attribute("descr").unwrap_or_default().to_string(), decorative, hidden: attr_bool(c_nv_pr, "hidden").unwrap_or(false) }
+    Access { alt_text: c_nv_pr.attribute("descr").unwrap_or_default().to_string(), decorative, hidden: attr_bool(c_nv_pr, "hidden").unwrap_or(false), locked: is_locked(c_nv_pr) }
+}
+
+/// The non-visual "locks" element next to `cNvPr` (`a:spLocks`, `a:picLocks`, ...), if any.
+pub(crate) fn locks_of<'a, 'i>(c_nv_pr: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    let owner = c_nv_pr.next_siblings().skip(1).find(|n| n.is_element() && n.tag_name().name().starts_with("cNv"))?;
+    owner.children().find(|n| n.is_element() && n.tag_name().name().ends_with("Locks"))
+}
+
+/// A shape is locked when it can neither move nor resize (what PowerPoint's Lock sets).
+fn is_locked(c_nv_pr: Node) -> bool {
+    locks_of(c_nv_pr).is_some_and(|l| attr_bool(l, "noMove").unwrap_or(false) && attr_bool(l, "noResize").unwrap_or(false))
 }
 
 fn is_hidden(n: Node) -> bool {
