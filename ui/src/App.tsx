@@ -43,6 +43,9 @@ import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
 import { AnimationBadges } from "./components/AnimationTab";
 import { FindBar, type FindBarHandle } from "./components/FindBar";
 import { SpellMenu, type SpellHit } from "./components/SpellMenu";
+import { ContextMenu } from "./components/ContextMenu";
+import { AltTextForm } from "./components/AltTextDialog";
+import { buildContextMenu, type ContextKind } from "./lib/contextMenu";
 import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 import type { AltTextInfo } from "./components/AltTextDialog";
@@ -177,6 +180,10 @@ export function App() {
   const [layoutThumbs, setLayoutThumbs] = useState<(ImageData | undefined)[]>([]);
   const [thumbs, setThumbs] = useState<Map<number, ImageData>>(new Map());
   const [linkRequest, setLinkRequest] = useState(0);
+  const [tabRequest, setTabRequest] = useState<{ tab: string; n: number }>({ tab: "", n: 0 });
+  /** The right-click menu (objects, text, blank area), and the alt text form it can open. */
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; kind: ContextKind } | null>(null);
+  const [altPopup, setAltPopup] = useState<{ x: number; y: number } | null>(null);
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
   const [animPresets, setAnimPresets] = useState<AnimationPreset[]>([]);
   const [shapeIcons, setShapeIcons] = useState<Map<string, PresetIcon>>(new Map());
@@ -577,23 +584,35 @@ export function App() {
     setSpellEpoch((n) => n + 1);
   }, []);
 
-  /** Right click on a misspelled word: its corrections. */
+  /** Right click on the canvas: a misspelled word's corrections, or the menu of what was hit. */
   const onCanvasContextMenu = useCallback(
     (e: React.MouseEvent) => {
       const engine = engineRef.current;
       const canvas = document.querySelector(".canvas-host canvas");
-      if (!engine || !canvas || !spellOn || showingRef.current) return;
+      if (!engine || !canvas || showingRef.current || viewModeRef.current !== "normal") return;
       const r = canvas.getBoundingClientRect();
-      const hit = engine.spellingAt(e.clientX - r.left, e.clientY - r.top) as SpellHit | null;
-      if (!hit) return;
+      const cx = e.clientX - r.left;
+      const cy = e.clientY - r.top;
+      if (cx < 0 || cy < 0 || cx > r.width || cy > r.height) return;
       e.preventDefault();
       const area = e.currentTarget.getBoundingClientRect();
-      const at = { x: e.clientX - area.left, y: e.clientY - area.top, hit };
-      setSpellMenu({ ...at, guesses: null });
-      void invoke<string[]>("spell_guesses", { text: hit.text, start: hit.start, len: hit.length })
-        .catch(() => [])
-        .then((guesses) => setSpellMenu((m) => (m?.hit === hit ? { ...m, guesses } : m)));
+      const at = { x: e.clientX - area.left, y: e.clientY - area.top };
+      setCtxMenu(null);
+      setAltPopup(null);
+      const hit = spellOn ? (engine.spellingAt(cx, cy) as SpellHit | null) : null;
+      if (hit) {
+        setSpellMenu({ ...at, hit, guesses: null });
+        void invoke<string[]>("spell_guesses", { text: hit.text, start: hit.start, len: hit.length })
+          .catch(() => [])
+          .then((guesses) => setSpellMenu((m) => (m?.hit === hit ? { ...m, guesses } : m)));
+        return;
+      }
+      setSpellMenu(null);
+      const kind = engine.contextTarget(cx, cy) as ContextKind;
+      refresh();
+      setCtxMenu({ ...at, kind });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [spellOn],
   );
 
@@ -1412,7 +1431,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title={t("title.unsaved")} />}
         </span>
       </header>
-      <Ribbon painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
+      <Ribbon tabRequest={tabRequest} painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
         theme={theme}
         colorSchemes={schemes.colors}
         fontSchemes={schemes.fonts}
@@ -1488,6 +1507,35 @@ export function App() {
                 onLearn={() => void invoke("spell_learn", { word: spellMenu.hit.word }).then(recheckSpelling)}
                 onClose={() => setSpellMenu(null)}
               />
+            )}
+            {ctxMenu && (
+              <ContextMenu
+                x={ctxMenu.x}
+                y={ctxMenu.y}
+                label={t("ctx.menu")}
+                items={buildContextMenu(ctxMenu.kind, {
+                  status,
+                  run,
+                  layoutNames,
+                  openTab: (tab) => setTabRequest((q) => ({ tab, n: q.n + 1 })),
+                  openLink: () => setLinkRequest((n) => n + 1),
+                  openAltText: () => setAltPopup({ x: ctxMenu.x, y: ctxMenu.y }),
+                  endEditing: () => {
+                    engineRef.current?.keyDown("Escape", false, false, false, false);
+                    refresh();
+                  },
+                })}
+                onClose={() => setCtxMenu(null)}
+              />
+            )}
+            {altPopup && (
+              <div className="ctx-popup" style={{ left: altPopup.x, top: altPopup.y }}>
+                <AltTextForm
+                  initial={(engineRef.current?.altText() as AltTextInfo | null | undefined) ?? { text: "", decorative: false }}
+                  run={run}
+                  close={() => setAltPopup(null)}
+                />
+              </div>
             )}
             {error && (
               <div className="banner" role="alert">

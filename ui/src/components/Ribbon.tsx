@@ -63,7 +63,7 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 /** Numbering schemes offered in the gallery, with a sample. */
-const NUMBERINGS: [string, string][] = [
+export const NUMBERINGS: [string, string][] = [
   ["arabicPeriod", "1. 2. 3."],
   ["arabicParenR", "1) 2) 3)"],
   ["romanUcPeriod", "I. II. III."],
@@ -135,9 +135,11 @@ interface Props {
   /** The selected object's alternative text, read when the dialog opens. */
   loadAltText: () => AltTextInfo | null;
   appearance: Appearance;
+  /** Switch to a tab (`n` changes with each request, so the same tab can be asked for again). */
+  tabRequest?: { tab: string; n: number };
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance, tabRequest }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -145,6 +147,9 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
   useEffect(() => {
     if (linkRequest > 0) setTab("插入");
   }, [linkRequest]);
+  useEffect(() => {
+    if (tabRequest && (TABS as readonly string[]).includes(tabRequest.tab)) setTab(tabRequest.tab as Tab);
+  }, [tabRequest]);
   const text = status.hasText;
   const shapes = status.hasSelection && !status.editingText;
 

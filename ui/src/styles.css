@@ -1466,11 +1466,16 @@ button {
   visibility: hidden;
 }
 
-/* Right-click menu on a misspelled word. */
-.spell-menu {
+/* Right-click menus (objects, text, blank area, misspelled words). */
+.ctx-root {
   position: absolute;
   z-index: 30;
-  min-width: 160px;
+  outline: none;
+}
+
+.ctx-menu {
+  position: relative;
+  min-width: 200px;
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1481,34 +1486,84 @@ button {
   flex-direction: column;
 }
 
-.spell-item {
-  font: inherit;
-  text-align: left;
-  padding: 3px 10px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  cursor: default;
+.ctx-sub {
+  position: absolute;
+  left: 100%;
+  top: -5px;
+  z-index: 31;
 }
 
-.spell-item:hover {
+.ctx-sub.flip {
+  left: auto;
+  right: 100%;
+}
+
+.ctx-row {
+  position: relative;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 4px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.ctx-item.bold .ctx-label {
+  font-weight: 600;
+}
+
+.ctx-item.disabled {
+  opacity: 0.45;
+}
+
+.ctx-item.focused:not(.disabled),
+.ctx-item.parent {
   background: #4a7fd6;
   color: #fff;
 }
 
-.spell-item.guess {
-  font-weight: 600;
+.ctx-check {
+  width: 14px;
+  text-align: center;
 }
 
-.spell-note {
-  padding: 3px 10px;
+.ctx-label {
+  flex: 1;
+}
+
+.ctx-shortcut {
+  margin-left: 24px;
   color: var(--muted);
 }
 
+.ctx-item.focused:not(.disabled) .ctx-shortcut,
+.ctx-item.parent .ctx-shortcut {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.ctx-arrow {
+  margin-left: 16px;
+}
+
+.ctx-sep,
 .spell-sep {
   height: 1px;
   margin: 4px 2px;
   background: var(--border);
+}
+
+.ctx-popup {
+  position: absolute;
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 
 /* Small dropdown menus in the ribbon (character spacing, line spacing, text anchor). */

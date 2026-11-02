@@ -113,6 +113,14 @@ pub struct Modifiers {
     pub ctrl: bool,
 }
 
+/// What a right click landed on (`Editor::context_target`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextTarget {
+    Blank,
+    Object,
+    Text,
+}
+
 /// Hit-test tolerances in EMU, derived from screen pixels by the host.
 #[derive(Clone, Copy, Debug)]
 pub struct Tolerance {
@@ -591,6 +599,32 @@ impl Editor {
 
     fn origs(&self) -> Vec<(ShapeId, Xfrm)> {
         self.selected_shapes().iter().map(|s| (s.id, s.xfrm)).collect()
+    }
+
+    /// Right click: what is under the pointer. An object that isn't selected yet becomes the selection
+    /// (as with PowerPoint); a click inside the text being edited keeps editing, any other click ends it.
+    pub fn context_target(&mut self, engine: &mut TextEngine, ev: &PointerEvent, tol: &Tolerance) -> ContextTarget {
+        let hit = self.hit_test(ev.x, ev.y, tol.handle);
+        if let Some(edit) = &self.text {
+            if hit == Some(edit.shape) {
+                return ContextTarget::Text;
+            }
+            self.end_text_edit(engine);
+        }
+        match hit {
+            Some(id) => {
+                if !self.is_selected(id) {
+                    self.cell_range = None;
+                    self.selection = self.click_target(id);
+                }
+                ContextTarget::Object
+            }
+            None => {
+                self.cell_range = None;
+                self.selection.clear();
+                ContextTarget::Blank
+            }
+        }
     }
 
     /// Returns true when the view needs to be redrawn.

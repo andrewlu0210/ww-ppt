@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { useEffect, useRef } from "react";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
 
 /** A misspelled word under the pointer (`App::spellingAt`); ranges in UTF-16 units. */
 export interface SpellHit {
@@ -27,41 +27,10 @@ const MAX_GUESSES = 6;
 
 /** The right-click menu on a misspelled word: corrections, ignore, add to the dictionary. */
 export function SpellMenu({ x, y, hit, guesses, onPick, onIgnore, onLearn, onClose }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-  const item = (label: string, act: () => void, bold = false) => (
-    <button
-      key={label}
-      className={bold ? "spell-item guess" : "spell-item"}
-      role="menuitem"
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => {
-        act();
-        onClose();
-      }}
-    >
-      {label}
-    </button>
-  );
-  return (
-    <div ref={ref} className="spell-menu" role="menu" aria-label={t("spell.suggestionsFor", { word: hit.word })} style={{ left: x, top: y }}>
-      {guesses === null && <div className="spell-note">{t("spell.looking")}</div>}
-      {guesses?.length === 0 && <div className="spell-note">{t("spell.none")}</div>}
-      {guesses?.slice(0, MAX_GUESSES).map((g) => item(g, () => onPick(g), true))}
-      <div className="spell-sep" />
-      {item(t("spell.ignore"), onIgnore)}
-      {item(t("spell.learn"), onLearn)}
-    </div>
-  );
+  const items: MenuItem[] = [];
+  if (guesses === null) items.push({ label: t("spell.looking"), disabled: true });
+  else if (guesses.length === 0) items.push({ label: t("spell.none"), disabled: true });
+  for (const g of guesses?.slice(0, MAX_GUESSES) ?? []) items.push({ label: g, bold: true, onSelect: () => onPick(g) });
+  items.push({ sep: true }, { label: t("spell.ignore"), onSelect: onIgnore }, { label: t("spell.learn"), onSelect: onLearn });
+  return <ContextMenu x={x} y={y} items={items} label={t("spell.suggestionsFor", { word: hit.word })} onClose={onClose} />;
 }

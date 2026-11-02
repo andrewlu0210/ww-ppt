@@ -8,7 +8,7 @@ export interface AltTextInfo {
   decorative: boolean;
 }
 
-function Form({ initial, run, close }: { initial: AltTextInfo; run: (c: Command) => void; close: () => void }) {
+export function AltTextForm({ initial, run, close }: { initial: AltTextInfo; run: (c: Command) => void; close: () => void }) {
   const [text, setText] = useState(initial.text);
   const [decorative, setDecorative] = useState(initial.decorative);
   return (
@@ -39,5 +39,5 @@ function Form({ initial, run, close }: { initial: AltTextInfo; run: (c: Command)
 
 /** 替代文字: alternative text and the decorative mark of the selected object. */
 export function AltTextDialog({ load, run, button }: { load: () => AltTextInfo | null; run: (c: Command) => void; button: (open: boolean, toggle: () => void) => ReactNode }) {
-  return <Popover button={button}>{(close) => <Form initial={load() ?? { text: "", decorative: false }} run={run} close={close} />}</Popover>;
+  return <Popover button={button}>{(close) => <AltTextForm initial={load() ?? { text: "", decorative: false }} run={run} close={close} />}</Popover>;
 }

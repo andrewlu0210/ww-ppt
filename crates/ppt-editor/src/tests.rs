@@ -1660,3 +1660,22 @@ fn format_painter_copies_shape_and_text_format_in_one_undo_step() {
     assert!(shape.fill.is_none() && shape.line.is_none());
     assert!(!shape.text.as_ref().unwrap().style_at(0).bold);
 }
+
+#[test]
+fn right_click_selects_the_object_under_the_pointer() {
+    let (mut e, a) = editor();
+    let b = add_rect(&mut e, 3 * IN, IN);
+    let mut eng = engine();
+    let at = |x: i64, y: i64| PointerEvent { x: x as f64, y: y as f64, shift: false, alt: false, meta: false, clicks: 0 };
+    // On the second shape: it becomes the selection.
+    e.selection = vec![a];
+    let (bx, by) = (3 * IN + IN / 2, IN + IN / 2);
+    assert_eq!(e.context_target(&mut eng, &at(bx, by), &TOL), ContextTarget::Object);
+    assert_eq!(e.selection, vec![b]);
+    // Again on the same shape: the selection stays.
+    assert_eq!(e.context_target(&mut eng, &at(bx, by), &TOL), ContextTarget::Object);
+    assert_eq!(e.selection, vec![b]);
+    // On empty space: nothing is selected.
+    assert_eq!(e.context_target(&mut eng, &at(0, 0), &TOL), ContextTarget::Blank);
+    assert!(e.selection.is_empty());
+}

@@ -806,6 +806,22 @@ impl App {
         self.touch(changed)
     }
 
+    /// Right click at a point: selects the object there when it isn't selected, and says what was hit:
+    /// "object", "text" (inside the text being edited) or "blank".
+    #[wasm_bindgen(js_name = contextTarget)]
+    pub fn context_target(&mut self, x: f64, y: f64) -> String {
+        let ev = self.pointer(x, y, false, false, false, 0);
+        let tol = self.tolerance();
+        let target = self.editor.context_target(&mut self.engine, &ev, &tol);
+        self.touch(true);
+        match target {
+            ppt_editor::ContextTarget::Blank => "blank",
+            ppt_editor::ContextTarget::Object => "object",
+            ppt_editor::ContextTarget::Text => "text",
+        }
+        .to_string()
+    }
+
     /// CSS cursor for the pointer position.
     pub fn cursor(&self, x: f64, y: f64) -> String {
         let ev = self.pointer(x, y, false, false, false, 0);
