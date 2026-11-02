@@ -238,6 +238,15 @@ export function App() {
   const [viewMode, setViewMode] = useState<"normal" | "sorter">("normal");
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
+  // The WebView's own right-click menu (Reload, ...) has no place in an editor, and Reload would
+  // throw away unsaved work. Text fields keep their native cut/copy/paste menu.
+  useEffect(() => {
+    const onMenu = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest?.("input, textarea, [contenteditable='true']")) e.preventDefault();
+    };
+    document.addEventListener("contextmenu", onMenu);
+    return () => document.removeEventListener("contextmenu", onMenu);
+  }, []);
   // Last key press, so keyboard moves of the selection can be spoken.
   const lastKeyAt = useRef(0);
   useEffect(() => {
