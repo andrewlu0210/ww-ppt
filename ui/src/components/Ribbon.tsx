@@ -94,7 +94,6 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="rb-group" role="group" aria-label={label}>
       <div className="rb-items">{children}</div>
-      <div className="rb-label">{label}</div>
     </div>
   );
 }

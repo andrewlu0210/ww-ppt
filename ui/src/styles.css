@@ -184,8 +184,8 @@ button {
 
 .rb-body {
   display: flex;
-  min-height: 86px;
-  padding: 4px 6px 0;
+  min-height: 66px;
+  padding: 4px 6px;
   /* Visible so popovers (colors, layouts) are not clipped. */
   overflow: visible;
 }
@@ -204,13 +204,6 @@ button {
   gap: 2px;
   flex: 1;
   max-width: 420px;
-}
-
-.rb-label {
-  text-align: center;
-  color: var(--muted);
-  font-size: 11px;
-  padding: 2px 0 4px;
 }
 
 .rb-btn {
