@@ -17,14 +17,15 @@ def timing(steps, media):
     """`steps`: list of (spid, click?) playFrom commands; `media`: <p:audio|video> settings."""
     pars = ""
     n = 10
-    for spid, click in steps:
+    for spid, click, *rest in steps:
+        delay = rest[0] if rest else 0
         cond = '<p:cond delay="indefinite"/>' if click else '<p:cond delay="indefinite"/><p:cond evt="onBegin" delay="0"><p:tn val="2"/></p:cond>'
         node = "clickEffect" if click else "afterEffect"
         pars += (
             f'<p:par><p:cTn id="{n}" fill="hold"><p:stCondLst>{cond}</p:stCondLst><p:childTnLst>'
             f'<p:par><p:cTn id="{n+1}" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>'
             f'<p:par><p:cTn id="{n+2}" presetID="1" presetClass="mediacall" presetSubtype="0" fill="hold" nodeType="{node}">'
-            f'<p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst>'
+            f'<p:stCondLst><p:cond delay="{delay}"/></p:stCondLst><p:childTnLst>'
             f'<p:cmd type="call" cmd="playFrom(0.0)"><p:cBhvr><p:cTn id="{n+3}" dur="1" fill="hold"/>'
             f'<p:tgtEl><p:spTgt spid="{spid}"/></p:tgtEl></p:cBhvr></p:cmd>'
             f"</p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par>"

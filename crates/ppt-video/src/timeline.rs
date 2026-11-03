@@ -52,6 +52,8 @@ pub enum Shot {
 pub struct ClipSpan {
     pub slide: usize,
     pub start: ClipStart,
+    /// Wait after `start` (the effect's delay).
+    pub delay_ms: f64,
     /// Playing time in the video (after trimming); `None` if it carries on
     /// past its slide (a loop, or music over several slides).
     pub len_ms: Option<f64>,
@@ -127,10 +129,11 @@ pub fn plan(pres: &Presentation, opts: &VideoOptions, clips: &[ClipSpan]) -> Pla
         // Wait for the sounds and videos that play only here.
         for c in clips.iter().filter(|c| c.slide == i) {
             let Some(len) = c.len_ms else { continue };
-            let begin = match c.start {
-                ClipStart::Auto => click_ms[0],
-                ClipStart::Click(n) => click_ms.get(n).copied().unwrap_or(anim_ms + played),
-            };
+            let begin = c.delay_ms
+                + match c.start {
+                    ClipStart::Auto => click_ms[0],
+                    ClipStart::Click(n) => click_ms.get(n).copied().unwrap_or(anim_ms + played),
+                };
             hold = hold.max(begin + len - now.get());
         }
         span(hold, &mut out, &|_| Shot::Slide { slide: i, clicks, ms: SETTLED });
@@ -180,7 +183,7 @@ mod tests {
     fn a_slide_waits_for_the_clip_that_plays_only_on_it() {
         let pres = deck(vec![Slide::default(), Slide::default()]);
         let opts = VideoOptions { fps: 10, seconds_per_slide: 1.0, ..Default::default() };
-        let clip = ClipSpan { slide: 0, start: ClipStart::Auto, len_ms: Some(2500.0) };
+        let clip = ClipSpan { slide: 0, start: ClipStart::Auto, delay_ms: 0.0, len_ms: Some(2500.0) };
         let p = plan(&pres, &opts, &[clip]);
         assert_eq!(p.shots.len(), 25 + 10);
         assert_eq!((p.slides[0].anim_ms, p.slides[0].end_ms), (0.0, 2500.0));
@@ -188,6 +191,15 @@ mod tests {
         // A loop (no length) leaves the time alone.
         let looped = ClipSpan { len_ms: None, ..clip };
         assert_eq!(plan(&pres, &opts, &[looped]).shots.len(), 20);
+    }
+
+    #[test]
+    fn a_delayed_clip_starts_later_and_holds_its_slide_longer() {
+        let pres = deck(vec![Slide::default()]);
+        let opts = VideoOptions { fps: 10, seconds_per_slide: 1.0, ..Default::default() };
+        let clip = ClipSpan { slide: 0, start: ClipStart::Auto, delay_ms: 1000.0, len_ms: Some(2000.0) };
+        // It plays from 1 s to 3 s: the slide stays 3 s, not 1 s.
+        assert_eq!(plan(&pres, &opts, &[clip]).shots.len(), 30);
     }
 
     #[test]

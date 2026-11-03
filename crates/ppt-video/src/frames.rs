@@ -57,17 +57,41 @@ impl VideoSource {
     }
 }
 
-/// Draws `image` into the `x`, `y`, `w`, `h` rectangle (pixels from the top left) of the
-/// `width` × `height` RGBA `pixels`.
-pub fn draw(pixels: &mut [u8], width: u32, height: u32, image: &CGImage, (x, y, w, h): (f64, f64, f64, f64)) {
+/// Where a video's picture is on the output frame, in pixels from the top left.
+#[derive(Clone, Copy, Debug)]
+pub struct PictureFrame {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    /// Clockwise degrees about the centre, and mirroring.
+    pub rot: f64,
+    pub flip_h: bool,
+    pub flip_v: bool,
+    /// The picture's crop, as fractions of the whole video frame: left, top, right, bottom.
+    pub crop: (f64, f64, f64, f64),
+}
+
+/// Draws `image` as the picture `frame` in the `width` × `height` RGBA `pixels`: cropped,
+/// mirrored and rotated like the picture it plays in.
+pub fn draw(pixels: &mut [u8], width: u32, height: u32, image: &CGImage, frame: PictureFrame) {
     let Some(space) = CGColorSpace::new_device_rgb() else { return };
     // Premultiplied alpha, last: RGBA bytes.
     const PREMULTIPLIED_LAST: u32 = 1;
     unsafe {
         let Some(ctx) = CGBitmapContextCreate(pixels.as_mut_ptr().cast(), width as usize, height as usize, 8, width as usize * 4, Some(&space), PREMULTIPLIED_LAST) else { return };
         let ctx: CFRetained<CGContext> = CFRetained::from_raw(ctx);
-        // The context's origin is at the bottom left.
-        let rect = CGRect { origin: CGPoint { x, y: height as f64 - (y + h) }, size: CGSize { width: w, height: h } };
-        CGContext::draw_image(Some(&ctx), rect, Some(image));
+        let c = Some(&*ctx);
+        let (cl, ct, cr, cb) = frame.crop;
+        // The whole video frame is larger than the picture by the cropped parts.
+        let (full_w, full_h) = (frame.w / (1.0 - cl - cr).max(0.01), frame.h / (1.0 - ct - cb).max(0.01));
+        // The context's origin is at the bottom left, y up: work about the picture's centre.
+        CGContext::translate_ctm(c, frame.x + frame.w / 2.0, height as f64 - (frame.y + frame.h / 2.0));
+        // Clockwise on screen is counter-clockwise with y up.
+        CGContext::rotate_ctm(c, -frame.rot.to_radians());
+        CGContext::scale_ctm(c, if frame.flip_h { -1.0 } else { 1.0 }, if frame.flip_v { -1.0 } else { 1.0 });
+        CGContext::clip_to_rect(c, CGRect { origin: CGPoint { x: -frame.w / 2.0, y: -frame.h / 2.0 }, size: CGSize { width: frame.w, height: frame.h } });
+        let whole = CGRect { origin: CGPoint { x: -frame.w / 2.0 - cl * full_w, y: -frame.h / 2.0 - cb * full_h }, size: CGSize { width: full_w, height: full_h } };
+        CGContext::draw_image(c, whole, Some(image));
     }
 }

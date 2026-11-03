@@ -49,3 +49,21 @@ fn a_narration_stretches_its_slide_and_is_heard() {
     let duration: f64 = d.parse().unwrap();
     assert!((duration - 7.5).abs() < 0.2, "{duration}");
 }
+
+#[test]
+fn a_delayed_video_with_a_rotation_and_shapes_around_it_exports() {
+    // `samples/media-layers.pptx`: a rotated, cropped video that starts 1 s in, with a shape under and one over it.
+    let pres = ppt_ooxml::parse_pptx(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/media-layers.pptx")).unwrap()).unwrap();
+    let clips = ppt_ooxml::media_clips(&pres);
+    assert_eq!(clips.len(), 1, "{clips:#?}");
+    assert_eq!(clips[0].delay_ms, 1000.0);
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/video-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("layers.mp4");
+    let opts = VideoOptions { width: 320, fps: 10, seconds_per_slide: 0.5, use_timings: true };
+    assert!(export(&pres, &opts, &path, &mut |_, _| true).unwrap());
+    let Some(d) = ffprobe(&path, &["-show_entries", "format=duration", "-of", "csv=p=0"]) else { return };
+    // 1 s of delay and the 3 s video: the slide stays 4 s.
+    let duration: f64 = d.parse().unwrap();
+    assert!((duration - 4.0).abs() < 0.2, "{duration}");
+}

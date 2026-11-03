@@ -98,6 +98,8 @@ pub struct MediaClip {
     /// more is background music that carries on.
     pub slides: usize,
     pub start: ClipStart,
+    /// Wait after `start` before it plays (the effect's delay in the animation), in milliseconds.
+    pub delay_ms: f64,
 }
 
 /// Name of the audio object holding a slide's recorded narration.

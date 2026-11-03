@@ -44,6 +44,7 @@ pub fn clips(pres: &Presentation) -> Vec<MediaClip> {
                 repeat: play.repeat,
                 slides: play.slides,
                 start: play.start,
+                delay_ms: play.delay_ms,
             });
         }
     }
@@ -90,6 +91,7 @@ struct Play {
     repeat: bool,
     slides: usize,
     start: ClipStart,
+    delay_ms: f64,
 }
 
 fn timing_of(doc: &Document) -> Vec<Play> {
@@ -107,7 +109,7 @@ fn timing_of(doc: &Document) -> Vec<Play> {
             .find(|c| target(*c) == Some(spid))
             .and_then(start_of)
             .or_else(|| start_of(media));
-        let Some(start) = start else { continue };
+        let Some((start, delay_ms)) = start else { continue };
         let ctn = child(node, "cTn");
         out.push(Play {
             spid,
@@ -117,6 +119,7 @@ fn timing_of(doc: &Document) -> Vec<Play> {
             repeat: ctn.is_some_and(|c| c.attribute("repeatCount") == Some("indefinite")),
             slides: node.attribute("numSld").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).max(1),
             start,
+            delay_ms,
         });
     }
     out
@@ -124,7 +127,7 @@ fn timing_of(doc: &Document) -> Vec<Play> {
 
 /// When the click step holding `media` (a command or a media node) starts: with the slide or with a click.
 /// `None` for media triggered some other way (an interactive sequence).
-fn start_of(media: Node) -> Option<ClipStart> {
+fn start_of(media: Node) -> Option<(ClipStart, f64)> {
     // The step is the `p:par` directly under the main sequence's child list.
     let step = media.ancestors().find(|a| {
         local(*a, "par")
@@ -142,7 +145,17 @@ fn start_of(media: Node) -> Option<ClipStart> {
             clicks += 1;
         }
         if p == step {
-            return Some(if is_click { ClipStart::Click(clicks) } else { ClipStart::Auto });
+            // The effect's own delay, from the nodes between the step and the command.
+            let delay: f64 = media
+                .ancestors()
+                .take_while(|a| *a != step)
+                .filter(|a| local(*a, "cTn"))
+                .filter_map(|c| child(c, "stCondLst"))
+                .flat_map(|l| l.children().filter(|c| local(*c, "cond")))
+                .filter_map(|c| c.attribute("delay")?.parse::<f64>().ok())
+                .filter(|d| *d > 0.0)
+                .sum();
+            return Some((if is_click { ClipStart::Click(clicks) } else { ClipStart::Auto }, delay));
         }
     }
     None
