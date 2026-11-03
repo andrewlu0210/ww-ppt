@@ -22,6 +22,38 @@ interface Clip {
   h: number;
 }
 
+/** Where the slide is drawn, for placing videos over it: `host` is what a video is added to. */
+export interface SlideBox {
+  host: HTMLElement;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Finds the slide on screen: the presenter view's current-slide box when that is up, else
+ * the show screen, which the slide fills as large as its aspect ratio (width / height) allows.
+ */
+export function domSlideBox(aspect: number): () => SlideBox | null {
+  return () => {
+    const pv = document.querySelector<HTMLElement>(".pv-current");
+    if (pv) return { host: pv, left: 0, top: 0, width: pv.clientWidth, height: pv.clientHeight };
+    const host = document.querySelector<HTMLElement>(".slide-show");
+    if (!host) return null;
+    const [cw, ch] = [host.clientWidth, host.clientHeight];
+    const width = Math.min(cw, ch * aspect);
+    const height = width / aspect;
+    return { host, left: (cw - width) / 2, top: (ch - height) / 2, width, height };
+  };
+}
+
+/** What a window plays: the main window plays everything; the audience window only shows videos, silently. */
+export interface MediaOptions {
+  audio: boolean;
+  muted: boolean;
+}
+
 const MIME: Record<string, string> = { m4a: "audio/mp4", mp3: "audio/mpeg", wav: "audio/wav", aac: "audio/aac", mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime" };
 
 /** The show's media being played, for the dev automation's `mediastate`. */
@@ -35,18 +67,31 @@ export class ShowMedia {
   private paused = false;
   private at = { slide: 0, step: 0, steps: 0 };
 
-  /**
-   * `host`: the element a video goes into (positioned over the slide, which fills it
-   * centered); `null` while the show has no such place (the presenter view).
-   */
+  /** `slideBox`: where the slide is on screen now (null while the show has no screen to put a video on). */
   constructor(
     private engine: Engine,
-    private host: () => HTMLElement | null,
-    private slideAspect: number,
+    private slideBox: () => SlideBox | null,
+    private options: MediaOptions = { audio: true, muted: false },
   ) {
-    this.clips = (engine.mediaClips() as Clip[]).filter((c) => c.slides >= 1);
+    this.clips = (engine.mediaClips() as Clip[]).filter((c) => c.slides >= 1 && (options.audio || c.kind === "video"));
     active = this;
+    window.addEventListener("resize", this.relayout);
   }
+
+  /** Puts the playing videos where the slide is now (it moves with the window and with the view). */
+  relayout = () => {
+    const box = this.slideBox();
+    if (!box) return;
+    for (const [i, el] of this.playing) {
+      if (!(el instanceof HTMLVideoElement)) continue;
+      // A video moved into another view stops by itself; it carries on from where it was.
+      if (el.parentElement !== box.host) {
+        box.host.appendChild(el);
+        if (!this.paused && !el.ended) void el.play().catch(() => {});
+      }
+      this.place(el, box, this.clips[i]);
+    }
+  };
 
   /** What is playing: kind, file, position (s) and whether it is paused. */
   describe() {
@@ -71,6 +116,8 @@ export class ShowMedia {
       // A clip waits for its click; one whose click never comes (the slide has fewer) starts at once.
       else if (!live && !this.done.has(i) && slide === c.slide && (c.start === 0 || c.start <= step || c.start > steps)) this.startClip(i, c);
     });
+    // The view may have changed (slides, presenter view) since the videos were put up.
+    this.relayout();
     // Leaving a slide lets its clips play again when the show comes back to it.
     for (const i of [...this.done]) if (slide < this.clips[i].slide || slide > this.clips[i].slide + this.clips[i].slides - 1) this.done.delete(i);
   }
@@ -91,6 +138,7 @@ export class ShowMedia {
     this.done.clear();
     for (const url of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
+    window.removeEventListener("resize", this.relayout);
     if (active === this) active = null;
   }
 
@@ -121,26 +169,27 @@ export class ShowMedia {
 
   private startClipUnchecked(i: number, c: Clip) {
     const url = this.url(c);
-    this.trace.push(`start ${i} ${c.kind} url=${!!url} host=${c.kind === "video" ? !!this.host() : "-"}`);
     // A video needs the show's screen to be there; until it is, the next update tries again.
-    const host = c.kind === "video" ? this.host() : null;
-    if (c.kind === "video" && !host) return;
+    const box = c.kind === "video" ? this.slideBox() : null;
+    this.trace.push(`start ${i} ${c.kind} url=${!!url} host=${c.kind === "video" ? !!box : "-"}`);
+    if (c.kind === "video" && !box) return;
     this.done.add(i);
     if (!url) return;
     let el: HTMLMediaElement;
-    if (c.kind === "video" && host) {
+    if (c.kind === "video" && box) {
       if (c.w <= 0 || c.h <= 0) return;
       const v = document.createElement("video");
       v.className = "show-video";
       v.playsInline = true;
-      this.place(v, host, c);
-      host.appendChild(v);
+      this.place(v, box, c);
+      box.host.appendChild(v);
       el = v;
     } else {
       el = new Audio();
     }
     el.src = url;
     el.volume = Math.max(0, Math.min(1, c.volume));
+    el.muted = this.options.muted;
     const from = c.trimStartMs / 1000;
     const seek = () => {
       el.currentTime = from;
@@ -167,13 +216,9 @@ export class ShowMedia {
     if (!this.paused) void el.play().catch(() => {});
   }
 
-  /** Puts a video over the slide: the slide fills `host` as large as its aspect ratio allows, centered. */
-  private place(v: HTMLVideoElement, host: HTMLElement, c: Clip) {
-    const [cw, ch] = [host.clientWidth, host.clientHeight];
-    const fw = Math.min(cw, ch * this.slideAspect);
-    const fh = fw / this.slideAspect;
-    const [left, top] = [(cw - fw) / 2, (ch - fh) / 2];
-    Object.assign(v.style, { left: `${left + c.x * fw}px`, top: `${top + c.y * fh}px`, width: `${c.w * fw}px`, height: `${c.h * fh}px` });
+  /** Puts a video over its picture on the slide. */
+  private place(v: HTMLVideoElement, box: SlideBox, c: Clip) {
+    Object.assign(v.style, { left: `${box.left + c.x * box.width}px`, top: `${box.top + c.y * box.height}px`, width: `${c.w * box.width}px`, height: `${c.h * box.height}px` });
   }
 
   private stopClip(i: number) {

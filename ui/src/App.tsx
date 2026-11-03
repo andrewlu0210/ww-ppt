@@ -10,7 +10,7 @@ import { SlidePane } from "./components/SlidePane";
 import { SlideShow } from "./components/SlideShow";
 import { ReadingBar } from "./components/ReadingBar";
 import { NarrationRecorder, type Take } from "./lib/narration";
-import { ShowMedia } from "./lib/showMedia";
+import { domSlideBox, ShowMedia } from "./lib/showMedia";
 import { PresenterView, type ShowTimer } from "./components/PresenterView";
 import { AUDIENCE_LABEL, type ShowCommand, type ShowState } from "./lib/show";
 import { MIN_NOTES_HEIGHT, NotesPane, notesFocused } from "./components/NotesPane";
@@ -824,7 +824,7 @@ export function App() {
       // Recording narration plays nothing (the microphone would hear it).
       if (!recorderRef.current) {
         const [w, h] = Array.from(engine.slideSize());
-        const media = new ShowMedia(engine, () => document.querySelector<HTMLElement>(".slide-show"), w / Math.max(1, h));
+        const media = new ShowMedia(engine, domSlideBox(w / Math.max(1, h)));
         showMediaRef.current = media.any ? media : null;
       }
       setReading(inWindow);

@@ -247,7 +247,7 @@ async function step(cmd: string, h: Hooks) {
     }
     // A key for the slide show, e.g. `showkey ArrowRight`, and a pause in ms: `sleep 1500`.
     case "showkey":
-      document.querySelector(".slide-show")?.dispatchEvent(new KeyboardEvent("keydown", { key: args[0], bubbles: true, cancelable: true }));
+      document.querySelector(".slide-show, .presenter")?.dispatchEvent(new KeyboardEvent("keydown", { key: args[0], altKey: has("alt"), bubbles: true, cancelable: true }));
       break;
     case "sleep":
       await new Promise((r) => setTimeout(r, num(0)));

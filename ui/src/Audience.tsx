@@ -6,6 +6,7 @@ import { lang } from "./i18n";
 import { SlideShow } from "./components/SlideShow";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import type { ShowCommand, ShowState } from "./lib/show";
+import { domSlideBox, ShowMedia } from "./lib/showMedia";
 
 /**
  * Root of the audience window: the slides full screen on the second display.
@@ -16,6 +17,8 @@ export function Audience() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
   const [state, setState] = useState<ShowState | null>(null);
+  // Videos of the show, silent: the main window plays the sound.
+  const mediaRef = useRef<ShowMedia | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -52,6 +55,10 @@ export function Audience() {
       const deck = new Uint8Array(await invoke<ArrayBuffer>("get_show_deck"));
       app.loadPptx(deck);
       app.startShow(false);
+      const [slideW, slideH] = Array.from(app.slideSize());
+      const media = new ShowMedia(app, domSlideBox(slideW / Math.max(1, slideH)), { audio: false, muted: true });
+      mediaRef.current = media;
+      cleanups.push(() => media.stop());
       const unlisten = await listen<ShowState>("show-sync", (e) => {
         app.showSet(e.payload.slide, e.payload.blank, e.payload.transition, e.payload.step, e.payload.stepAnimate);
         setState(e.payload);
@@ -77,6 +84,17 @@ export function Audience() {
       cleanups.forEach((c) => c());
     };
   }, []);
+
+  // Videos follow the show the main window sends (and are tried again once the screen is up).
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!engine || !media || !state) return;
+    media.update(state.slide, state.step, state.steps);
+    media.setBlank(state.blank !== "");
+    // Dev automation only (a no-op otherwise).
+    const videos = [...document.querySelectorAll<HTMLVideoElement>(".show-video")].map((v) => ({ rect: [v.offsetLeft, v.offsetTop, v.offsetWidth, v.offsetHeight].map(Math.round), t: Number(v.currentTime.toFixed(2)), paused: v.paused, muted: v.muted }));
+    void invoke("automation_log", { line: `audience-media ${JSON.stringify({ ...media.describe(), videos })}` });
+  }, [engine, state]);
 
   const command = (c: ShowCommand) => void emitTo("main", "show-input", c);
 
