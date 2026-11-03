@@ -1342,6 +1342,9 @@ export function App() {
         case "lineSpec":
           engine.setLineSpec(c.spec);
           break;
+        case "shadowSpec":
+          engine.setShadowSpec(c.spec);
+          break;
         case "lineColor":
           engine.setLineColor(c.color);
           break;

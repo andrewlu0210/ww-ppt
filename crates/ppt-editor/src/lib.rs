@@ -20,7 +20,7 @@ mod narration;
 mod painter;
 mod richedit;
 mod spell;
-pub use fillline::{FillLineInfo, FillSpec, LineSpec};
+pub use fillline::{FillLineInfo, FillSpec, LineSpec, ShadowSpec};
 pub mod show;
 mod table;
 mod view;

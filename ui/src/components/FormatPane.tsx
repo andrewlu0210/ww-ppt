@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { App } from "../wasm/ppt_wasm";
 import type { Command } from "../lib/commands";
 import { ColorPicker } from "./ColorPicker";
+import { SHADOWS } from "./FormatGroups";
 
 // What `App::fillLineInfo` returns.
 interface Stop {
@@ -32,18 +33,40 @@ interface LineInfo {
   head?: End;
   tail?: End;
 }
+interface ShadowInfo {
+  visible: boolean;
+  color?: string;
+  alpha?: number;
+  blurPt?: number;
+  distPt?: number;
+  angle?: number;
+}
 interface Info {
   canFill: boolean;
   canArrows: boolean;
+  canShadow: boolean;
+  /** null: the selected shapes differ. */
+  shadow: ShadowInfo | null;
   /** null: the selected shapes differ. */
   fill: FillInfo | null;
   line: LineInfo | null;
 }
 
 export type FillSpec = { type: "none" } | { type: "solid"; color: string; alpha: number } | { type: "gradient"; kind: "linear" | "radial"; angle: number; stops: Stop[] };
+export type ShadowSpec = Partial<{ visible: boolean; color: string; alpha: number; blurPt: number; distPt: number; angle: number }>;
 export type LineSpec = Partial<{ visible: boolean; color: string; alpha: number; widthPt: number; dash: string; head: End; tail: End }>;
 
 const DEFAULT_COLOR = "#4472C4";
+
+/** PowerPoint's preset shadows as (direction °, distance pt, blur pt), to tell which one a shadow is. */
+const SHADOW_SHAPES: Record<string, [number, number, number]> = { bottomRight: [45, 3, 4], bottom: [90, 3, 4], right: [0, 3, 4], bottomLeft: [135, 3, 4], center: [0, 0, 5] };
+
+function shadowPreset(s: ShadowInfo | null): string {
+  if (s === null) return "";
+  if (!s.visible) return "none";
+  const found = Object.entries(SHADOW_SHAPES).find(([, [dir, dist, blur]]) => Math.abs((s.angle ?? 0) - dir) < 0.5 && Math.abs((s.distPt ?? 0) - dist) < 0.05 && Math.abs((s.blurPt ?? 0) - blur) < 0.05);
+  return found ? found[0] : "custom";
+}
 
 const DASHES: [string, string][] = [
   ["solid", t("format.dash.solid")],
@@ -183,6 +206,9 @@ export function FormatPane({ engine, version, run, onClose }: Props) {
   const line = info?.line ?? null;
   const setFill = (spec: FillSpec) => run({ kind: "fillSpec", spec });
   const setLine = (spec: LineSpec) => run({ kind: "lineSpec", spec });
+  const setShadow = (spec: ShadowSpec) => run({ kind: "shadowSpec", spec });
+  const shadow = info?.shadow ?? null;
+  const preset = shadowPreset(shadow);
 
   // --- fill
   const baseColor = fill?.type === "solid" ? fill.color! : fill?.type === "gradient" ? fill.stops![0].color : DEFAULT_COLOR;
@@ -362,6 +388,40 @@ export function FormatPane({ engine, version, run, onClose }: Props) {
               </>
             )}
           </Section>
+          {info.canShadow && (
+            <Section title={t("format.effectsSection")}>
+              <div className="fp-subhead">{t("format.shadow")}</div>
+              <label className="fp-field wide">
+                <span>{t("format.shadowPreset")}</span>
+                <select value={preset} onChange={(e) => run({ kind: "shadow", preset: e.target.value })}>
+                  {preset === "" && (
+                    <option value="" disabled>
+                      —
+                    </option>
+                  )}
+                  {SHADOWS.map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                  {preset === "custom" && <option value="custom">{t("format.shadowCustom")}</option>}
+                </select>
+              </label>
+              {shadow === null && <div className="pane-empty">{t("format.mixed")}</div>}
+              {shadow?.visible && (
+                <>
+                  <div className="fp-row">
+                    <span className="fp-label">{t("format.color")}</span>
+                    <ColorPicker icon={<Swatch color={shadow.color} alpha={shadow.alpha} />} label="" value={shadow.color} onPick={(color) => color && setShadow({ color, alpha: shadow.alpha })} />
+                  </div>
+                  <Percent label={t("format.transparency")} value={Math.round((1 - shadow.alpha!) * 100)} onCommit={(p) => setShadow({ alpha: 1 - p / 100 })} />
+                  <Num label={t("format.blur")} unit="pt" value={shadow.blurPt} min={0} max={100} step={0.5} onCommit={(blurPt) => setShadow({ blurPt })} />
+                  <Num label={t("format.angle")} unit="°" value={shadow.angle} min={0} max={359} step={5} onCommit={(angle) => setShadow({ angle })} />
+                  <Num label={t("format.distance")} unit="pt" value={shadow.distPt} min={0} max={200} step={0.5} onCommit={(distPt) => setShadow({ distPt })} />
+                </>
+              )}
+            </Section>
+          )}
         </div>
       )}
     </aside>

@@ -798,6 +798,12 @@ export const en: Messages = {
   "format.arrow.diamond": "Diamond Arrow",
   "format.arrow.oval": "Oval Arrow",
   "format.arrow.arrow": "Open Arrow",
+  "format.effectsSection": "Effects",
+  "format.shadow": "Shadow",
+  "format.shadowPreset": "Presets",
+  "format.shadowCustom": "Custom",
+  "format.blur": "Blur",
+  "format.distance": "Distance",
   "show.ended": "End of slide show, click to exit.",
 
   // ColorPicker.tsx

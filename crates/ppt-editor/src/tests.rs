@@ -1782,3 +1782,26 @@ fn a_line_takes_arrowheads_and_the_pane_reads_back_mixed_values() {
     assert_eq!(info.line, None);
     assert_eq!(info.fill, Some(Some(Paint::Solid(Color::BLACK))));
 }
+
+#[test]
+fn the_shadow_is_set_in_detail() {
+    let (mut e, id) = editor();
+    e.selection = vec![id];
+    assert!(e.pres.shape(0, id).unwrap().shadow.is_none());
+    // Touching a detail gives a shape without a shadow the default one with that change.
+    assert!(e.set_shadow_spec(ShadowSpec { blur: Some(127_000), ..Default::default() }));
+    let s = e.pres.shape(0, id).unwrap().shadow.unwrap();
+    assert_eq!((s.blur, s.dist, s.dir, s.color.a), (127_000, 38_100, 45.0, 102));
+    assert!(e.set_shadow_spec(ShadowSpec { rgb: Some((200, 0, 0)), alpha: Some(200), dist: Some(0), dir: Some(-90.0), ..Default::default() }));
+    let s = e.pres.shape(0, id).unwrap().shadow.unwrap();
+    assert_eq!((s.color, s.dist, s.dir), (Color { r: 200, g: 0, b: 0, a: 200 }, 0, 270.0));
+    let info = e.fill_line_info().unwrap();
+    assert!(info.can_shadow);
+    assert_eq!(info.shadow, Some(Some(s)));
+    // The same again is not a step; removing it is.
+    assert!(!e.set_shadow_spec(ShadowSpec { dist: Some(0), ..Default::default() }));
+    assert!(e.set_shadow_spec(ShadowSpec { visible: Some(false), ..Default::default() }));
+    assert!(e.pres.shape(0, id).unwrap().shadow.is_none());
+    // A shape without a shadow stays without one when only "hidden" is asked.
+    assert!(!e.set_shadow_spec(ShadowSpec { visible: Some(false), ..Default::default() }));
+}

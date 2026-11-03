@@ -1387,8 +1387,25 @@ impl App {
         self.touch(changed)
     }
 
+    /// Changes the selection's drop shadow; what `spec` leaves out stays. `spec`: `{ visible, color,
+    /// alpha, blurPt, distPt, angle }` (`angle` in degrees clockwise from the x axis).
+    #[wasm_bindgen(js_name = setShadowSpec)]
+    pub fn set_shadow_spec(&mut self, spec: JsValue) -> bool {
+        let pt = |key: &str| js_num(&spec, key).map(|v| (v * EMU_PER_PT).round() as i64);
+        let shadow = ppt_editor::ShadowSpec {
+            visible: Reflect::get(&spec, &"visible".into()).ok().and_then(|v| v.as_bool()),
+            rgb: js_str(&spec, "color").and_then(|c| parse_hex(&c)).map(|c| (c.r, c.g, c.b)),
+            alpha: js_num(&spec, "alpha").map(|a| (a.clamp(0.0, 1.0) * 255.0).round() as u8),
+            blur: pt("blurPt"),
+            dist: pt("distPt"),
+            dir: js_num(&spec, "angle"),
+        };
+        let changed = self.editor.set_shadow_spec(shadow);
+        self.touch(changed)
+    }
+
     /// The selection's fill and outline for the format pane, or null when nothing is selected:
-    /// `{ canFill, canArrows, fill, line }`. `fill` is null when the shapes differ, else
+    /// `{ canFill, canArrows, canShadow, fill, line, shadow }`. `fill` is null when the shapes differ, else
     /// `{ type, color, alpha, kind, angle, stops }` as in `setFillSpec`; `line` likewise
     /// (`{ visible, color, alpha, widthPt, dash, head, tail }`).
     #[wasm_bindgen(js_name = fillLineInfo)]
@@ -1405,6 +1422,28 @@ impl App {
         let out = Object::new();
         set(&out, "canFill", info.can_fill.into());
         set(&out, "canArrows", info.can_arrows.into());
+        set(&out, "canShadow", info.can_shadow.into());
+        set(
+            &out,
+            "shadow",
+            match info.shadow {
+                None => JsValue::NULL,
+                Some(None) => {
+                    let o = Object::new();
+                    set(&o, "visible", false.into());
+                    o.into()
+                }
+                Some(Some(sh)) => {
+                    let o = Object::new();
+                    set(&o, "visible", true.into());
+                    color_into(&o, sh.color);
+                    set(&o, "blurPt", (sh.blur as f64 / EMU_PER_PT).into());
+                    set(&o, "distPt", (sh.dist as f64 / EMU_PER_PT).into());
+                    set(&o, "angle", sh.dir.into());
+                    o.into()
+                }
+            },
+        );
         set(
             &out,
             "fill",

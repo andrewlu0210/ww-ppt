@@ -798,6 +798,12 @@ export const zhHans: Messages = {
   "format.arrow.diamond": "菱形箭头",
   "format.arrow.oval": "圆形箭头",
   "format.arrow.arrow": "开放箭头",
+  "format.effectsSection": "效果",
+  "format.shadow": "阴影",
+  "format.shadowPreset": "预设",
+  "format.shadowCustom": "自定义",
+  "format.blur": "模糊",
+  "format.distance": "距离",
   "show.ended": "放映结束，单击鼠标退出。",
 
   // ColorPicker.tsx

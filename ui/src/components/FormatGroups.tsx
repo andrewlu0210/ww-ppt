@@ -114,7 +114,7 @@ export function RotateMenu({ disabled, run }: { disabled: boolean; run: (c: Comm
   );
 }
 
-const SHADOWS: [string, string][] = [
+export const SHADOWS: [string, string][] = [
   ["none", t("format.noShadow")],
   ["bottomRight", t("format.offsetBottomRight")],
   ["bottom", t("format.offsetBottom")],

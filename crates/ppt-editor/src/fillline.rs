@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use ppt_model::{Color, Dash, Gradient, Line, LineEnd, Paint, Shape, ShapeKind};
+use ppt_model::{Color, Dash, Gradient, Line, LineEnd, Paint, Shadow, Shape, ShapeKind};
 
 use crate::Editor;
 
@@ -33,6 +33,20 @@ pub struct LineSpec {
     pub tail: Option<LineEnd>,
 }
 
+/// Changes to the drop shadow; what is `None` stays as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShadowSpec {
+    /// `Some(false)`: no shadow. `Some(true)`: a shadow (the default one if there was none).
+    pub visible: Option<bool>,
+    pub rgb: Option<(u8, u8, u8)>,
+    /// New opacity, 0 (clear) to 255.
+    pub alpha: Option<u8>,
+    /// Blur radius and offset distance in EMU, offset direction in degrees.
+    pub blur: Option<i64>,
+    pub dist: Option<i64>,
+    pub dir: Option<f64>,
+}
+
 /// What the format pane shows for the selection. A field is `None` when the shapes differ.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FillLineInfo {
@@ -42,10 +56,23 @@ pub struct FillLineInfo {
     pub can_arrows: bool,
     pub fill: Option<Option<Paint>>,
     pub line: Option<Option<Line>>,
+    /// At least one selected shape can have a shadow.
+    pub can_shadow: bool,
+    pub shadow: Option<Option<Shadow>>,
 }
 
 fn can_fill(s: &Shape) -> bool {
     !s.geometry.is_line() && matches!(s.kind, ShapeKind::Shape)
+}
+
+/// Shapes and pictures take a drop shadow (tables, charts and SmartArt do not).
+fn can_shadow(s: &Shape) -> bool {
+    matches!(s.kind, ShapeKind::Shape | ShapeKind::Picture { .. })
+}
+
+/// The shadow a shape gets when it is given one without details (PowerPoint's offset diagonal bottom right).
+fn default_shadow() -> Shadow {
+    Shadow { color: Color { r: 0, g: 0, b: 0, a: 102 }, blur: 50_800, dist: 38_100, dir: 45.0 }
 }
 
 /// Lines, connectors and freeform paths that are not closed.
@@ -116,6 +143,37 @@ impl Editor {
         })
     }
 
+    /// Changes the drop shadow of the selected shapes.
+    pub fn set_shadow_spec(&mut self, spec: ShadowSpec) -> bool {
+        self.edit_selected_if_changed(|s| {
+            if !can_shadow(s) {
+                return;
+            }
+            if spec.visible == Some(false) {
+                s.shadow = None;
+                return;
+            }
+            let wants = spec.visible == Some(true) || spec.rgb.is_some() || spec.alpha.is_some() || spec.blur.is_some() || spec.dist.is_some() || spec.dir.is_some();
+            let Some(mut shadow) = s.shadow.or_else(|| wants.then(default_shadow)) else { return };
+            if let Some((r, g, b)) = spec.rgb {
+                shadow.color = Color { r, g, b, a: shadow.color.a };
+            }
+            if let Some(a) = spec.alpha {
+                shadow.color.a = a;
+            }
+            if let Some(v) = spec.blur {
+                shadow.blur = v.max(0);
+            }
+            if let Some(v) = spec.dist {
+                shadow.dist = v.max(0);
+            }
+            if let Some(v) = spec.dir {
+                shadow.dir = v.rem_euclid(360.0);
+            }
+            s.shadow = Some(shadow);
+        })
+    }
+
     /// The fill and outline of the selection, `None` when nothing is selected.
     pub fn fill_line_info(&self) -> Option<FillLineInfo> {
         let shapes = self.selected_shapes();
@@ -131,6 +189,8 @@ impl Editor {
         }
         let fill = common(fillable.iter().map(|s| s.fill.clone()));
         let line = common(shapes.iter().map(|s| s.line));
-        Some(FillLineInfo { can_fill: !fillable.is_empty(), can_arrows: shapes.iter().any(|s| can_have_arrows(s)), fill, line })
+        let shadowable: Vec<&&Shape> = shapes.iter().filter(|s| can_shadow(s)).collect();
+        let shadow = common(shadowable.iter().map(|s| s.shadow));
+        Some(FillLineInfo { can_fill: !fillable.is_empty(), can_arrows: shapes.iter().any(|s| can_have_arrows(s)), fill, line, can_shadow: !shadowable.is_empty(), shadow })
     }
 }

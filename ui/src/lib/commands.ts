@@ -99,6 +99,8 @@ export type Command =
   | { kind: "fillSpec"; spec: import("../components/FormatPane").FillSpec }
   /** Changes to the selection's outline (`App::setLineSpec`). */
   | { kind: "lineSpec"; spec: import("../components/FormatPane").LineSpec }
+  /** Changes to the selection's drop shadow (`App::setShadowSpec`). */
+  | { kind: "shadowSpec"; spec: import("../components/FormatPane").ShadowSpec }
   /** Open, close or toggle the Format Shape pane. */
   | { kind: "formatPane"; open?: boolean }
   /** Remove the current slide's recorded narration. */

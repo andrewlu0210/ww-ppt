@@ -800,6 +800,12 @@ export const zhHant = {
   "format.arrow.diamond": "菱形箭號",
   "format.arrow.oval": "橢圓形箭號",
   "format.arrow.arrow": "開放箭號",
+  "format.effectsSection": "效果",
+  "format.shadow": "陰影",
+  "format.shadowPreset": "預設",
+  "format.shadowCustom": "自訂",
+  "format.blur": "模糊",
+  "format.distance": "距離",
   "show.ended": "投影片放映結束，按一下以結束。",
 
   // ColorPicker.tsx

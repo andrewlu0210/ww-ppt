@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use ppt_model::{Color, Dash, EndKind, Geometry, Gradient, GradientKind, Line, LineEnd, Paint, Shape, ShapeKind, Xfrm};
+use ppt_model::{Color, Dash, EndKind, Geometry, Gradient, GradientKind, Line, LineEnd, Paint, Shadow, Shape, ShapeKind, Xfrm};
 
 fn deck() -> ppt_model::Presentation {
     ppt_ooxml::parse_pptx(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap()).unwrap()
@@ -15,6 +15,10 @@ fn gradient() -> Gradient {
 
 fn styled_line() -> Line {
     Line { color: Color { r: 10, g: 20, b: 30, a: 100 }, width: 38_100, dash: Dash::SysDash, head: LineEnd { kind: EndKind::Oval, width: 0, length: 2 }, tail: LineEnd { kind: EndKind::Triangle, width: 2, length: 1 } }
+}
+
+fn shadow() -> Shadow {
+    Shadow { color: Color { r: 200, g: 0, b: 0, a: 150 }, blur: 127_000, dist: 76_200, dir: 135.0 }
 }
 
 fn find<'a>(pres: &'a ppt_model::Presentation, name: &str) -> &'a Shape {
@@ -30,12 +34,14 @@ fn edited_fill_and_outline_round_trip() {
         for s in slide.shapes.iter_mut().filter(|s| s.name == existing) {
             s.fill = Some(Paint::Gradient(Arc::new(gradient())));
             s.line = Some(Line { head: LineEnd::NONE, tail: LineEnd::NONE, ..styled_line() });
+            s.shadow = Some(shadow());
         }
     }
     let id = pres.alloc_id();
     let mut fresh = Shape::new(id, "fresh", Xfrm::new(1_000_000, 1_000_000, 2_000_000, 1_000_000));
     fresh.fill = Some(Paint::Gradient(Arc::new(Gradient { kind: GradientKind::Path { circle: true, focus: [0.5; 4] }, ..gradient() })));
     fresh.line = Some(Line { head: LineEnd::NONE, tail: LineEnd::NONE, ..styled_line() });
+    fresh.shadow = Some(shadow());
     pres.slides[0].shapes.push(fresh);
     let line_id = pres.alloc_id();
     let mut arrow = Shape::new(line_id, "arrow", Xfrm::new(500_000, 500_000, 3_000_000, 0));
@@ -58,5 +64,10 @@ fn edited_fill_and_outline_round_trip() {
             assert!(same_fill(&before.fill, &after.fill), "{name}: {:?} vs {:?}", before.fill, after.fill);
         }
         assert!(same_line(&before.line, &after.line), "{name}: {:?} vs {:?}", before.line, after.line);
+        if name != "arrow" {
+            let (b, a) = (before.shadow.unwrap(), after.shadow.unwrap_or_else(|| panic!("{name} lost its shadow")));
+            assert_eq!((b.blur, b.dist, (b.color.r, b.color.g, b.color.b)), (a.blur, a.dist, (a.color.r, a.color.g, a.color.b)), "{name}");
+            assert!((b.dir - a.dir).abs() < 0.01 && b.color.a.abs_diff(a.color.a) <= 1, "{name}: {b:?} vs {a:?}");
+        }
     }
 }
