@@ -10,6 +10,7 @@ import { SlidePane } from "./components/SlidePane";
 import { SlideShow } from "./components/SlideShow";
 import { ReadingBar } from "./components/ReadingBar";
 import { NarrationRecorder, type Take } from "./lib/narration";
+import { ShowMedia } from "./lib/showMedia";
 import { PresenterView, type ShowTimer } from "./components/PresenterView";
 import { AUDIENCE_LABEL, type ShowCommand, type ShowState } from "./lib/show";
 import { MIN_NOTES_HEIGHT, NotesPane, notesFocused } from "./components/NotesPane";
@@ -205,6 +206,8 @@ export function App() {
   /// Narration being recorded during the show (the microphone is open).
   const recorderRef = useRef<NarrationRecorder | null>(null);
   const [recording, setRecording] = useState(false);
+  /// Sounds and videos of the show in progress (none while recording narration).
+  const showMediaRef = useRef<ShowMedia | null>(null);
   // Whether the slide on screen has recorded narration (the engine knows; the status revision says when to ask).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const hasNarration = useMemo(() => engineRef.current?.hasNarration(status.slideIndex) ?? false, [status.revision, status.slideIndex]);
@@ -818,6 +821,12 @@ export function App() {
       if (!engine || showingRef.current) return false;
       if (inWindow) setViewMode("normal");
       if (!engine.startShow(fromBeginning)) return false;
+      // Recording narration plays nothing (the microphone would hear it).
+      if (!recorderRef.current) {
+        const [w, h] = Array.from(engine.slideSize());
+        const media = new ShowMedia(engine, () => document.querySelector<HTMLElement>(".slide-show"), w / Math.max(1, h));
+        showMediaRef.current = media.any ? media : null;
+      }
       setReading(inWindow);
       showTimer.current = { elapsed: 0, since: Date.now() };
       syncShow();
@@ -863,6 +872,14 @@ export function App() {
     [startShow],
   );
 
+  // Sounds and videos follow the show: slides, clicks and the black or white screen.
+  useEffect(() => {
+    const media = showMediaRef.current;
+    if (!media || !showState) return;
+    media.update(showState.slide, showState.step, showState.steps);
+    media.setBlank(showState.blank !== "");
+  }, [showMode, showState?.slide, showState?.step, showState?.steps, showState?.blank]);
+
   // One recording per slide: moving to another slide ends the last one and starts the next.
   useEffect(() => {
     const recorder = recorderRef.current;
@@ -886,6 +903,8 @@ export function App() {
     const engine = engineRef.current;
     if (!engine || !showingRef.current) return;
     engine.endShow();
+    showMediaRef.current?.stop();
+    showMediaRef.current = null;
     setShowMode(null);
     setShowState(null);
     const wasReading = readingRef.current;

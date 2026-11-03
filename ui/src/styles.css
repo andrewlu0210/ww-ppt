@@ -2635,3 +2635,12 @@ input:focus-visible,
     animation: none;
   }
 }
+
+/* A video playing over its picture in a slide show. */
+.show-video {
+  position: absolute;
+  z-index: 1;
+  object-fit: fill;
+  background: #000;
+  pointer-events: none;
+}

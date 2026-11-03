@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo } from "@tauri-apps/api/event";
 import { availableMonitors } from "@tauri-apps/api/window";
 import type { App } from "../wasm/ppt_wasm";
+import { activeShowMedia } from "./showMedia";
 import { exportVideo, inTauri, onVideoEvents, readFile, recoveryList, recoveryRead, writeFile } from "./backend";
 import type { Command } from "./commands";
 
@@ -242,6 +243,22 @@ async function step(cmd: string, h: Hooks) {
       if (!ta) throw new Error(`no text pane row ${args[0]}`);
       ta.focus();
       document.execCommand("insertText", false, args.slice(1).join(" "));
+      break;
+    }
+    // A key for the slide show, e.g. `showkey ArrowRight`, and a pause in ms: `sleep 1500`.
+    case "showkey":
+      document.querySelector(".slide-show")?.dispatchEvent(new KeyboardEvent("keydown", { key: args[0], bubbles: true, cancelable: true }));
+      break;
+    case "sleep":
+      await new Promise((r) => setTimeout(r, num(0)));
+      break;
+    case "mediaclips":
+      await log(`mediaclips ${JSON.stringify(engine.mediaClips())}`);
+      break;
+    // What the show is playing: `mediastate`.
+    case "mediastate": {
+      const videos = [...document.querySelectorAll<HTMLVideoElement>(".show-video")].map((v) => ({ rect: [v.offsetLeft, v.offsetTop, v.offsetWidth, v.offsetHeight].map(Math.round), t: Number(v.currentTime.toFixed(2)), paused: v.paused }));
+      await log(`mediastate ${JSON.stringify({ ...(activeShowMedia()?.describe() ?? { at: null, playing: null }), videos })}`);
       break;
     }
     // Narration as the recorder would add it: `narrate 2 clip.m4a 2500` (slide index, audio file, stay in ms).

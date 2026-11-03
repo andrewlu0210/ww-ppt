@@ -2476,6 +2476,62 @@ impl App {
         o.into()
     }
 
+    /// The sounds and videos a show plays: `[{ slide, kind, key, start, volume, repeat, slides,
+    /// trimStartMs, trimEndMs, x, y, w, h }]`. `start` is 0 when it begins with the slide, else
+    /// the click that starts it; `x`, `y`, `w`, `h` are the picture's frame as fractions of the slide.
+    /// Recordings not saved yet are included (they play from the start of their slide).
+    #[wasm_bindgen(js_name = mediaClips)]
+    pub fn media_clips(&self) -> Array {
+        use ppt_model::media::{ClipKind, ClipStart};
+        let pres = &self.editor.pres;
+        let (slide_w, slide_h) = (pres.slide_width.max(1) as f64, pres.slide_height.max(1) as f64);
+        let out = Array::new();
+        let push = |slide: usize, kind: &str, key: &str, start: u32, volume: f64, repeat: bool, slides: usize, trim: (f64, f64), frame: (f64, f64, f64, f64)| {
+            let o = Object::new();
+            let set = |k: &str, v: JsValue| {
+                let _ = Reflect::set(&o, &k.into(), &v);
+            };
+            set("slide", (slide as u32).into());
+            set("kind", kind.into());
+            set("key", key.into());
+            set("start", start.into());
+            set("volume", volume.into());
+            set("repeat", repeat.into());
+            set("slides", (slides as u32).into());
+            set("trimStartMs", trim.0.into());
+            set("trimEndMs", trim.1.into());
+            set("x", frame.0.into());
+            set("y", frame.1.into());
+            set("w", frame.2.into());
+            set("h", frame.3.into());
+            out.push(&o);
+        };
+        for c in ppt_ooxml::media_clips(pres) {
+            let frame = pres.slides.get(c.slide).and_then(|s| s.shapes.iter().find(|sh| sh.id == c.shape)).map_or((0.0, 0.0, 0.0, 0.0), |sh| {
+                let x = sh.xfrm;
+                (x.x as f64 / slide_w, x.y as f64 / slide_h, x.w as f64 / slide_w, x.h as f64 / slide_h)
+            });
+            let start = match c.start {
+                ClipStart::Auto => 0,
+                ClipStart::Click(n) => n as u32,
+            };
+            let kind = if c.kind == ClipKind::Video { "video" } else { "audio" };
+            push(c.slide, kind, &c.part, start, c.volume, c.repeat, c.slides, (c.trim_start_ms, c.trim_end_ms), frame);
+        }
+        for (i, slide) in pres.slides.iter().enumerate() {
+            if let Some(n) = &slide.narration {
+                push(i, "audio", &n.media, 0, 1.0, false, 1, (0.0, 0.0), (0.0, 0.0, 0.0, 0.0));
+            }
+        }
+        out
+    }
+
+    /// The encoded bytes of a media part (a key from `mediaClips`).
+    #[wasm_bindgen(js_name = mediaBytes)]
+    pub fn media_bytes(&self, key: &str) -> Option<Vec<u8>> {
+        self.editor.pres.media.get(key).map(|b| b.to_vec())
+    }
+
     // --- Slides --------------------------------------------------------------------
 
     #[wasm_bindgen(js_name = setSlide)]
