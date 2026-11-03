@@ -252,6 +252,10 @@ async function step(cmd: string, h: Hooks) {
     case "sleep":
       await new Promise((r) => setTimeout(r, num(0)));
       break;
+    // Which status bar buttons are disabled: `statusbar`.
+    case "statusbar":
+      await log(`statusbar ${JSON.stringify([...document.querySelectorAll<HTMLButtonElement>(".status-bar button")].map((b) => `${b.getAttribute("aria-label") ?? b.title ?? b.textContent}:${b.disabled ? "off" : "on"}`))}`);
+      break;
     case "mediaclips":
       await log(`mediaclips ${JSON.stringify(engine.mediaClips())}`);
       break;
