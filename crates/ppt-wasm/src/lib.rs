@@ -191,6 +191,24 @@ fn parse_hex(s: &str) -> Option<Color> {
     Color::from_hex(s.trim_start_matches('#'))
 }
 
+fn js_str(o: &JsValue, key: &str) -> Option<String> {
+    Reflect::get(o, &key.into()).ok()?.as_string()
+}
+
+fn js_num(o: &JsValue, key: &str) -> Option<f64> {
+    Reflect::get(o, &key.into()).ok()?.as_f64()
+}
+
+fn js_array(o: &JsValue, key: &str) -> Vec<JsValue> {
+    Reflect::get(o, &key.into()).ok().filter(|v| Array::is_array(v)).map(|v| Array::from(&v).iter().collect()).unwrap_or_default()
+}
+
+/// `{ color: "#RRGGBB", alpha: 0..1 }` as a color.
+fn js_color(o: &JsValue) -> Color {
+    let c = js_str(o, "color").and_then(|c| parse_hex(&c)).unwrap_or(Color::BLACK);
+    Color { a: (js_num(o, "alpha").unwrap_or(1.0).clamp(0.0, 1.0) * 255.0).round() as u8, ..c }
+}
+
 fn template() -> Presentation {
     ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).expect("built-in template parses")
 }
@@ -1313,6 +1331,146 @@ impl App {
     pub fn set_line_width(&mut self, pt: f64) -> bool {
         let changed = self.editor.set_line_width((pt * EMU_PER_PT).round() as i64);
         self.touch(changed)
+    }
+
+    // --- Fill and outline (the format pane) -----------------------------------------
+
+    /// Sets the selection's fill. `spec`: `{ type: "none" }`, `{ type: "solid", color, alpha }` or
+    /// `{ type: "gradient", kind: "linear" | "radial", angle, stops: [{ pos, color, alpha }] }`
+    /// (`color` "#RRGGBB", `alpha` 0 clear to 1 opaque, `pos` 0 to 1, `angle` in degrees).
+    #[wasm_bindgen(js_name = setFillSpec)]
+    pub fn set_fill_spec(&mut self, spec: JsValue) -> bool {
+        use ppt_editor::FillSpec;
+        let Some(kind) = js_str(&spec, "type") else { return false };
+        let fill = match kind.as_str() {
+            "none" => FillSpec::None,
+            "solid" => FillSpec::Solid(js_color(&spec)),
+            "gradient" => {
+                let stops: Vec<(f32, Color)> = js_array(&spec, "stops").iter().map(|st| (js_num(&st, "pos").unwrap_or(0.0).clamp(0.0, 1.0) as f32, js_color(&st))).collect();
+                if stops.len() < 2 {
+                    return false;
+                }
+                let mut stops = stops;
+                stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let kind = if js_str(&spec, "kind").as_deref() == Some("radial") {
+                    ppt_model::GradientKind::Path { circle: true, focus: [0.5; 4] }
+                } else {
+                    ppt_model::GradientKind::Linear { angle: js_num(&spec, "angle").unwrap_or(90.0), scaled: false }
+                };
+                FillSpec::Gradient(ppt_model::Gradient { stops, kind, rotate_with_shape: true })
+            }
+            _ => return false,
+        };
+        let changed = self.editor.set_fill_spec(fill);
+        self.touch(changed)
+    }
+
+    /// Changes the selection's outline; what `spec` leaves out stays. `spec`: `{ visible, color, alpha,
+    /// widthPt, dash, head: { type, w, l }, tail: { ... } }` (`dash` an OOXML name such as "sysDash",
+    /// `type` "none", "triangle", "stealth", "diamond", "oval" or "arrow", `w` and `l` 0 to 2).
+    #[wasm_bindgen(js_name = setLineSpec)]
+    pub fn set_line_spec(&mut self, spec: JsValue) -> bool {
+        let end = |key: &str| {
+            let o = Reflect::get(&spec, &key.into()).ok().filter(|v| v.is_object())?;
+            Some(ppt_model::LineEnd { kind: ppt_model::EndKind::parse(&js_str(&o, "type").unwrap_or_default()), width: js_num(&o, "w").unwrap_or(1.0).clamp(0.0, 2.0) as u8, length: js_num(&o, "l").unwrap_or(1.0).clamp(0.0, 2.0) as u8 })
+        };
+        let line = ppt_editor::LineSpec {
+            visible: Reflect::get(&spec, &"visible".into()).ok().and_then(|v| v.as_bool()),
+            rgb: js_str(&spec, "color").and_then(|c| parse_hex(&c)).map(|c| (c.r, c.g, c.b)),
+            alpha: js_num(&spec, "alpha").map(|a| (a.clamp(0.0, 1.0) * 255.0).round() as u8),
+            width: js_num(&spec, "widthPt").map(|pt| (pt * EMU_PER_PT).round() as i64),
+            dash: js_str(&spec, "dash").map(|d| ppt_model::Dash::parse(&d)),
+            head: end("head"),
+            tail: end("tail"),
+        };
+        let changed = self.editor.set_line_spec(line);
+        self.touch(changed)
+    }
+
+    /// The selection's fill and outline for the format pane, or null when nothing is selected:
+    /// `{ canFill, canArrows, fill, line }`. `fill` is null when the shapes differ, else
+    /// `{ type, color, alpha, kind, angle, stops }` as in `setFillSpec`; `line` likewise
+    /// (`{ visible, color, alpha, widthPt, dash, head, tail }`).
+    #[wasm_bindgen(js_name = fillLineInfo)]
+    pub fn fill_line_info(&self) -> JsValue {
+        use ppt_model::{GradientKind, Paint};
+        let Some(info) = self.editor.fill_line_info() else { return JsValue::NULL };
+        let set = |o: &Object, k: &str, v: JsValue| {
+            let _ = Reflect::set(o, &k.into(), &v);
+        };
+        let color_into = |o: &Object, c: Color| {
+            set(o, "color", hex(c).into());
+            set(o, "alpha", (c.a as f64 / 255.0).into());
+        };
+        let out = Object::new();
+        set(&out, "canFill", info.can_fill.into());
+        set(&out, "canArrows", info.can_arrows.into());
+        set(
+            &out,
+            "fill",
+            match info.fill {
+                None => JsValue::NULL,
+                Some(None) => {
+                    let o = Object::new();
+                    set(&o, "type", "none".into());
+                    o.into()
+                }
+                Some(Some(Paint::Solid(c))) => {
+                    let o = Object::new();
+                    set(&o, "type", "solid".into());
+                    color_into(&o, c);
+                    o.into()
+                }
+                Some(Some(Paint::Gradient(g))) => {
+                    let o = Object::new();
+                    set(&o, "type", "gradient".into());
+                    match g.kind {
+                        GradientKind::Linear { angle, .. } => {
+                            set(&o, "kind", "linear".into());
+                            set(&o, "angle", angle.into());
+                        }
+                        GradientKind::Path { .. } => set(&o, "kind", "radial".into()),
+                    }
+                    let stops = Array::new();
+                    for (pos, c) in &g.stops {
+                        let st = Object::new();
+                        set(&st, "pos", (*pos as f64).into());
+                        color_into(&st, *c);
+                        stops.push(&st);
+                    }
+                    set(&o, "stops", stops.into());
+                    o.into()
+                }
+            },
+        );
+        set(
+            &out,
+            "line",
+            match info.line {
+                None => JsValue::NULL,
+                Some(None) => {
+                    let o = Object::new();
+                    set(&o, "visible", false.into());
+                    o.into()
+                }
+                Some(Some(l)) => {
+                    let o = Object::new();
+                    set(&o, "visible", true.into());
+                    color_into(&o, l.color);
+                    set(&o, "widthPt", (l.width as f64 / EMU_PER_PT).into());
+                    set(&o, "dash", l.dash.name().into());
+                    for (key, e) in [("head", l.head), ("tail", l.tail)] {
+                        let eo = Object::new();
+                        set(&eo, "type", e.kind.name().into());
+                        set(&eo, "w", (e.width as f64).into());
+                        set(&eo, "l", (e.length as f64).into());
+                        set(&o, key, eo.into());
+                    }
+                    o.into()
+                }
+            },
+        );
+        out.into()
     }
 
     // --- Arrange & insert ----------------------------------------------------------

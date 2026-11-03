@@ -256,6 +256,12 @@ async function step(cmd: string, h: Hooks) {
     case "statusbar":
       await log(`statusbar ${JSON.stringify([...document.querySelectorAll<HTMLButtonElement>(".status-bar button")].map((b) => `${b.getAttribute("aria-label") ?? b.title ?? b.textContent}:${b.disabled ? "off" : "on"}`))}`);
       break;
+    // What the Format Shape pane shows: `panetext`.
+    case "panetext": {
+      const pane = document.querySelector<HTMLElement>(".format-pane");
+      await log(`panetext ${JSON.stringify({ open: !!pane, text: pane?.innerText.replace(/\s+/g, " ").trim() ?? null, inputs: pane?.querySelectorAll("input,select").length ?? 0 })}`);
+      break;
+    }
     case "mediaclips":
       await log(`mediaclips ${JSON.stringify(engine.mediaClips())}`);
       break;

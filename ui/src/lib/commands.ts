@@ -95,6 +95,12 @@ export type Command =
   | { kind: "selectAnimation"; index: number }
   | { kind: "toggleNotes" }
   | { kind: "viewMode"; mode: "normal" | "sorter" }
+  /** The selection's fill, set in full (`App::setFillSpec`). */
+  | { kind: "fillSpec"; spec: import("../components/FormatPane").FillSpec }
+  /** Changes to the selection's outline (`App::setLineSpec`). */
+  | { kind: "lineSpec"; spec: import("../components/FormatPane").LineSpec }
+  /** Open, close or toggle the Format Shape pane. */
+  | { kind: "formatPane"; open?: boolean }
   /** Remove the current slide's recorded narration. */
   | { kind: "clearNarration" }
   | { kind: "toggleRuler" }

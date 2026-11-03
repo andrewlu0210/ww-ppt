@@ -53,6 +53,7 @@ import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 import type { AltTextInfo } from "./components/AltTextDialog";
 import { SelectionPane } from "./components/SelectionPane";
+import { FormatPane } from "./components/FormatPane";
 import { DiagramPane } from "./components/DiagramPane";
 import { VideoDialog } from "./components/VideoDialog";
 import { ZoomDialog } from "./components/ZoomDialog";
@@ -107,6 +108,8 @@ interface ViewPrefs {
   pane: boolean;
   /** The accessibility checker is open. */
   checker: boolean;
+  /** The Format Shape pane is open. */
+  format: boolean;
   grid: boolean;
   /** Slide sorter thumbnail width in CSS px. */
   sorterSize: number;
@@ -122,9 +125,9 @@ const newSessionId = () => crypto.randomUUID();
 function loadViewPrefs(): ViewPrefs {
   try {
     const v = JSON.parse(localStorage.getItem(VIEW_KEY) ?? "null") as Partial<ViewPrefs> | null;
-    return { ruler: v?.ruler === true, pane: v?.pane === true, checker: v?.checker === true, grid: v?.grid === true, sorterSize: typeof v?.sorterSize === "number" ? v.sorterSize : SORTER_BASE };
+    return { ruler: v?.ruler === true, pane: v?.pane === true, checker: v?.checker === true, format: v?.format === true, grid: v?.grid === true, sorterSize: typeof v?.sorterSize === "number" ? v.sorterSize : SORTER_BASE };
   } catch {
-    return { ruler: false, pane: false, checker: false, grid: false, sorterSize: SORTER_BASE };
+    return { ruler: false, pane: false, checker: false, format: false, grid: false, sorterSize: SORTER_BASE };
   }
 }
 
@@ -1045,6 +1048,10 @@ export function App() {
         }
         return;
       }
+      if (c.kind === "formatPane") {
+        setViewPrefs((p) => ({ ...p, format: c.open ?? !p.format }));
+        return;
+      }
       if (c.kind === "selectionPane") {
         setViewPrefs((p) => ({ ...p, pane: c.open ?? !p.pane }));
         return;
@@ -1329,6 +1336,12 @@ export function App() {
         case "fill":
           engine.setFill(c.color);
           break;
+        case "fillSpec":
+          engine.setFillSpec(c.spec);
+          break;
+        case "lineSpec":
+          engine.setLineSpec(c.spec);
+          break;
         case "lineColor":
           engine.setLineColor(c.color);
           break;
@@ -1463,6 +1476,12 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (showingRef.current) return;
+      // ⌘1 opens the Format pane, as in PowerPoint for Mac.
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.key === "1") {
+        e.preventDefault();
+        void run({ kind: "formatPane" });
+        return;
+      }
       if (e.key === "F6") {
         // F6 / Shift+F6 move between the panes, as in PowerPoint.
         e.preventDefault();
@@ -1569,7 +1588,7 @@ export function App() {
         textPaneOpen={diagramShown}
         loadAltText={() => (engineRef.current?.altText() as AltTextInfo | null | undefined) ?? null}
       />
-      <main className={["workspace", viewMode === "sorter" && !showing && "sorting", (viewPrefs.pane || viewPrefs.checker || diagramShown) && !showing && "with-pane"].filter(Boolean).join(" ")}>
+      <main className={["workspace", viewMode === "sorter" && !showing && "sorting", (viewPrefs.pane || viewPrefs.checker || viewPrefs.format || diagramShown) && !showing && "with-pane", viewPrefs.format && !showing && "with-format"].filter(Boolean).join(" ")}>
         {viewMode === "sorter" && !showing && (
           <SlideSorter
             count={status.slideCount}
@@ -1643,6 +1662,7 @@ export function App() {
                   run,
                   layoutNames,
                   openTab: (tab) => setTabRequest((q) => ({ tab, n: q.n + 1 })),
+                  openFormatPane: () => void run({ kind: "formatPane", open: true }),
                   openLink: () => setLinkRequest((n) => n + 1),
                   openAltText: () => setAltPopup({ x: ctxMenu.x, y: ctxMenu.y }),
                   endEditing: () => {
@@ -1683,7 +1703,7 @@ export function App() {
             />
           )}
         </section>
-        {(viewPrefs.pane || viewPrefs.checker || diagramShown) && !showing && (
+        {(viewPrefs.pane || viewPrefs.checker || viewPrefs.format || diagramShown) && !showing && (
           <div className="side-panels">
             {diagramShown && (
               <DiagramPane
@@ -1698,6 +1718,14 @@ export function App() {
                   setDiagramPane(false);
                   focusCanvas();
                 }}
+              />
+            )}
+            {viewPrefs.format && (
+              <FormatPane
+                engine={engineRef.current}
+                version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}`}
+                run={run}
+                onClose={() => setViewPrefs((p) => ({ ...p, format: false }))}
               />
             )}
             {viewPrefs.checker && <CheckerPane engine={engineRef.current} issues={a11yIssues} run={run} onChange={refresh} onClose={() => setViewPrefs((p) => ({ ...p, checker: false }))} />}

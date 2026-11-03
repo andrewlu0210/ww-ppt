@@ -494,6 +494,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
         {tab === "圖形格式" && (
           <>
             <Group label={t("group.shapeStyles")}>
+              <Button icon={icons.formatPane} label={t("ctx.formatShape")} disabled={!shapes} onClick={() => run({ kind: "formatPane" })} />
               <div className="rb-col">
                 <ColorPicker icon={icons.fill} label={t("ribbon.shapeFill")} value={status.fill} disabled={!shapes} noneLabel={t("ribbon.noFill")} onPick={(color) => run({ kind: "fill", color })} />
                 <ColorPicker icon={icons.outline} label={t("ribbon.shapeOutline")} value={status.lineColor} disabled={!shapes} noneLabel={t("ribbon.noOutline")} onPick={(color) => run({ kind: "lineColor", color })} />

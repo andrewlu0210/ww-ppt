@@ -290,6 +290,13 @@ export const icons: Record<string, ReactNode> = {
       <rect x="13" y="5" width="7.5" height="14" rx="1.5" />
     </Svg>
   ),
+  formatPane: (
+    <Svg>
+      <rect x="3" y="4" width="18" height="16" rx="1.5" />
+      <path d="M14.5 4v16" />
+      <path d="M17 8h2M17 11h2M17 14h2" />
+    </Svg>
+  ),
   record: (
     <Svg>
       <circle cx="12" cy="12" r="7" />

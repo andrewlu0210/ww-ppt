@@ -13,6 +13,8 @@ export interface ContextEnv {
   layoutNames: string[];
   /** Go to a ribbon tab (by its internal name). */
   openTab: (tab: string) => void;
+  /** Opens the Format Shape pane. */
+  openFormatPane: () => void;
   openLink: () => void;
   openAltText: () => void;
   endEditing: () => void;
@@ -39,7 +41,7 @@ export function buildContextMenu(kind: ContextKind, env: ContextEnv): MenuItem[]
     },
   ];
   const link: MenuItem = { label: t("ctx.hyperlink"), shortcut: "⌘K", onSelect: env.openLink };
-  const formatShape: MenuItem = { label: t("ctx.formatShape"), onSelect: () => env.openTab("圖形格式") };
+  const formatShape: MenuItem = { label: t("ctx.formatShape"), shortcut: "⌘1", onSelect: env.openFormatPane };
 
   if (kind === "text") {
     return [...clipboard, SEP, { label: t("ctx.endEditing"), onSelect: env.endEditing }, ...textItems, SEP, link, SEP, formatShape];

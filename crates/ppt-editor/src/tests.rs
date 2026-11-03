@@ -1724,3 +1724,61 @@ fn locked_shapes_cannot_move_resize_or_rotate_and_the_lock_is_saved() {
     assert!(!xml.contains("noMove") && !xml.contains("noResize"), "{xml}");
     assert!(re.nudge(10, 10));
 }
+
+#[test]
+fn fill_and_outline_are_set_in_full_and_undone() {
+    use ppt_model::{Dash, EndKind, Gradient, GradientKind, LineEnd};
+    let (mut e, id) = editor();
+    e.selection = vec![id];
+    // A gradient fill with a half-clear stop.
+    let gradient = Gradient { stops: vec![(0.0, Color::rgb(255, 0, 0)), (1.0, Color { r: 0, g: 0, b: 255, a: 128 })], kind: GradientKind::Linear { angle: 90.0, scaled: false }, rotate_with_shape: true };
+    assert!(e.set_fill_spec(FillSpec::Gradient(gradient.clone())));
+    assert_eq!(e.pres.shape(0, id).unwrap().fill, Some(Paint::Gradient(std::sync::Arc::new(gradient))));
+    // Doing the same again changes nothing and is not an undo step.
+    let before = e.undo.len();
+    assert!(!e.set_fill_spec(FillSpec::Gradient(Gradient { stops: vec![(0.0, Color::rgb(255, 0, 0)), (1.0, Color { r: 0, g: 0, b: 255, a: 128 })], kind: GradientKind::Linear { angle: 90.0, scaled: false }, rotate_with_shape: true })));
+    assert_eq!(e.undo.len(), before);
+    assert!(e.set_fill_spec(FillSpec::Solid(Color { r: 1, g: 2, b: 3, a: 100 })));
+    assert_eq!(e.pres.shape(0, id).unwrap().fill, Some(Paint::Solid(Color { r: 1, g: 2, b: 3, a: 100 })));
+    assert!(e.set_fill_spec(FillSpec::None));
+    assert_eq!(e.pres.shape(0, id).unwrap().fill, None);
+
+    // Outline: giving a width gives a shape without one a black outline; a rectangle takes no arrowheads.
+    assert!(e.set_line_spec(LineSpec { width: Some(38_100), dash: Some(Dash::Dash), head: Some(LineEnd { kind: EndKind::Arrow, width: 2, length: 2 }), ..Default::default() }));
+    let line = e.pres.shape(0, id).unwrap().line.unwrap();
+    assert_eq!((line.color, line.width, line.dash, line.head), (Color::BLACK, 38_100, Dash::Dash, LineEnd::NONE));
+    // Color and opacity change separately.
+    assert!(e.set_line_spec(LineSpec { rgb: Some((10, 20, 30)), ..Default::default() }));
+    assert!(e.set_line_spec(LineSpec { alpha: Some(64), ..Default::default() }));
+    assert_eq!(e.pres.shape(0, id).unwrap().line.unwrap().color, Color { r: 10, g: 20, b: 30, a: 64 });
+    assert!(e.set_line_spec(LineSpec { visible: Some(false), ..Default::default() }));
+    assert_eq!(e.pres.shape(0, id).unwrap().line, None);
+    // Every step undoes.
+    while e.can_undo() {
+        e.undo(&mut engine());
+    }
+    assert_eq!(e.pres.shape(0, id).unwrap().fill, Some(Paint::Solid(Color::BLACK)));
+}
+
+#[test]
+fn a_line_takes_arrowheads_and_the_pane_reads_back_mixed_values() {
+    use ppt_model::{EndKind, LineEnd};
+    let (mut e, id) = editor();
+    let line_id = e.pres.alloc_id();
+    let mut line = Shape::new(line_id, "line", Xfrm::new(0, 0, IN, IN));
+    line.geometry = Geometry::preset("line");
+    line.line = Some(Line::new(Color::BLACK, 12_700));
+    e.pres.slides[0].shapes.push(line);
+    e.selection = vec![line_id];
+    let arrow = LineEnd { kind: EndKind::Triangle, width: 1, length: 1 };
+    assert!(e.set_line_spec(LineSpec { tail: Some(arrow), ..Default::default() }));
+    assert_eq!(e.pres.shape(0, line_id).unwrap().line.unwrap().tail, arrow);
+    let info = e.fill_line_info().unwrap();
+    assert!(info.can_arrows && !info.can_fill);
+    // A rectangle and a line together: the outlines differ.
+    e.selection = vec![id, line_id];
+    let info = e.fill_line_info().unwrap();
+    assert!(info.can_fill && info.can_arrows);
+    assert_eq!(info.line, None);
+    assert_eq!(info.fill, Some(Some(Paint::Solid(Color::BLACK))));
+}
