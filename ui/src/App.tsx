@@ -9,6 +9,7 @@ import { Ribbon } from "./components/Ribbon";
 import { SlidePane } from "./components/SlidePane";
 import { SlideShow } from "./components/SlideShow";
 import { ReadingBar } from "./components/ReadingBar";
+import { NarrationRecorder, type Take } from "./lib/narration";
 import { PresenterView, type ShowTimer } from "./components/PresenterView";
 import { AUDIENCE_LABEL, type ShowCommand, type ShowState } from "./lib/show";
 import { MIN_NOTES_HEIGHT, NotesPane, notesFocused } from "./components/NotesPane";
@@ -201,6 +202,12 @@ export function App() {
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
   readingRef.current = reading;
+  /// Narration being recorded during the show (the microphone is open).
+  const recorderRef = useRef<NarrationRecorder | null>(null);
+  const [recording, setRecording] = useState(false);
+  // Whether the slide on screen has recorded narration (the engine knows; the status revision says when to ask).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const hasNarration = useMemo(() => engineRef.current?.hasNarration(status.slideIndex) ?? false, [status.revision, status.slideIndex]);
   const [showState, setShowState] = useState<ShowState | null>(null);
   // In a show, each new slide is spoken (the end screen too).
   const shownSlide = showState?.slide;
@@ -808,15 +815,15 @@ export function App() {
   const startShow = useCallback(
     async (fromBeginning: boolean, presenter?: boolean, forceAudience = false, inWindow = false) => {
       const engine = engineRef.current;
-      if (!engine || showingRef.current) return;
+      if (!engine || showingRef.current) return false;
       if (inWindow) setViewMode("normal");
-      if (!engine.startShow(fromBeginning)) return;
+      if (!engine.startShow(fromBeginning)) return false;
       setReading(inWindow);
       showTimer.current = { elapsed: 0, since: Date.now() };
       syncShow();
       if (inWindow) {
         setShowMode("slides");
-        return;
+        return true;
       }
       const wantPresenter = presenter ?? usePresenterRef.current;
       const external = inTauri && (wantPresenter || forceAudience) ? await openAudience(forceAudience).catch(() => false) : false;
@@ -828,9 +835,52 @@ export function App() {
         if (!wasFullscreen.current) await win.setFullscreen(true);
         if (external) await win.setFocus();
       }
+      return true;
     },
     [openAudience, syncShow],
   );
+
+  /** Starts a show with the microphone recording each slide. */
+  const startRecording = useCallback(
+    async (fromBeginning: boolean) => {
+      if (showingRef.current) return;
+      let recorder: NarrationRecorder;
+      try {
+        recorder = await NarrationRecorder.open();
+      } catch {
+        setError(t("record.micFailed"));
+        return;
+      }
+      recorderRef.current = recorder;
+      setRecording(true);
+      // The slide on screen is picked up by the effect on `shownSlide`.
+      if (!(await startShow(fromBeginning))) {
+        recorderRef.current = null;
+        setRecording(false);
+        await recorder.finish();
+      }
+    },
+    [startShow],
+  );
+
+  // One recording per slide: moving to another slide ends the last one and starts the next.
+  useEffect(() => {
+    const recorder = recorderRef.current;
+    if (recorder && shownSlide !== undefined) void recorder.switchTo(shownSlide >= 0 ? shownSlide : null);
+  }, [shownSlide]);
+
+  /** Writes the recorded takes into the deck as narration, with each slide's time as its advance time. */
+  const applyTakes = useCallback(async (engine: Engine, takes: Take[]) => {
+    if (takes.length === 0) {
+      announce(t("record.none"));
+      setError(t("record.none"));
+      return;
+    }
+    engine.beginRecordings();
+    for (const take of takes) engine.addNarration(take.slide, new Uint8Array(await take.blob.arrayBuffer()), "m4a", take.stayMs);
+    engine.endRecordings();
+    announce(t("record.done", { count: takes.length }));
+  }, []);
 
   const endShow = useCallback(async () => {
     const engine = engineRef.current;
@@ -841,6 +891,14 @@ export function App() {
     const wasReading = readingRef.current;
     setReading(false);
     setAudienceOpen(false);
+    // Narration: the takes go into the deck now that the show has ended (one undo step).
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    if (recorder) {
+      setRecording(false);
+      const takes = await recorder.finish();
+      await applyTakes(engine, takes);
+    }
     if (inTauri) await (await WebviewWindow.getByLabel(AUDIENCE_LABEL))?.close();
     refresh();
     focusCanvas();
@@ -863,11 +921,12 @@ export function App() {
   // Slides set to advance by themselves (after their transition has played).
   useEffect(() => {
     // Advancing by time waits until the slide's animation clicks have played.
-    if (!showState || showState.slide < 0 || showState.blank || showState.afterMs < 0 || showState.step < showState.steps) return;
+    // Recording is by hand: the slides advance when the speaker does.
+    if (recording || !showState || showState.slide < 0 || showState.blank || showState.afterMs < 0 || showState.step < showState.steps) return;
     const delay = showState.afterMs + (showState.transition ? showState.transitionMs : 0);
     const id = window.setTimeout(() => showCommand({ name: "next" }), delay);
     return () => window.clearTimeout(id);
-  }, [showState, showCommand]);
+  }, [showState, showCommand, recording]);
 
   // Input forwarded from the audience window; it asks for the state once it has loaded.
   useEffect(() => {
@@ -885,7 +944,12 @@ export function App() {
       const engine = engineRef.current;
       if (!engine) return;
       if (c.kind === "slideShow") {
-        await startShow(c.fromBeginning, c.presenter, c.forceAudience, c.reading);
+        if (c.record) await startRecording(c.fromBeginning);
+        else await startShow(c.fromBeginning, c.presenter, c.forceAudience, c.reading);
+        return;
+      }
+      if (c.kind === "clearNarration") {
+        if (engine.clearNarration((engine.status() as { slideIndex: number }).slideIndex)) refresh();
         return;
       }
       if (c.kind === "usePresenter") {
@@ -1276,7 +1340,7 @@ export function App() {
       if (viewModeRef.current === "sorter") document.querySelector<HTMLElement>(".slide-sorter")?.focus({ preventScroll: true });
       else focusCanvas();
     },
-    [confirmDiscard, deckStyleChanged, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow, endShow],
+    [confirmDiscard, deckStyleChanged, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow, startRecording, endShow],
   );
 
   // Native menu items are forwarded here by the backend.
@@ -1449,7 +1513,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title={t("title.unsaved")} />}
         </span>
       </header>
-      <Ribbon tabRequest={tabRequest} painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
+      <Ribbon hasNarration={hasNarration} tabRequest={tabRequest} painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
         theme={theme}
         colorSchemes={schemes.colors}
         fontSchemes={schemes.fonts}
@@ -1504,7 +1568,7 @@ export function App() {
             {!showing && viewMode === "normal" && <A11yMirror engine={engineRef.current} version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}|${status.zoom}|${viewPrefs.ruler}|${viewPrefs.pane}|${notesPrefs.open}`} />}
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
             {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}
-            {showMode === "slides" && <SlideShow state={showState} command={showCommand} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}
+            {showMode === "slides" && <SlideShow state={showState} command={showCommand} recording={recording} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}
             {showMode === "slides" && reading && <ReadingBar state={showState} command={showCommand} />}
             {showMode === "presenter" && engineRef.current && showState && (
               <PresenterView
@@ -1608,7 +1672,7 @@ export function App() {
       </main>
       {zoomOpen && <ZoomDialog percent={status.zoomPercent} relative={status.zoom} fit={status.zoomFit} run={run} onClose={() => { setZoomOpen(false); focusCanvas(); }} />}
       {videoOpen && <VideoDialog engine={engineRef.current} name={doc.name} onClose={() => setVideoOpen(false)} />}
-      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={reading ? "reading" : viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} onZoomDialog={() => setZoomOpen(true)} />
+      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={reading ? "reading" : viewMode} hasNarration={hasNarration} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} onZoomDialog={() => setZoomOpen(true)} />
     </div>
   );
 }

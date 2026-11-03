@@ -235,6 +235,6 @@ cargo run -p ppt-vr --release -- --only test  # 只跑一份
 
 ## 開發用自動化
 
-設定 `WW_PPT_AUTOMATION=<資料夾>` 啟動後，App 會讀取 `<資料夾>/commands.txt`，每行一個指令，例如 `click 400 300 2`、`drag x1 y1 x2 y2`、`down`/`move`/`up`、`text 你好`、`compose ㄋㄧˇ`、`commit 你`、`key Escape`、`run {"kind":"newSlide"}`、`save 路徑`、`shot 名稱`、`thumbs 名稱`。執行結果寫到 `log.txt`，畫布截圖存成 `名稱.png`。實作見 `ui/src/lib/automation.ts`。
+設定 `WW_PPT_AUTOMATION=<資料夾>` 啟動後，App 會讀取 `<資料夾>/commands.txt`，每行一個指令，例如 `click 400 300 2`、`drag x1 y1 x2 y2`、`down`/`move`/`up`、`text 你好`、`compose ㄋㄧˇ`、`commit 你`、`key Escape`、`run {"kind":"newSlide"}`、`save 路徑`、`narrate 投影片索引 音檔 停留毫秒`、`video 路徑 寬度 每張秒數`、`shot 名稱`、`thumbs 名稱`。執行結果寫到 `log.txt`，畫布截圖存成 `名稱.png`。實作見 `ui/src/lib/automation.ts`。
 
 存檔的開發工具：`cargo run -p ppt-ooxml --example resave -- in.pptx out.pptx [--edit]`（`in.pptx` 可用 `template` 代表內建範本）。

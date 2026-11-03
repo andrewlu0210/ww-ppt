@@ -742,6 +742,16 @@ export const en: Messages = {
   "reading.prev": "Previous Slide",
   "reading.next": "Next Slide",
   "reading.page": "{current} / {total}",
+  "group.record": "Record",
+  "ribbon.recordFromBeginning": "Record from Beginning",
+  "ribbon.recordFromCurrent": "Record from Current Slide",
+  "ribbon.clearNarration": "Clear Narration",
+  "record.recording": "Recording",
+  "record.narration": "Narration",
+  "record.narrationTip": "This slide has recorded narration",
+  "record.micFailed": "Cannot use the microphone. Allow Want-Point in System Settings > Privacy & Security > Microphone, then try again.",
+  "record.done": "Narration recorded for {count} slide|Narration recorded for {count} slides",
+  "record.none": "No narration was recorded (stay on each slide for at least 1 second).",
   "show.ended": "End of slide show, click to exit.",
 
   // ColorPicker.tsx

@@ -2072,6 +2072,44 @@ impl App {
         self.touch(changed)
     }
 
+    // --- Narration ------------------------------------------------------------------
+
+    /// Starts a recording session: the narrations added before `endRecordings` undo as one step.
+    #[wasm_bindgen(js_name = beginRecordings)]
+    pub fn begin_recordings(&mut self) {
+        self.editor.begin_recordings();
+    }
+
+    /// Gives slide `slide` a narration (an audio file of type `ext`, e.g. "m4a"). A `stay_ms`
+    /// of 0 or more becomes the slide's automatic advance time.
+    #[wasm_bindgen(js_name = addNarration)]
+    pub fn add_narration(&mut self, slide: usize, bytes: Vec<u8>, ext: &str, stay_ms: i32) -> bool {
+        self.media_counter += 1;
+        let key = format!("new/narration{}.{}", self.media_counter, ext.to_lowercase());
+        let changed = self.editor.add_recording(slide, key, Arc::new(bytes), u32::try_from(stay_ms).ok());
+        self.touch(changed)
+    }
+
+    /// Ends the recording session (one undo step if anything was recorded).
+    #[wasm_bindgen(js_name = endRecordings)]
+    pub fn end_recordings(&mut self) -> bool {
+        let changed = self.editor.end_recordings();
+        self.touch(changed)
+    }
+
+    /// Whether slide `slide` has a narration.
+    #[wasm_bindgen(js_name = hasNarration)]
+    pub fn has_narration(&self, slide: usize) -> bool {
+        self.editor.has_narration(slide)
+    }
+
+    /// Removes slide `slide`'s narration.
+    #[wasm_bindgen(js_name = clearNarration)]
+    pub fn clear_narration(&mut self, slide: usize) -> bool {
+        let changed = self.editor.clear_narration(slide);
+        self.touch(changed)
+    }
+
     // --- Notes ----------------------------------------------------------------------
 
     /// Speaker notes of slide `index` (plain text).

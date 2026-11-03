@@ -127,6 +127,8 @@ interface Props {
   slideSize: [number, number];
   loadBackground: () => BackgroundInfo | null;
   viewMode: "normal" | "sorter";
+  /** The current slide has recorded narration. */
+  hasNarration: boolean;
   rulerOn: boolean;
   paneOpen: boolean;
   checkerOpen: boolean;
@@ -139,7 +141,7 @@ interface Props {
   tabRequest?: { tab: string; n: number };
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance, tabRequest }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, hasNarration, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance, tabRequest }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -605,6 +607,11 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               <Button icon={icons.playStart} label={t("ribbon.fromBeginning")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: true })} />
               <Button icon={icons.playCurrent} label={t("ribbon.fromCurrent")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} />
               <Button icon={icons.presenter} label={t("ribbon.presenterView")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false, presenter: true })} />
+            </Group>
+            <Group label={t("group.record")}>
+              <Button icon={icons.record} label={t("ribbon.recordFromBeginning")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: true, record: true })} />
+              <Button icon={icons.record} label={t("ribbon.recordFromCurrent")} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false, record: true })} />
+              <Button icon={icons.clearNarration} label={t("ribbon.clearNarration")} disabled={!hasNarration} onClick={() => run({ kind: "clearNarration" })} />
             </Group>
             <Group label={t("group.monitors")}>
               <label className="rb-check" title={t("ribbon.usePresenterTip")}>

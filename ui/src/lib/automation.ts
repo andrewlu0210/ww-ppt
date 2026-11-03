@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, emitTo } from "@tauri-apps/api/event";
 import { availableMonitors } from "@tauri-apps/api/window";
 import type { App } from "../wasm/ppt_wasm";
-import { exportVideo, inTauri, onVideoEvents, recoveryList, recoveryRead, writeFile } from "./backend";
+import { exportVideo, inTauri, onVideoEvents, readFile, recoveryList, recoveryRead, writeFile } from "./backend";
 import type { Command } from "./commands";
 
 interface Hooks {
@@ -242,6 +242,15 @@ async function step(cmd: string, h: Hooks) {
       if (!ta) throw new Error(`no text pane row ${args[0]}`);
       ta.focus();
       document.execCommand("insertText", false, args.slice(1).join(" "));
+      break;
+    }
+    // Narration as the recorder would add it: `narrate 2 clip.m4a 2500` (slide index, audio file, stay in ms).
+    case "narrate": {
+      engine.beginRecordings();
+      engine.addNarration(num(0), await readFile(args[1]), args[1].split(".").pop() ?? "m4a", num(2) || -1);
+      engine.endRecordings();
+      h.refresh();
+      await log(`narration ${engine.hasNarration(num(0))}`);
       break;
     }
     // Video export through the backend, as the dialog does: `video out.mp4 1280 2`.

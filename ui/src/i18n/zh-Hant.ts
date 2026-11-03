@@ -744,6 +744,16 @@ export const zhHant = {
   "reading.prev": "上一張投影片",
   "reading.next": "下一張投影片",
   "reading.page": "{current} / {total}",
+  "group.record": "錄製",
+  "ribbon.recordFromBeginning": "從頭開始錄製",
+  "ribbon.recordFromCurrent": "從目前投影片開始錄製",
+  "ribbon.clearNarration": "清除旁白",
+  "record.recording": "錄製中",
+  "record.narration": "旁白",
+  "record.narrationTip": "這張投影片有錄製的旁白",
+  "record.micFailed": "無法使用麥克風。請在「系統設定 > 隱私權與安全性 > 麥克風」允許旺-Point，然後再試一次。",
+  "record.done": "已為 {count} 張投影片錄製旁白",
+  "record.none": "沒有錄到旁白（每張投影片至少要停留 1 秒）。",
   "show.ended": "投影片放映結束，按一下以結束。",
 
   // ColorPicker.tsx

@@ -7,6 +7,8 @@ interface Props {
   command: (c: ShowCommand) => void;
   /** ⌥↩: switch to the presenter view (single display only). */
   onToggleView?: () => void;
+  /** Narration is being recorded: shows a red recording mark. */
+  recording?: boolean;
 }
 
 /** The pointer hides after this long without moving. */
@@ -18,7 +20,7 @@ const WHEEL_STEP = 40;
  * Input layer over a canvas showing the slides full screen. The engine draws
  * the slides; this maps keys, clicks and the wheel to show commands.
  */
-export function SlideShow({ state, command, onToggleView }: Props) {
+export function SlideShow({ state, command, onToggleView, recording }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [cursor, setCursor] = useState(false);
   const digits = useRef("");
@@ -72,7 +74,25 @@ export function SlideShow({ state, command, onToggleView }: Props) {
       onBlur={() => window.setTimeout(() => ref.current?.focus({ preventScroll: true }), 0)}
       aria-label={t("tab.slideShow")}
     >
+      {recording && <RecordingMark slide={state?.slide ?? -1} />}
       {state?.slide === -1 && !state.blank && <div className="show-end">{t("show.ended")}</div>}
+    </div>
+  );
+}
+
+/** "● Recording 0:07": how long the slide on screen has been recorded. */
+function RecordingMark({ slide }: { slide: number }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+    const start = performance.now();
+    const id = window.setInterval(() => setSeconds(Math.floor((performance.now() - start) / 1000)), 500);
+    return () => window.clearInterval(id);
+  }, [slide]);
+  return (
+    <div className="rec-mark" role="status">
+      <span className="rec-dot" />
+      {t("record.recording")} {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
     </div>
   );
 }

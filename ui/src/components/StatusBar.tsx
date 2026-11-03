@@ -10,6 +10,8 @@ interface Props {
   viewMode: "normal" | "sorter" | "reading";
   /** Thumbnail scale in the slide sorter (1 = 100%). */
   sorterZoom: number;
+  /** The current slide has recorded narration. */
+  hasNarration: boolean;
   /** How many accessibility problems the checker found. */
   a11yIssues: number;
   run: (c: Command) => void;
@@ -17,7 +19,7 @@ interface Props {
   onZoomDialog: () => void;
 }
 
-export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoom, a11yIssues, run, onZoomDialog }: Props) {
+export function StatusBar({ status, fontsLoading, notesOpen, viewMode, hasNarration, sorterZoom, a11yIssues, run, onZoomDialog }: Props) {
   const view = (mode: "normal" | "sorter", label: string, icon?: React.ReactNode) => (
     <button
       className={[icon ? "icon-btn" : "", "toggle", viewMode === mode ? "on" : ""].filter(Boolean).join(" ")}
@@ -41,6 +43,7 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoo
       {status.editingText && <span>{t("status.editingText")}</span>}
       {!status.editingText && status.selectionName && <span>{t("status.selected", { name: status.selectionName })}</span>}
       {fontsLoading && <span>{t("status.loadingFonts")}</span>}
+      {hasNarration && <span title={t("record.narrationTip")}>{t("record.narration")}</span>}
       <button className="a11y-status" onClick={() => run({ kind: "checker", open: true })} onMouseDown={(e) => e.preventDefault()} title={t("status.checkAccessibility")}>
         {a11yIssues === 0 ? t("status.a11yGood") : t("status.a11yIssues", { count: a11yIssues })}
       </button>

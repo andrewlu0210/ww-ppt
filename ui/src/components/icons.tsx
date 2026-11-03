@@ -290,6 +290,18 @@ export const icons: Record<string, ReactNode> = {
       <rect x="13" y="5" width="7.5" height="14" rx="1.5" />
     </Svg>
   ),
+  record: (
+    <Svg>
+      <circle cx="12" cy="12" r="7" />
+      <circle cx="12" cy="12" r="3.5" fill="currentColor" />
+    </Svg>
+  ),
+  clearNarration: (
+    <Svg>
+      <rect x="9" y="4" width="6" height="10" rx="3" />
+      <path d="M6 11a6 6 0 0 0 12 0M12 17v3M4 4l16 16" />
+    </Svg>
+  ),
   playCurrent: (
     <Svg>
       <rect x="3.5" y="5" width="17" height="12" rx="1" />

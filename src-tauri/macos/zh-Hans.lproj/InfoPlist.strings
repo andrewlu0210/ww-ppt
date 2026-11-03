@@ -1,2 +1,3 @@
 "CFBundleName" = "旺-Point";
 "CFBundleDisplayName" = "旺-Point";
+"NSMicrophoneUsageDescription" = "旺-Point 需要使用麦克风，才能为幻灯片录制旁白。";

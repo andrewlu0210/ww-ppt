@@ -742,6 +742,16 @@ export const zhHans: Messages = {
   "reading.prev": "上一张幻灯片",
   "reading.next": "下一张幻灯片",
   "reading.page": "{current} / {total}",
+  "group.record": "录制",
+  "ribbon.recordFromBeginning": "从头开始录制",
+  "ribbon.recordFromCurrent": "从当前幻灯片开始录制",
+  "ribbon.clearNarration": "清除旁白",
+  "record.recording": "录制中",
+  "record.narration": "旁白",
+  "record.narrationTip": "这张幻灯片有录制的旁白",
+  "record.micFailed": "无法使用麦克风。请在“系统设置 > 隐私与安全性 > 麦克风”中允许旺-Point，然后重试。",
+  "record.done": "已为 {count} 张幻灯片录制旁白",
+  "record.none": "没有录到旁白（每张幻灯片至少要停留 1 秒）。",
   "show.ended": "放映结束，单击鼠标退出。",
 
   // ColorPicker.tsx
