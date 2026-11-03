@@ -739,6 +739,9 @@ export const en: Messages = {
   "tablePicker.cellAria": "{rows} rows by {cols} columns",
 
   // SlideShow.tsx
+  "reading.prev": "Previous Slide",
+  "reading.next": "Next Slide",
+  "reading.page": "{current} / {total}",
   "show.ended": "End of slide show, click to exit.",
 
   // ColorPicker.tsx

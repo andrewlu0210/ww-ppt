@@ -739,6 +739,9 @@ export const zhHans: Messages = {
   "tablePicker.cellAria": "{rows} 行 {cols} 列",
 
   // SlideShow.tsx
+  "reading.prev": "上一张幻灯片",
+  "reading.next": "下一张幻灯片",
+  "reading.page": "{current} / {total}",
   "show.ended": "放映结束，单击鼠标退出。",
 
   // ColorPicker.tsx

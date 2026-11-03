@@ -2546,3 +2546,54 @@ input:focus-visible,
 .canvas-host.painting canvas {
   cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M20 4l-7.5 7.5'/><path d='M10.5 9.5l4 4c-.8 3.2-3.2 5-8.5 5 1.8-1.7 1.2-3.7 2.2-5.2z' fill='white'/></svg>") 4 20, copy !important;
 }
+
+/* Reading view navigation bar: floats at the bottom centre of the show. */
+.reading-bar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(30, 30, 30, 0.78);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.reading-bar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+}
+
+.reading-bar button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.reading-bar button:disabled {
+  opacity: 0.35;
+}
+
+.reading-bar svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

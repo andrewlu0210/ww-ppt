@@ -8,6 +8,7 @@ import { CanvasHost, focusCanvas } from "./components/CanvasHost";
 import { Ribbon } from "./components/Ribbon";
 import { SlidePane } from "./components/SlidePane";
 import { SlideShow } from "./components/SlideShow";
+import { ReadingBar } from "./components/ReadingBar";
 import { PresenterView, type ShowTimer } from "./components/PresenterView";
 import { AUDIENCE_LABEL, type ShowCommand, type ShowState } from "./lib/show";
 import { MIN_NOTES_HEIGHT, NotesPane, notesFocused } from "./components/NotesPane";
@@ -1504,6 +1505,7 @@ export function App() {
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
             {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}
             {showMode === "slides" && <SlideShow state={showState} command={showCommand} onToggleView={audienceOpen ? undefined : () => setShowMode("presenter")} />}
+            {showMode === "slides" && reading && <ReadingBar state={showState} command={showCommand} />}
             {showMode === "presenter" && engineRef.current && showState && (
               <PresenterView
                 engine={engineRef.current}

@@ -741,6 +741,9 @@ export const zhHant = {
   "tablePicker.cellAria": "{rows} 列 {cols} 欄",
 
   // SlideShow.tsx
+  "reading.prev": "上一張投影片",
+  "reading.next": "下一張投影片",
+  "reading.page": "{current} / {total}",
   "show.ended": "投影片放映結束，按一下以結束。",
 
   // ColorPicker.tsx
