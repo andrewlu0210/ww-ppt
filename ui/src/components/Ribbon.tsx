@@ -637,6 +637,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
             <Group label={t("group.presentationViews")}>
               <Button large icon={icons.normalView} label={t("ribbon.normal")} active={viewMode === "normal"} onClick={() => run({ kind: "viewMode", mode: "normal" })} />
               <Button large icon={icons.sorterView} label={t("ribbon.sorter")} active={viewMode === "sorter"} onClick={() => run({ kind: "viewMode", mode: "sorter" })} />
+              <Button large icon={icons.readingView} label={t("ribbon.reading")} onClick={() => run({ kind: "slideShow", fromBeginning: false, reading: true })} />
             </Group>
             <Group label={t("group.show")}>
               <div className="rb-checks">

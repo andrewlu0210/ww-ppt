@@ -7,7 +7,7 @@ interface Props {
   status: Status;
   fontsLoading: boolean;
   notesOpen: boolean;
-  viewMode: "normal" | "sorter";
+  viewMode: "normal" | "sorter" | "reading";
   /** Thumbnail scale in the slide sorter (1 = 100%). */
   sorterZoom: number;
   /** How many accessibility problems the checker found. */
@@ -18,9 +18,21 @@ interface Props {
 }
 
 export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoom, a11yIssues, run, onZoomDialog }: Props) {
-  const view = (mode: "normal" | "sorter", label: string) => (
-    <button className={viewMode === mode ? "toggle on" : "toggle"} onClick={() => run({ kind: "viewMode", mode })} onMouseDown={(e) => e.preventDefault()} aria-pressed={viewMode === mode}>
-      {label}
+  const view = (mode: "normal" | "sorter", label: string, icon?: React.ReactNode) => (
+    <button
+      className={[icon ? "icon-btn" : "", "toggle", viewMode === mode ? "on" : ""].filter(Boolean).join(" ")}
+      onClick={() => run({ kind: "viewMode", mode })}
+      onMouseDown={(e) => e.preventDefault()}
+      aria-pressed={viewMode === mode}
+      title={icon ? label : undefined}
+      aria-label={icon ? label : undefined}
+    >
+      {icon ?? label}
+    </button>
+  );
+  const reading = (
+    <button className={viewMode === "reading" ? "icon-btn toggle on" : "icon-btn toggle"} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false, reading: true })} onMouseDown={(e) => e.preventDefault()} aria-pressed={viewMode === "reading"} title={t("status.reading")} aria-label={t("status.reading")}>
+      {icons.readingView}
     </button>
   );
   return (
@@ -37,8 +49,9 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, sorterZoo
       <button className={notesOpen ? "toggle on" : "toggle"} onClick={() => run({ kind: "toggleNotes" })} onMouseDown={(e) => e.preventDefault()} aria-pressed={notesOpen} title={t("status.toggleNotes")}>
         {t("status.notes")}
       </button>
-      {view("normal", t("status.normal"))}
-      {view("sorter", t("status.sorter"))}
+      {view("normal", t("status.normal"), icons.normalView)}
+      {view("sorter", t("status.sorter"), icons.sorterView)}
+      {reading}
       <button className="icon-btn" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} onMouseDown={(e) => e.preventDefault()} title={t("ribbon.fromCurrent")} aria-label={t("ribbon.fromCurrent")}>
         {icons.playCurrent}
       </button>

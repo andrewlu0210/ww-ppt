@@ -196,6 +196,10 @@ export function App() {
   /** Slide show in progress: the slides full screen, or the presenter view. */
   const [showMode, setShowMode] = useState<"slides" | "presenter" | null>(null);
   const showing = showMode !== null;
+  /** Reading view: the show plays inside the window (title bar and status bar stay). */
+  const [reading, setReading] = useState(false);
+  const readingRef = useRef(false);
+  readingRef.current = reading;
   const [showState, setShowState] = useState<ShowState | null>(null);
   // In a show, each new slide is spoken (the end screen too).
   const shownSlide = showState?.slide;
@@ -801,11 +805,18 @@ export function App() {
   }, []);
 
   const startShow = useCallback(
-    async (fromBeginning: boolean, presenter?: boolean, forceAudience = false) => {
+    async (fromBeginning: boolean, presenter?: boolean, forceAudience = false, inWindow = false) => {
       const engine = engineRef.current;
-      if (!engine || showingRef.current || !engine.startShow(fromBeginning)) return;
+      if (!engine || showingRef.current) return;
+      if (inWindow) setViewMode("normal");
+      if (!engine.startShow(fromBeginning)) return;
+      setReading(inWindow);
       showTimer.current = { elapsed: 0, since: Date.now() };
       syncShow();
+      if (inWindow) {
+        setShowMode("slides");
+        return;
+      }
       const wantPresenter = presenter ?? usePresenterRef.current;
       const external = inTauri && (wantPresenter || forceAudience) ? await openAudience(forceAudience).catch(() => false) : false;
       // Presenter view: always with a second display (when wanted), or when asked for explicitly (⌥↩).
@@ -826,11 +837,13 @@ export function App() {
     engine.endShow();
     setShowMode(null);
     setShowState(null);
+    const wasReading = readingRef.current;
+    setReading(false);
     setAudienceOpen(false);
     if (inTauri) await (await WebviewWindow.getByLabel(AUDIENCE_LABEL))?.close();
     refresh();
     focusCanvas();
-    if (inTauri && !wasFullscreen.current) await getCurrentWindow().setFullscreen(false);
+    if (inTauri && !wasReading && !wasFullscreen.current) await getCurrentWindow().setFullscreen(false);
   }, [refresh]);
 
   const showCommand = useCallback(
@@ -871,7 +884,7 @@ export function App() {
       const engine = engineRef.current;
       if (!engine) return;
       if (c.kind === "slideShow") {
-        await startShow(c.fromBeginning, c.presenter, c.forceAudience);
+        await startShow(c.fromBeginning, c.presenter, c.forceAudience, c.reading);
         return;
       }
       if (c.kind === "usePresenter") {
@@ -891,6 +904,7 @@ export function App() {
         return;
       }
       if (c.kind === "viewMode") {
+        if (showingRef.current && readingRef.current) await endShow();
         setViewMode(c.mode);
         if (c.mode === "normal") focusCanvas();
         return;
@@ -1261,7 +1275,7 @@ export function App() {
       if (viewModeRef.current === "sorter") document.querySelector<HTMLElement>(".slide-sorter")?.focus({ preventScroll: true });
       else focusCanvas();
     },
-    [confirmDiscard, deckStyleChanged, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow],
+    [confirmDiscard, deckStyleChanged, documentReplaced, exportPdf, loadFonts, openPath, refresh, save, saveAs, scheduleThumbs, startShow, endShow],
   );
 
   // Native menu items are forwarded here by the backend.
@@ -1482,7 +1496,7 @@ export function App() {
           }}
           run={run}
         />
-        <section className={showing ? "editor-area showing" : "editor-area"}>
+        <section className={showing ? (reading ? "editor-area showing reading" : "editor-area showing") : "editor-area"}>
           <div className={viewPrefs.ruler && !showing ? "canvas-area with-ruler" : "canvas-area"} onContextMenu={onCanvasContextMenu}>
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} scroll={status.scroll} painter={painter} onPainterDone={() => setPainter(null)} />
             {viewPrefs.ruler && !showing && <Rulers engine={engineRef.current} slideSize={slideSize} />}
@@ -1592,7 +1606,7 @@ export function App() {
       </main>
       {zoomOpen && <ZoomDialog percent={status.zoomPercent} relative={status.zoom} fit={status.zoomFit} run={run} onClose={() => { setZoomOpen(false); focusCanvas(); }} />}
       {videoOpen && <VideoDialog engine={engineRef.current} name={doc.name} onClose={() => setVideoOpen(false)} />}
-      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} onZoomDialog={() => setZoomOpen(true)} />
+      <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={reading ? "reading" : viewMode} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} onZoomDialog={() => setZoomOpen(true)} />
     </div>
   );
 }

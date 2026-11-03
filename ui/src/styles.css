@@ -367,6 +367,11 @@ button {
   background: #000;
 }
 
+/* Reading view: below the title bar, above the status bar. */
+.editor-area.showing.reading {
+  inset: 38px 0 26px 0;
+}
+
 .slide-show {
   position: absolute;
   inset: 0;

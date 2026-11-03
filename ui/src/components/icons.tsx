@@ -84,10 +84,10 @@ export const icons: Record<string, ReactNode> = {
   ),
   sorterView: (
     <Svg>
-      <rect x="3" y="4.5" width="7.5" height="6" rx="0.5" />
-      <rect x="13.5" y="4.5" width="7.5" height="6" rx="0.5" />
-      <rect x="3" y="13.5" width="7.5" height="6" rx="0.5" />
-      <rect x="13.5" y="13.5" width="7.5" height="6" rx="0.5" />
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
     </Svg>
   ),
   grid: (
@@ -282,6 +282,12 @@ export const icons: Record<string, ReactNode> = {
       <rect x="2.5" y="4" width="12" height="9" rx="1" />
       <rect x="16" y="4" width="5.5" height="4" rx="0.5" />
       <path d="M16 11h5.5M16 13.5h4M2.5 16.5h12M2.5 19h8" />
+    </Svg>
+  ),
+  readingView: (
+    <Svg>
+      <rect x="3.5" y="5" width="7.5" height="14" rx="1.5" />
+      <rect x="13" y="5" width="7.5" height="14" rx="1.5" />
     </Svg>
   ),
   playCurrent: (
