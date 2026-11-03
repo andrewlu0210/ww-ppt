@@ -820,6 +820,8 @@ export const zhHans: Messages = {
   "format.autofitShape": "根据文字调整形状大小",
   "format.propertiesGroup": "属性",
   "format.lockObject": "锁定",
+  "format.backgroundTitle": "设置背景格式",
+  "format.fillPicture": "图片填充",
   "show.ended": "放映结束，单击鼠标退出。",
 
   // ColorPicker.tsx

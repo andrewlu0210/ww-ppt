@@ -820,6 +820,8 @@ export const en: Messages = {
   "format.autofitShape": "Resize shape to fit text",
   "format.propertiesGroup": "Properties",
   "format.lockObject": "Lock",
+  "format.backgroundTitle": "Format Background",
+  "format.fillPicture": "Picture fill",
   "show.ended": "End of slide show, click to exit.",
 
   // ColorPicker.tsx

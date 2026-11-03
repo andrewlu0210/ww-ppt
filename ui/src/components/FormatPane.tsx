@@ -209,6 +209,140 @@ interface Props {
   onClose: () => void;
 }
 
+interface FillEditorProps {
+  name: string;
+  /** The fill now; null when the shapes differ (or it is not one of these kinds). */
+  fill: FillInfo | null;
+  /** The kinds offered, in order; "picture" runs `onPicture`. */
+  kinds: ("none" | "solid" | "gradient" | "picture")[];
+  /** Fills can be partly clear (shapes); a slide background cannot. */
+  allowAlpha: boolean;
+  /** A picture is the current fill. */
+  picture?: boolean;
+  onPicture?: () => void;
+  onChange: (spec: FillSpec) => void;
+}
+
+const FILL_LABELS = { none: "format.fillNone", solid: "format.fillSolid", gradient: "format.fillGradient", picture: "format.fillPicture" } as const;
+
+/** Fill kind (none, solid, gradient, picture) and its settings, shared by shapes and the slide background. */
+function FillEditor({ name, fill, kinds, allowAlpha, picture, onPicture, onChange }: FillEditorProps) {
+  const baseColor = fill?.type === "solid" ? fill.color! : fill?.type === "gradient" ? fill.stops![0].color : DEFAULT_COLOR;
+  const baseAlpha = fill?.type === "solid" ? fill.alpha! : 1;
+  const pickType = (type: string) => {
+    if (type === "none") onChange({ type: "none" });
+    else if (type === "solid") onChange({ type: "solid", color: baseColor, alpha: baseAlpha });
+    else if (type === "picture") onPicture?.();
+    else onChange({ type: "gradient", kind: "linear", angle: 90, stops: [{ pos: 0, color: baseColor, alpha: baseAlpha }, { pos: 1, color: lighten(baseColor, 0.6), alpha: baseAlpha }] });
+  };
+  const gradient = fill?.type === "gradient" ? fill : null;
+  const setGradient = (patch: Partial<{ kind: "linear" | "radial"; angle: number; stops: Stop[] }>) => {
+    if (!gradient) return;
+    onChange({ type: "gradient", kind: patch.kind ?? gradient.kind ?? "linear", angle: patch.angle ?? gradient.angle ?? 90, stops: patch.stops ?? gradient.stops! });
+  };
+  const editStop = (i: number, patch: Partial<Stop>) => setGradient({ stops: gradient!.stops!.map((s, k) => (k === i ? { ...s, ...patch } : s)) });
+  const addStop = () => {
+    const stops = [...gradient!.stops!].sort((a, b) => a.pos - b.pos);
+    // In the middle of the widest gap, in the color of the stop before it.
+    let at = 0;
+    for (let i = 1; i < stops.length; i++) if (stops[i].pos - stops[i - 1].pos > stops[at + 1].pos - stops[at].pos) at = i - 1;
+    const mid = (stops[at].pos + stops[at + 1].pos) / 2;
+    setGradient({ stops: [...stops.slice(0, at + 1), { ...stops[at], pos: mid }, ...stops.slice(at + 1)] });
+  };
+  const preview = gradient
+    ? `linear-gradient(90deg, ${[...gradient.stops!].sort((a, b) => a.pos - b.pos).map((s) => `${css(s.color, s.alpha)} ${Math.round(s.pos * 100)}%`).join(", ")})`
+    : undefined;
+  return (
+    <>
+      <Radios name={name} value={picture ? "picture" : (fill?.type ?? null)} options={kinds.map((k) => [k, t(FILL_LABELS[k])])} onPick={pickType} />
+      {fill?.type === "solid" && (
+        <>
+          <div className="fp-row">
+            <span className="fp-label">{t("format.color")}</span>
+            <ColorPicker icon={<Swatch color={fill.color} alpha={fill.alpha} />} label="" value={fill.color} onPick={(color) => color && onChange({ type: "solid", color, alpha: fill.alpha! })} />
+          </div>
+          {allowAlpha && <Percent label={t("format.transparency")} value={Math.round((1 - fill.alpha!) * 100)} onCommit={(p) => onChange({ type: "solid", color: fill.color!, alpha: 1 - p / 100 })} />}
+        </>
+      )}
+      {gradient && (
+        <>
+          <div className="fp-gradient-bar" style={{ background: preview }} aria-hidden="true" />
+          <div className="fp-row">
+            <label className="fp-field wide">
+              <span>{t("format.gradientType")}</span>
+              <select value={gradient.kind} onChange={(e) => setGradient({ kind: e.target.value as "linear" | "radial" })}>
+                <option value="linear">{t("format.gradLinear")}</option>
+                <option value="radial">{t("format.gradRadial")}</option>
+              </select>
+            </label>
+          </div>
+          {gradient.kind === "linear" && <Num label={t("format.angle")} unit="°" value={gradient.angle} min={0} max={359} step={5} onCommit={(angle) => setGradient({ angle })} />}
+          <div className="fp-subhead">{t("format.stops")}</div>
+          {gradient.stops!.map((s, i) => (
+            <div className="fp-stop" key={i} role="group" aria-label={t("format.stopN", { n: i + 1 })}>
+              <ColorPicker icon={<Swatch color={s.color} alpha={s.alpha} />} label="" value={s.color} onPick={(color) => color && editStop(i, { color })} />
+              <Num label={t("format.stopPosition")} unit="%" value={Math.round(s.pos * 100)} min={0} max={100} step={5} onCommit={(p) => editStop(i, { pos: p / 100 })} />
+              {allowAlpha && <Num label={t("format.transparency")} unit="%" value={Math.round((1 - s.alpha) * 100)} min={0} max={100} step={5} onCommit={(p) => editStop(i, { alpha: 1 - p / 100 })} />}
+              <button className="fp-icon" disabled={gradient.stops!.length <= 2} onClick={() => setGradient({ stops: gradient.stops!.filter((_, k) => k !== i) })} aria-label={t("format.removeStop")} title={t("format.removeStop")}>
+                −
+              </button>
+            </div>
+          ))}
+          <button className="fp-add" onClick={addStop}>
+            + {t("format.addStop")}
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+
+/** The slide background (`App::background`) with the paint in full. */
+interface BackgroundState {
+  kind?: "solid" | "gradient" | "picture";
+  own?: boolean;
+  hideGraphics?: boolean;
+  fill?: FillInfo;
+}
+
+/** 設定背景格式: what the pane shows when no object is selected. */
+function BackgroundSettings({ engine, run }: { engine: App | null; run: (c: Command) => void }) {
+  const bg = engine ? (engine.background() as BackgroundState) : {};
+  if (!bg.kind) return <div className="pane-empty">{t("design.noSlides")}</div>;
+  return (
+    <div className="fp-scroll">
+      <Section title={t("format.fillSection")}>
+        <FillEditor
+          name="fp-bg"
+          fill={bg.kind === "picture" ? null : (bg.fill ?? null)}
+          kinds={["solid", "gradient", "picture"]}
+          allowAlpha={false}
+          picture={bg.kind === "picture"}
+          onPicture={() => run({ kind: "backgroundPicture" })}
+          onChange={(spec) => run({ kind: "backgroundFill", spec })}
+        />
+        {bg.kind === "picture" && (
+          <button className="fp-add" onClick={() => run({ kind: "backgroundPicture" })}>
+            {t("design.insertPicture")}
+          </button>
+        )}
+        <label className="fp-check">
+          <input type="checkbox" checked={bg.hideGraphics === true} onChange={(e) => run({ kind: "hideBackgroundGraphics", on: e.target.checked })} />
+          {t("design.hideBackgroundGraphics")}
+        </label>
+        <div className="fp-buttons">
+          <button disabled={!bg.own} onClick={() => run({ kind: "resetBackground" })}>
+            {t("design.resetBackground")}
+          </button>
+          <button className="primary" onClick={() => run({ kind: "backgroundToAll" })}>
+            {t("trans.applyAll")}
+          </button>
+        </div>
+      </Section>
+    </div>
+  );
+}
+
 /**
  * 設定圖形格式: the selected shapes' fill and outline. Every change is one command and one undo step;
  * with different values in the selection the controls show nothing chosen until one is picked.
@@ -243,32 +377,6 @@ export function FormatPane({ status, engine, version, run, onClose }: Props) {
   const alt = engine && status.selectionCount === 1 ? (engine.altText() as { text: string; decorative: boolean } | null) : null;
   const shadow = info?.shadow ?? null;
   const preset = shadowPreset(shadow);
-
-  // --- fill
-  const baseColor = fill?.type === "solid" ? fill.color! : fill?.type === "gradient" ? fill.stops![0].color : DEFAULT_COLOR;
-  const baseAlpha = fill?.type === "solid" ? fill.alpha! : 1;
-  const pickFillType = (type: string) => {
-    if (type === "none") setFill({ type: "none" });
-    else if (type === "solid") setFill({ type: "solid", color: baseColor, alpha: baseAlpha });
-    else setFill({ type: "gradient", kind: "linear", angle: 90, stops: [{ pos: 0, color: baseColor, alpha: baseAlpha }, { pos: 1, color: lighten(baseColor, 0.6), alpha: baseAlpha }] });
-  };
-  const gradient = fill?.type === "gradient" ? fill : null;
-  const setGradient = (patch: Partial<{ kind: "linear" | "radial"; angle: number; stops: Stop[] }>) => {
-    if (!gradient) return;
-    setFill({ type: "gradient", kind: patch.kind ?? gradient.kind ?? "linear", angle: patch.angle ?? gradient.angle ?? 90, stops: patch.stops ?? gradient.stops! });
-  };
-  const editStop = (i: number, patch: Partial<Stop>) => setGradient({ stops: gradient!.stops!.map((s, k) => (k === i ? { ...s, ...patch } : s)) });
-  const addStop = () => {
-    const stops = [...gradient!.stops!].sort((a, b) => a.pos - b.pos);
-    // In the middle of the widest gap, in the color of the stop before it.
-    let at = 0;
-    for (let i = 1; i < stops.length; i++) if (stops[i].pos - stops[i - 1].pos > stops[at + 1].pos - stops[at].pos) at = i - 1;
-    const mid = (stops[at].pos + stops[at + 1].pos) / 2;
-    setGradient({ stops: [...stops.slice(0, at + 1), { ...stops[at], pos: mid }, ...stops.slice(at + 1)] });
-  };
-  const preview = gradient
-    ? `linear-gradient(90deg, ${[...gradient.stops!].sort((a, b) => a.pos - b.pos).map((s) => `${css(s.color, s.alpha)} ${Math.round(s.pos * 100)}%`).join(", ")})`
-    : undefined;
 
   // --- line
   const lineVisible = line === null ? null : line.visible ? "solid" : "none";
@@ -316,15 +424,15 @@ export function FormatPane({ status, engine, version, run, onClose }: Props) {
   };
 
   return (
-    <aside className="format-pane" aria-label={t("format.paneTitle")}>
+    <aside className="format-pane" aria-label={info ? t("format.paneTitle") : t("format.backgroundTitle")}>
       <div className="pane-head">
-        <span className="pane-title">{t("format.paneTitle")}</span>
+        <span className="pane-title">{info ? t("format.paneTitle") : t("format.backgroundTitle")}</span>
         <button className="pane-close" onClick={onClose} aria-label={t("format.paneClose")} title={t("common.close")}>
           ×
         </button>
       </div>
       {!info ? (
-        <div className="pane-empty">{t("format.nothingSelected")}</div>
+        <BackgroundSettings engine={engine} run={run} />
       ) : (
         <div className="fp-scroll">
           <Section title={t("format.fillSection")}>
@@ -332,55 +440,8 @@ export function FormatPane({ status, engine, version, run, onClose }: Props) {
               <div className="pane-empty">{t("format.noFill")}</div>
             ) : (
               <>
-                <Radios
-                  name="fp-fill"
-                  value={fill?.type ?? null}
-                  options={[
-                    ["none", t("format.fillNone")],
-                    ["solid", t("format.fillSolid")],
-                    ["gradient", t("format.fillGradient")],
-                  ]}
-                  onPick={pickFillType}
-                />
+                <FillEditor name="fp-fill" fill={fill} kinds={["none", "solid", "gradient"]} allowAlpha onChange={setFill} />
                 {fill === null && <div className="pane-empty">{t("format.mixed")}</div>}
-                {fill?.type === "solid" && (
-                  <>
-                    <div className="fp-row">
-                      <span className="fp-label">{t("format.color")}</span>
-                      <ColorPicker icon={<Swatch color={fill.color} alpha={fill.alpha} />} label="" value={fill.color} onPick={(color) => color && setFill({ type: "solid", color, alpha: fill.alpha! })} />
-                    </div>
-                    <Percent label={t("format.transparency")} value={Math.round((1 - fill.alpha!) * 100)} onCommit={(p) => setFill({ type: "solid", color: fill.color!, alpha: 1 - p / 100 })} />
-                  </>
-                )}
-                {gradient && (
-                  <>
-                    <div className="fp-gradient-bar" style={{ background: preview }} aria-hidden="true" />
-                    <div className="fp-row">
-                      <label className="fp-field wide">
-                        <span>{t("format.gradientType")}</span>
-                        <select value={gradient.kind} onChange={(e) => setGradient({ kind: e.target.value as "linear" | "radial" })}>
-                          <option value="linear">{t("format.gradLinear")}</option>
-                          <option value="radial">{t("format.gradRadial")}</option>
-                        </select>
-                      </label>
-                    </div>
-                    {gradient.kind === "linear" && <Num label={t("format.angle")} unit="°" value={gradient.angle} min={0} max={359} step={5} onCommit={(angle) => setGradient({ angle })} />}
-                    <div className="fp-subhead">{t("format.stops")}</div>
-                    {gradient.stops!.map((s, i) => (
-                      <div className="fp-stop" key={i} role="group" aria-label={t("format.stopN", { n: i + 1 })}>
-                        <ColorPicker icon={<Swatch color={s.color} alpha={s.alpha} />} label="" value={s.color} onPick={(color) => color && editStop(i, { color })} />
-                        <Num label={t("format.stopPosition")} unit="%" value={Math.round(s.pos * 100)} min={0} max={100} step={5} onCommit={(p) => editStop(i, { pos: p / 100 })} />
-                        <Num label={t("format.transparency")} unit="%" value={Math.round((1 - s.alpha) * 100)} min={0} max={100} step={5} onCommit={(p) => editStop(i, { alpha: 1 - p / 100 })} />
-                        <button className="fp-icon" disabled={gradient.stops!.length <= 2} onClick={() => setGradient({ stops: gradient.stops!.filter((_, k) => k !== i) })} aria-label={t("format.removeStop")} title={t("format.removeStop")}>
-                          −
-                        </button>
-                      </div>
-                    ))}
-                    <button className="fp-add" onClick={addStop}>
-                      + {t("format.addStop")}
-                    </button>
-                  </>
-                )}
               </>
             )}
           </Section>

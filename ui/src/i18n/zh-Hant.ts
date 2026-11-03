@@ -822,6 +822,8 @@ export const zhHant = {
   "format.autofitShape": "調整圖形大小以配合文字",
   "format.propertiesGroup": "屬性",
   "format.lockObject": "鎖定",
+  "format.backgroundTitle": "設定背景格式",
+  "format.fillPicture": "圖片填滿",
   "show.ended": "投影片放映結束，按一下以結束。",
 
   // ColorPicker.tsx

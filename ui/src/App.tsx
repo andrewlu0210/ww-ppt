@@ -1291,6 +1291,9 @@ export function App() {
         case "hideBackgroundGraphics":
           engine.setHideBackgroundGraphics(c.on);
           break;
+        case "backgroundFill":
+          engine.setBackgroundFill(c.spec);
+          break;
         case "backgroundToAll":
           engine.applyBackgroundToAll();
           structural = true;

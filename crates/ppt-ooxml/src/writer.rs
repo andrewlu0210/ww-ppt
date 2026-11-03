@@ -428,22 +428,6 @@ fn patch_body_pr(src: &str, c: Node, body: &TextBody, old: Option<&TextBody>) ->
     }
 }
 
-fn with_attr(src: &str, n: Node, name: &str, value: &str) -> String {
-    let start = n.range().start;
-    let mut xml = src[n.range()].to_string();
-    match n.attributes().find(|a| a.name() == name && a.namespace().is_none()) {
-        Some(a) => {
-            let r = a.range_value();
-            xml.replace_range(r.start - start..r.end - start, &esc(value));
-        }
-        None => {
-            let at = open_tag(src, n).len();
-            xml.insert_str(at, &format!(r#" {name}="{}""#, esc(value)));
-        }
-    }
-    xml
-}
-
 fn body_pr_xml(body: &TextBody) -> String {
     let anchor = anchor_code(body.anchor);
     let [l, t, r, b] = body.insets;

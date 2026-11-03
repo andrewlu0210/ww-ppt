@@ -88,7 +88,7 @@ export function buildContextMenu(kind: ContextKind, env: ContextEnv): MenuItem[]
     },
     { label: t("ribbon.reset"), onSelect: () => run({ kind: "resetSlide" }) },
     SEP,
-    { label: t("ctx.background"), onSelect: () => env.openTab("設計") },
+    { label: t("ctx.background"), onSelect: env.openFormatPane },
     SEP,
     { label: t("ribbon.gridlines"), checked: !!status.showGrid, onSelect: () => run({ kind: "showGrid", on: !status.showGrid }) },
     { label: t("ribbon.guides"), checked: !!status.showGuides, onSelect: () => run({ kind: "showGuides", on: !status.showGuides }) },

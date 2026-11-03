@@ -111,3 +111,18 @@ fn lock_aspect_and_text_box_settings_round_trip() {
     let third = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres2).unwrap()).unwrap();
     assert!(!find(&third, "locked-aspect").access.lock_aspect && !find(&third, &existing).access.lock_aspect);
 }
+
+#[test]
+fn a_gradient_background_with_several_stops_round_trips() {
+    let mut pres = deck();
+    pres.slides[0].background = Some(ppt_model::Background::Paint(Paint::Gradient(Arc::new(Gradient {
+        stops: vec![(0.0, Color::rgb(0x1F, 0x38, 0x64)), (0.5, Color::rgb(0x2E, 0x75, 0xB6)), (1.0, Color::rgb(0xBD, 0xD7, 0xEE))],
+        kind: GradientKind::Linear { angle: 90.0, scaled: false },
+        rotate_with_shape: true,
+    }))));
+    let again = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
+    let Some(ppt_model::Background::Paint(Paint::Gradient(g))) = &again.slides[0].background else { panic!("{:?}", again.slides[0].background) };
+    assert_eq!(g.stops.len(), 3);
+    assert_eq!(g.stops[1].1, Color::rgb(0x2E, 0x75, 0xB6));
+    assert!(matches!(g.kind, GradientKind::Linear { angle, .. } if (angle - 90.0).abs() < 0.01));
+}

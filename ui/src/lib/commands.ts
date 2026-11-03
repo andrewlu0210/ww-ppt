@@ -59,6 +59,8 @@ export type Command =
   | { kind: "background"; fill: "solid"; color: string }
   | { kind: "background"; fill: "gradient"; start: string; end: string; radial: boolean; angle: number }
   | { kind: "backgroundPicture" }
+  /** The slide background, set in full (`App::setBackgroundFill`). */
+  | { kind: "backgroundFill"; spec: import("../components/FormatPane").FillSpec }
   | { kind: "resetBackground" }
   | { kind: "hideBackgroundGraphics"; on: boolean }
   | { kind: "backgroundToAll" }

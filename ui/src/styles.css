@@ -2850,3 +2850,20 @@ input:focus-visible,
   box-sizing: border-box;
   resize: vertical;
 }
+
+.fp-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.fp-buttons button {
+  font: inherit;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.fp-buttons button:disabled {
+  opacity: 0.4;
+}

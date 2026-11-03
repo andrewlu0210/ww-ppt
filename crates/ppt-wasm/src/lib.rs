@@ -209,6 +209,67 @@ fn js_color(o: &JsValue) -> Color {
     Color { a: (js_num(o, "alpha").unwrap_or(1.0).clamp(0.0, 1.0) * 255.0).round() as u8, ..c }
 }
 
+/// A fill from JS (`{ type: "none" | "solid" | "gradient", ... }`, see `App::setFillSpec`); `None` when it is malformed.
+fn fill_spec_from_js(spec: &JsValue) -> Option<ppt_editor::FillSpec> {
+    use ppt_editor::FillSpec;
+    Some(match js_str(spec, "type")?.as_str() {
+        "none" => FillSpec::None,
+        "solid" => FillSpec::Solid(js_color(spec)),
+        "gradient" => {
+            let mut stops: Vec<(f32, Color)> = js_array(spec, "stops").iter().map(|st| (js_num(st, "pos").unwrap_or(0.0).clamp(0.0, 1.0) as f32, js_color(st))).collect();
+            if stops.len() < 2 {
+                return None;
+            }
+            stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let kind = if js_str(spec, "kind").as_deref() == Some("radial") {
+                ppt_model::GradientKind::Path { circle: true, focus: [0.5; 4] }
+            } else {
+                ppt_model::GradientKind::Linear { angle: js_num(spec, "angle").unwrap_or(90.0), scaled: false }
+            };
+            FillSpec::Gradient(ppt_model::Gradient { stops, kind, rotate_with_shape: true })
+        }
+        _ => return None,
+    })
+}
+
+/// A paint (`None`: no fill) as the pane's fill info: `{ type, color, alpha, kind, angle, stops }`.
+fn paint_info(paint: Option<&Paint>) -> JsValue {
+    let o = Object::new();
+    let set = |o: &Object, k: &str, v: JsValue| {
+        let _ = Reflect::set(o, &k.into(), &v);
+    };
+    let color_into = |o: &Object, c: Color| {
+        set(o, "color", hex(c).into());
+        set(o, "alpha", (c.a as f64 / 255.0).into());
+    };
+    match paint {
+        None => set(&o, "type", "none".into()),
+        Some(Paint::Solid(c)) => {
+            set(&o, "type", "solid".into());
+            color_into(&o, *c);
+        }
+        Some(Paint::Gradient(g)) => {
+            set(&o, "type", "gradient".into());
+            match g.kind {
+                GradientKind::Linear { angle, .. } => {
+                    set(&o, "kind", "linear".into());
+                    set(&o, "angle", angle.into());
+                }
+                GradientKind::Path { .. } => set(&o, "kind", "radial".into()),
+            }
+            let stops = Array::new();
+            for (pos, c) in &g.stops {
+                let st = Object::new();
+                set(&st, "pos", (*pos as f64).into());
+                color_into(&st, *c);
+                stops.push(&st);
+            }
+            set(&o, "stops", stops.into());
+        }
+    }
+    o.into()
+}
+
 fn template() -> Presentation {
     ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).expect("built-in template parses")
 }
@@ -1340,27 +1401,7 @@ impl App {
     /// (`color` "#RRGGBB", `alpha` 0 clear to 1 opaque, `pos` 0 to 1, `angle` in degrees).
     #[wasm_bindgen(js_name = setFillSpec)]
     pub fn set_fill_spec(&mut self, spec: JsValue) -> bool {
-        use ppt_editor::FillSpec;
-        let Some(kind) = js_str(&spec, "type") else { return false };
-        let fill = match kind.as_str() {
-            "none" => FillSpec::None,
-            "solid" => FillSpec::Solid(js_color(&spec)),
-            "gradient" => {
-                let stops: Vec<(f32, Color)> = js_array(&spec, "stops").iter().map(|st| (js_num(&st, "pos").unwrap_or(0.0).clamp(0.0, 1.0) as f32, js_color(&st))).collect();
-                if stops.len() < 2 {
-                    return false;
-                }
-                let mut stops = stops;
-                stops.sort_by(|a, b| a.0.total_cmp(&b.0));
-                let kind = if js_str(&spec, "kind").as_deref() == Some("radial") {
-                    ppt_model::GradientKind::Path { circle: true, focus: [0.5; 4] }
-                } else {
-                    ppt_model::GradientKind::Linear { angle: js_num(&spec, "angle").unwrap_or(90.0), scaled: false }
-                };
-                FillSpec::Gradient(ppt_model::Gradient { stops, kind, rotate_with_shape: true })
-            }
-            _ => return false,
-        };
+        let Some(fill) = fill_spec_from_js(&spec) else { return false };
         let changed = self.editor.set_fill_spec(fill);
         self.touch(changed)
     }
@@ -1439,7 +1480,6 @@ impl App {
     /// (`{ visible, color, alpha, widthPt, dash, head, tail }`).
     #[wasm_bindgen(js_name = formatInfo)]
     pub fn format_info(&self) -> JsValue {
-        use ppt_model::{GradientKind, Paint};
         let Some(info) = self.editor.format_info() else { return JsValue::NULL };
         let set = |o: &Object, k: &str, v: JsValue| {
             let _ = Reflect::set(o, &k.into(), &v);
@@ -1496,44 +1536,7 @@ impl App {
                 }
             },
         );
-        set(
-            &out,
-            "fill",
-            match info.fill {
-                None => JsValue::NULL,
-                Some(None) => {
-                    let o = Object::new();
-                    set(&o, "type", "none".into());
-                    o.into()
-                }
-                Some(Some(Paint::Solid(c))) => {
-                    let o = Object::new();
-                    set(&o, "type", "solid".into());
-                    color_into(&o, c);
-                    o.into()
-                }
-                Some(Some(Paint::Gradient(g))) => {
-                    let o = Object::new();
-                    set(&o, "type", "gradient".into());
-                    match g.kind {
-                        GradientKind::Linear { angle, .. } => {
-                            set(&o, "kind", "linear".into());
-                            set(&o, "angle", angle.into());
-                        }
-                        GradientKind::Path { .. } => set(&o, "kind", "radial".into()),
-                    }
-                    let stops = Array::new();
-                    for (pos, c) in &g.stops {
-                        let st = Object::new();
-                        set(&st, "pos", (*pos as f64).into());
-                        color_into(&st, *c);
-                        stops.push(&st);
-                    }
-                    set(&o, "stops", stops.into());
-                    o.into()
-                }
-            },
-        );
+        set(&out, "fill", info.fill.map_or(JsValue::NULL, |p| paint_info(p.as_ref())));
         set(
             &out,
             "line",
@@ -2058,7 +2061,23 @@ impl App {
         let _ = Reflect::set(&o, &"angle".into(), &angle.into());
         let _ = Reflect::set(&o, &"own".into(), &own.into());
         let _ = Reflect::set(&o, &"hideGraphics".into(), &hide.into());
+        // The paint in full (gradient stops), for the format pane; none for a picture.
+        if let Background::Paint(p) = bg {
+            let _ = Reflect::set(&o, &"fill".into(), &paint_info(Some(p)));
+        }
         o
+    }
+
+    /// Fills the current slide's background as `spec` says (`{ type: "solid" | "gradient", ... }`, as `setFillSpec`).
+    #[wasm_bindgen(js_name = setBackgroundFill)]
+    pub fn set_background_fill(&mut self, spec: JsValue) -> bool {
+        let paint = match fill_spec_from_js(&spec) {
+            Some(ppt_editor::FillSpec::Solid(c)) => Paint::Solid(c),
+            Some(ppt_editor::FillSpec::Gradient(g)) => Paint::Gradient(Arc::new(g)),
+            _ => return false,
+        };
+        let changed = self.editor.set_background(&mut self.engine, Some(Background::Paint(paint)));
+        self.touch(changed)
     }
 
     /// Fills the current slide's background with one color.
