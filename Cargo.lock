@@ -2984,7 +2984,7 @@ checksum = "4a6394b9e965e73d0a289ee54f589087e2c676aedf60885baf52c76b771e4958"
 
 [[package]]
 name = "ppt-editor"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "parley",
  "ppt-geometry",
@@ -2996,7 +2996,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-fonts"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "fontique",
  "serde",
@@ -3004,7 +3004,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-geometry"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "kurbo",
  "ppt-model",
@@ -3013,11 +3013,11 @@ dependencies = [
 
 [[package]]
 name = "ppt-model"
-version = "0.1.5"
+version = "0.1.6"
 
 [[package]]
 name = "ppt-offscreen"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "image",
  "pollster",
@@ -3030,7 +3030,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-ooxml"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "ppt-model",
  "roxmltree",
@@ -3039,7 +3039,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-pdf"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "krilla",
  "ppt-model",
@@ -3050,7 +3050,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-render"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "image",
  "parley",
@@ -3062,7 +3062,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-text"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "parley",
  "ppt-model",
@@ -3070,7 +3070,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-video"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "block2",
  "objc2",
@@ -3087,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-vr"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "image",
  "pollster",
@@ -3107,7 +3107,7 @@ dependencies = [
 
 [[package]]
 name = "ppt-wasm"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -5565,7 +5565,7 @@ dependencies = [
 
 [[package]]
 name = "ww-ppt"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "libc",
  "objc2-app-kit",
