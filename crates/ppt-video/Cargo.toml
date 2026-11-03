@@ -14,7 +14,8 @@ ppt-offscreen.workspace = true
 objc2 = "0.6"
 block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSDictionary", "NSValue", "NSError", "NSObject"] }
-objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-video", "objc2-core-media", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-video", "objc2-core-media", "AVAssetWriter", "AVAssetWriterInput", "AVMediaFormat", "AVVideoSettings", "AVAsset", "AVAssetTrack", "AVAssetReader", "AVAssetReaderOutput", "AVAssetImageGenerator", "objc2-core-graphics"] }
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferPool", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase"] }
-objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime"] }
+objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime", "CMSampleBuffer", "CMBlockBuffer"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFString", "CFNumber"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGContext", "CGColorSpace", "CGBitmapContext"] }

@@ -8,6 +8,7 @@ mod chart;
 pub mod design;
 mod diagram;
 mod smartart;
+mod media;
 mod notes;
 mod package;
 mod style;
@@ -18,6 +19,7 @@ mod transition;
 mod view;
 mod writer;
 
+pub use media::clips as media_clips;
 pub use template::template_package;
 pub use writer::save_pptx;
 

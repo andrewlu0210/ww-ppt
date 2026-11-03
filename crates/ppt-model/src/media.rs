@@ -60,3 +60,42 @@ impl fmt::Debug for MediaStore {
         f.debug_struct("MediaStore").field("added", &self.added.keys().collect::<Vec<_>>()).field("source", &self.source.is_some()).finish()
     }
 }
+
+/// What a slide's audio or video clip plays, as PowerPoint stored it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipKind {
+    Audio,
+    Video,
+}
+
+/// When a clip starts playing on its slide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipStart {
+    /// With the slide (before any click).
+    Auto,
+    /// With click `n` of the slide's animations (1 is the first click).
+    Click(usize),
+}
+
+/// An audio or video object on a slide with its playback settings. Read from
+/// the original XML for video export; the editor does not edit these.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MediaClip {
+    /// Index into [`crate::Presentation::slides`].
+    pub slide: usize,
+    pub kind: ClipKind,
+    /// The picture or icon the clip is shown as (its frame on the slide).
+    pub shape: crate::ShapeId,
+    /// Key into [`crate::Presentation::media`].
+    pub part: String,
+    /// Time cut from the start / the end of the media (milliseconds).
+    pub trim_start_ms: f64,
+    pub trim_end_ms: f64,
+    /// 0–1.
+    pub volume: f64,
+    pub repeat: bool,
+    /// Slides the sound plays over, counting its own: 1 stops with its slide,
+    /// more is background music that carries on.
+    pub slides: usize,
+    pub start: ClipStart,
+}
