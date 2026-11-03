@@ -99,3 +99,14 @@ pub struct MediaClip {
     pub slides: usize,
     pub start: ClipStart,
 }
+
+/// Name of the audio object holding a slide's recorded narration.
+pub const NARRATION_NAME: &str = "Narration";
+
+/// A recording to write into a slide when saving, as an audio object that plays
+/// by itself when the slide appears (what PowerPoint's "Record Slide Show" makes).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Narration {
+    /// Key into [`crate::Presentation::media`].
+    pub media: String,
+}

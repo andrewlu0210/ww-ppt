@@ -500,6 +500,25 @@ impl MediaOut {
         copy
     }
 
+    /// The picture a narration's audio object is shown as, added to the package once.
+    fn narration_icon(&mut self) -> String {
+        const KEY: &str = "ww:narration-icon";
+        if let Some(p) = self.parts.get(KEY) {
+            return p.clone();
+        }
+        let mut n = 1;
+        let part = loop {
+            let name = format!("ppt/media/ww-narration{n}.png");
+            if self.taken.insert(name.clone()) {
+                break name;
+            }
+            n += 1;
+        };
+        self.parts.insert(KEY.to_string(), part.clone());
+        self.new_files.push((part.clone(), include_bytes!("../assets/narration-icon.png").to_vec()));
+        part
+    }
+
     fn part_for(&mut self, pres: &Presentation, key: &str) -> Option<String> {
         if self.existing.contains(key) {
             return Some(key.to_string());
@@ -535,6 +554,8 @@ struct SlideOut<'a> {
     namespaces: Vec<(String, String)>,
     /// The id each shape (and group, by its group id) was written with, for animations.
     written: HashMap<ppt_model::ShapeId, u32>,
+    /// The id the narration's audio object was written with.
+    narration_id: Option<u32>,
 }
 
 impl SlideOut<'_> {
@@ -1063,7 +1084,68 @@ fn shapes_xml(slide: &Slide, out: &mut SlideOut) -> String {
         }
         i += run;
     }
+    if let Some(n) = &slide.narration {
+        xml.push_str(&narration_shape_xml(n, out).unwrap_or_default());
+    }
     xml
+}
+
+/// The audio object of a narration: a microphone picture that is hidden while the slide plays.
+fn narration_shape_xml(n: &ppt_model::media::Narration, out: &mut SlideOut) -> Option<String> {
+    let part = out.media.part_for(out.pres, &n.media)?;
+    let icon = out.media.narration_icon();
+    let audio = out.rel_for(&format!("{REL_BASE}audio"), &part, false);
+    let media = out.rel_for("http://schemas.microsoft.com/office/2007/relationships/media", &part, false);
+    let image = out.rel_for(&format!("{REL_BASE}image"), &icon, false);
+    let id = out.take_id(0);
+    out.narration_id = Some(id);
+    // Half an inch, in the slide's bottom right corner.
+    let size = 457_200i64;
+    let (x, y) = (out.pres.slide_width - size - size / 2, out.pres.slide_height - size - size / 2);
+    Some(format!(
+        r#"<p:pic><p:nvPicPr><p:cNvPr id="{id}" name="{}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr><a:audioFile r:link="{audio}"/><p:extLst><p:ext uri="{{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}}"><p14:media xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" r:embed="{media}"/></p:ext></p:extLst></p:nvPr></p:nvPicPr><p:blipFill><a:blip r:embed="{image}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{size}" cy="{size}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#,
+        ppt_model::media::NARRATION_NAME
+    ))
+}
+
+/// `slide` XML with the playback of its narration added: a first step of the main
+/// sequence that starts the audio by itself, and the audio's settings.
+fn with_narration_timing(xml: String, spid: u32) -> String {
+    let Ok(doc) = Document::parse(&xml) else { return xml };
+    let root = doc.root_element();
+    let max_id = doc.descendants().filter(|n| n.tag_name().name() == "cTn").filter_map(|n| n.attribute("id")?.parse::<u32>().ok()).max().unwrap_or(0);
+    let id = |k: u32| max_id + k;
+    let step = format!(
+        r#"<p:par><p:cTn id="{}" fill="hold"><p:stCondLst><p:cond delay="indefinite"/><p:cond evt="onBegin" delay="0"><p:tn val="2"/></p:cond></p:stCondLst><p:childTnLst><p:par><p:cTn id="{}" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst><p:par><p:cTn id="{}" presetID="1" presetClass="mediacall" presetSubtype="0" fill="hold" nodeType="afterEffect"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst><p:cmd type="call" cmd="playFrom(0.0)"><p:cBhvr><p:cTn id="{}" dur="1" fill="hold"/><p:tgtEl><p:spTgt spid="{spid}"/></p:tgtEl></p:cBhvr></p:cmd></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par>"#,
+        id(1),
+        id(2),
+        id(3),
+        id(4)
+    );
+    let audio = format!(
+        r#"<p:audio isNarration="1"><p:cMediaNode vol="100000" showWhenStopped="0"><p:cTn id="{}" fill="hold" display="0"><p:stCondLst><p:cond delay="indefinite"/></p:stCondLst><p:endCondLst><p:cond evt="onStopAudio" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:endCondLst></p:cTn><p:tgtEl><p:spTgt spid="{spid}"/></p:tgtEl></p:cMediaNode></p:audio>"#,
+        id(5)
+    );
+    let list_of = |node_type: &str| doc.descendants().find(|n| n.tag_name().name() == "cTn" && n.attribute("nodeType") == Some(node_type)).and_then(|c| child(c, "childTnLst"));
+    match child(root, "timing") {
+        Some(_) => {
+            let (Some(seq), Some(top)) = (list_of("mainSeq"), list_of("tmRoot")) else { return xml };
+            // A self-closing list has nowhere to put the steps; leave it (the narration plays on click).
+            if xml[seq.range()].ends_with("/>") || xml[top.range()].ends_with("/>") {
+                return xml;
+            }
+            let seq_at = seq.range().start + open_tag(&xml, seq).len() + 1;
+            let top_at = close_tag_start(&xml, top);
+            apply_edits(&xml, vec![(seq_at..seq_at, step), (top_at..top_at, audio)])
+        }
+        None => {
+            let timing = format!(
+                r#"<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"><p:childTnLst>{step}</p:childTnLst></p:cTn><p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst><p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst></p:seq>{audio}</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>"#
+            );
+            let at = child(root, "extLst").map_or_else(|| close_tag_start(&xml, root), |e| e.range().start);
+            apply_edits(&xml, vec![(at..at, timing)])
+        }
+    }
 }
 
 /// One shape, reusing its XML when nothing changed.
@@ -1220,6 +1302,14 @@ fn max_raw_id(slide: &Slide) -> u32 {
 /// Builds the slide XML. `template` provides everything outside the shape tree
 /// (background, transitions, timing); without it a minimal slide is written.
 fn slide_xml(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) -> String {
+    let xml = slide_xml_without_narration_timing(slide, template, out);
+    match out.narration_id {
+        Some(id) => with_narration_timing(xml, id),
+        None => xml,
+    }
+}
+
+fn slide_xml_without_narration_timing(slide: &Slide, template: Option<&SlideSource>, out: &mut SlideOut) -> String {
     out.next_id = max_raw_id(slide) + 1;
     out.used_ids.insert(1);
     let shapes = shapes_xml(slide, out);
@@ -1323,7 +1413,8 @@ fn edited_timing(slide: &Slide, namespaces: &[(String, String)], out: &SlideOut)
 }
 
 fn slide_unchanged(slide: &Slide, src: &SlideSource) -> bool {
-    slide.background == src.background
+    slide.narration.is_none()
+        && slide.background == src.background
         && slide.hide_background_graphics == src.hide_background_graphics
         && slide.transition == src.transition
         && slide.timing == src.timing
@@ -1526,7 +1617,7 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
                 // Only the relationships change when a notes slide was added.
                 rels_changed.then(|| (src.doc.to_string(), rels_xml(&rels, &src.part)))
             } else {
-                let mut out = SlideOut { part: src.part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new(), written: HashMap::new() };
+                let mut out = SlideOut { part: src.part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new(), written: HashMap::new(), narration_id: None };
                 let xml = slide_xml(slide, Some(src), &mut out);
                 Some((xml, rels_xml(&out.rels, &src.part)))
             };
@@ -1548,7 +1639,7 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
         if let Some(lp) = layout_part {
             rels.push(RelEntry { id: "rId1".into(), kind: format!("{REL_BASE}slideLayout"), target: lp, external: false });
         }
-        let mut out = SlideOut { part: part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new(), written: HashMap::new() };
+        let mut out = SlideOut { part: part.clone(), rels, used_ids: HashSet::new(), next_id: 2, pres, media: &mut media, namespaces: Vec::new(), written: HashMap::new(), narration_id: None };
         let xml = slide_xml(slide, slide.source.as_deref(), &mut out);
         let mut slide_rels = out.rels;
         add_notes(&mut zip, &mut pres_rels, &mut taken_parts, &mut notes, slide, &part, &mut slide_rels);
@@ -1689,9 +1780,13 @@ pub fn save_pptx(pres: &Presentation) -> Result<Vec<u8>, Error> {
     for (part, _) in &media.new_files {
         let ext = part.rsplit('.').next().unwrap_or("png").to_string();
         if !defaults.iter().any(|(e, _)| e.eq_ignore_ascii_case(&ext)) {
-            let ct = match ext.as_str() {
+            let ct = match ext.to_lowercase().as_str() {
                 "jpg" | "jpeg" => "image/jpeg",
                 "gif" => "image/gif",
+                "m4a" => "audio/mp4",
+                "mp3" => "audio/mpeg",
+                "wav" => "audio/wav",
+                "mp4" => "video/mp4",
                 _ => "image/png",
             };
             defaults.push((ext, ct.to_string()));

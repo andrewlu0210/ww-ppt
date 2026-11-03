@@ -829,6 +829,8 @@ pub struct Slide {
     pub transition: Option<Transition>,
     /// Animations, played from the original XML (which is saved as is).
     pub timing: Option<Arc<anim::Timing>>,
+    /// A recorded narration not yet in the file: saving adds it as an audio object.
+    pub narration: Option<media::Narration>,
     pub source: Option<Arc<SlideSource>>,
 }
 
@@ -976,6 +978,7 @@ impl Presentation {
             notes: String::new(),
             transition: None,
             timing: None,
+            narration: None,
             source: None,
         }
     }

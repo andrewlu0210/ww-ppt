@@ -28,3 +28,24 @@ fn exports_video_and_sound() {
     let duration: f64 = ffprobe(&path, &["-show_entries", "format=duration", "-of", "csv=p=0"]).unwrap().parse().unwrap();
     assert!((duration - 6.0).abs() < 0.2, "{duration}");
 }
+
+#[test]
+fn a_narration_stretches_its_slide_and_is_heard() {
+    use ppt_model::media::{ClipKind, Narration};
+    let mut pres = ppt_ooxml::parse_pptx(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/media-demo.pptx")).unwrap()).unwrap();
+    // The deck's 2 s music file as slide 3's narration, through a save and load like a real recording.
+    let music = ppt_ooxml::media_clips(&pres).into_iter().find(|c| c.kind == ClipKind::Audio).unwrap();
+    pres.media.insert("new/narration1.m4a".into(), pres.media.get(&music.part).unwrap());
+    pres.slides[2].narration = Some(Narration { media: "new/narration1.m4a".into() });
+    let pres = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
+
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/video-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("narration.mp4");
+    let opts = VideoOptions { width: 320, fps: 10, seconds_per_slide: 0.5, use_timings: true };
+    assert!(export(&pres, &opts, &path, &mut |_, _| true).unwrap());
+    let Some(d) = ffprobe(&path, &["-show_entries", "format=duration", "-of", "csv=p=0"]) else { return };
+    // 2.5 s + 3 s as before, and the last slide now lasts the narration's 2 s (not 0.5 s).
+    let duration: f64 = d.parse().unwrap();
+    assert!((duration - 7.5).abs() < 0.2, "{duration}");
+}

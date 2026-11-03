@@ -170,7 +170,8 @@ pub fn export(pres: &Presentation, opts: &VideoOptions, path: &Path, progress: &
     let sound = if tracks.is_empty() {
         None
     } else {
-        let path = std::env::temp_dir().join(format!("want-point-mix-{}.wav", std::process::id()));
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!("want-point-mix-{}-{}.wav", std::process::id(), COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         std::fs::write(&path, mix::wav(&mix::mix(&tracks, total_ms))).map_err(|e| e.to_string())?;
         Some(Sound { path })
     };

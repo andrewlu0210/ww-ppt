@@ -15,6 +15,7 @@ mod footer;
 mod format;
 mod group;
 mod layout;
+mod narration;
 mod painter;
 mod richedit;
 mod spell;
@@ -279,6 +280,8 @@ pub struct Editor {
     pending_enter: Option<(ShapeId, ShapeId)>,
     /// The slide whose notes typing is folded into the last undo step.
     notes_undo: Option<usize>,
+    /// The deck before a recording session's narrations (one undo step for all of them).
+    recording_before: Option<Snapshot>,
     /// The picture in crop mode: its handles trim it instead of resizing it.
     pub crop: Option<ShapeId>,
     /// The shape the next drag draws (picked in the gallery).
@@ -328,6 +331,7 @@ impl Editor {
             entered_group: None,
             pending_enter: None,
             notes_undo: None,
+            recording_before: None,
             cell_range: None,
             crop: None,
             draw_tool: None,
