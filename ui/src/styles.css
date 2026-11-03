@@ -487,6 +487,10 @@ button {
   height: 16px;
 }
 
+.status-bar button:disabled {
+  opacity: 0.4;
+}
+
 .status-bar .icon-btn:disabled {
   opacity: 0.4;
 }

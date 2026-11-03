@@ -32,6 +32,8 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, hasNarrat
       {icon ?? label}
     </button>
   );
+  // The reading view plays the show: the slide's zoom does not apply.
+  const inReading = viewMode === "reading";
   const reading = (
     <button className={viewMode === "reading" ? "icon-btn toggle on" : "icon-btn toggle"} disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false, reading: true })} onMouseDown={(e) => e.preventDefault()} aria-pressed={viewMode === "reading"} title={t("status.reading")} aria-label={t("status.reading")}>
       {icons.readingView}
@@ -58,16 +60,16 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, hasNarrat
       <button className="icon-btn" disabled={status.slideCount === 0} onClick={() => run({ kind: "slideShow", fromBeginning: false })} onMouseDown={(e) => e.preventDefault()} title={t("ribbon.fromCurrent")} aria-label={t("ribbon.fromCurrent")}>
         {icons.playCurrent}
       </button>
-      <button onClick={() => run({ kind: "zoom", factor: 0.8 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomOut")}>
+      <button disabled={inReading} onClick={() => run({ kind: "zoom", factor: 0.8 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomOut")}>
         −
       </button>
-      <button className="zoom-value" onClick={() => (viewMode === "sorter" ? run({ kind: "zoom", factor: "fit" }) : onZoomDialog())} onMouseDown={(e) => e.preventDefault()} title={viewMode === "sorter" ? t("status.fit") : t("zoom.title")}>
+      <button className="zoom-value" disabled={inReading} onClick={() => (viewMode === "sorter" ? run({ kind: "zoom", factor: "fit" }) : onZoomDialog())} onMouseDown={(e) => e.preventDefault()} title={viewMode === "sorter" ? t("status.fit") : t("zoom.title")}>
         {Math.round(viewMode === "sorter" ? sorterZoom * 100 : status.zoomPercent)}%
       </button>
-      <button onClick={() => run({ kind: "zoom", factor: 1.25 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomIn")}>
+      <button disabled={inReading} onClick={() => run({ kind: "zoom", factor: 1.25 })} onMouseDown={(e) => e.preventDefault()} aria-label={t("status.zoomIn")}>
         +
       </button>
-      <button className="icon-btn" onClick={() => run({ kind: "zoom", factor: "fit" })} onMouseDown={(e) => e.preventDefault()} title={t("status.fit")} aria-label={t("status.fit")}>
+      <button className="icon-btn" disabled={inReading} onClick={() => run({ kind: "zoom", factor: "fit" })} onMouseDown={(e) => e.preventDefault()} title={t("status.fit")} aria-label={t("status.fit")}>
         {icons.fit}
       </button>
     </footer>

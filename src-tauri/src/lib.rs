@@ -233,6 +233,13 @@ pub fn run() {
     // Before anything that names things in the interface language (menus, new decks, errors).
     set_lang(detect_lang());
     tauri::Builder::default()
+        // Narration recording needs the microphone. The web view would ask by itself on every
+        // launch; macOS's own one-time authorization (the usage text in Info.plist) is the real
+        // consent, so the web view just passes the request on. Nothing else is granted.
+        .on_permission_request(|_, kind| match kind {
+            tauri::webview::PermissionKind::Microphone => tauri::webview::PermissionResponse::Allow,
+            _ => tauri::webview::PermissionResponse::Default,
+        })
         .plugin(tauri_plugin_dialog::init())
         .manage(FontService::new())
         .manage(ShowDeck::default())
