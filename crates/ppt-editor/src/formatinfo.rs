@@ -1,4 +1,4 @@
-//! 設定圖形格式 › 填滿與線條: the fill and outline of the selected shapes, set in full
+//! 設定圖形格式: the fill, outline, shadow, aspect lock and text box settings of the selected shapes, set in full
 //! (solid or gradient fill with transparency; outline color, transparency, width, dash
 //! and arrowheads) and read back for the format pane. A change that alters nothing is
 //! not an undo step, so dragging a slider back and forth does not fill the history.
@@ -49,7 +49,7 @@ pub struct ShadowSpec {
 
 /// What the format pane shows for the selection. A field is `None` when the shapes differ.
 #[derive(Clone, Debug, PartialEq)]
-pub struct FillLineInfo {
+pub struct FormatInfo {
     /// At least one selected shape can have a fill (not lines, pictures, tables ...).
     pub can_fill: bool,
     /// At least one selected shape is an open path, which can have arrowheads.
@@ -59,6 +59,27 @@ pub struct FillLineInfo {
     /// At least one selected shape can have a shadow.
     pub can_shadow: bool,
     pub shadow: Option<Option<Shadow>>,
+    /// "Lock aspect ratio" of the selection, `None` when the shapes differ.
+    pub lock_aspect: Option<bool>,
+    /// The text box settings of the selected shapes that have a text body, `None` when there are none.
+    pub text_box: Option<TextBoxInfo>,
+}
+
+/// Text box settings shared by the selected shapes; a field is `None` when they differ.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextBoxInfo {
+    pub anchor: Option<ppt_model::Anchor>,
+    /// Left, top, right, bottom margins in EMU.
+    pub insets: [Option<i64>; 4],
+    pub wrap: Option<bool>,
+    pub auto_grow: Option<bool>,
+}
+
+/// The common value, or `None` when the shapes differ (or there are none).
+pub(crate) fn common<T: PartialEq>(mut items: impl Iterator<Item = T>) -> Option<T> {
+    let first = items.next()?;
+    let mut rest = items;
+    rest.all(|v| v == first).then_some(first)
 }
 
 fn can_fill(s: &Shape) -> bool {
@@ -82,7 +103,7 @@ fn can_have_arrows(s: &Shape) -> bool {
 
 impl Editor {
     /// Applies `f` to the selected shapes; an undo step only if something changed.
-    fn edit_selected_if_changed(&mut self, f: impl Fn(&mut Shape)) -> bool {
+    pub(crate) fn edit_selected_if_changed(&mut self, f: impl Fn(&mut Shape)) -> bool {
         let changed = self.selected_shapes().iter().any(|s| {
             let mut copy = (*s).clone();
             f(&mut copy);
@@ -175,22 +196,24 @@ impl Editor {
     }
 
     /// The fill and outline of the selection, `None` when nothing is selected.
-    pub fn fill_line_info(&self) -> Option<FillLineInfo> {
+    pub fn format_info(&self) -> Option<FormatInfo> {
         let shapes = self.selected_shapes();
         if shapes.is_empty() {
             return None;
         }
         let fillable: Vec<&&Shape> = shapes.iter().filter(|s| can_fill(s)).collect();
-        // The common value, or `None` when the shapes differ.
-        fn common<T: PartialEq>(mut items: impl Iterator<Item = T>) -> Option<T> {
-            let first = items.next()?;
-            let mut rest = items;
-            rest.all(|v| v == first).then_some(first)
-        }
         let fill = common(fillable.iter().map(|s| s.fill.clone()));
         let line = common(shapes.iter().map(|s| s.line));
         let shadowable: Vec<&&Shape> = shapes.iter().filter(|s| can_shadow(s)).collect();
         let shadow = common(shadowable.iter().map(|s| s.shadow));
-        Some(FillLineInfo { can_fill: !fillable.is_empty(), can_arrows: shapes.iter().any(|s| can_have_arrows(s)), fill, line, can_shadow: !shadowable.is_empty(), shadow })
+        let bodies: Vec<&ppt_model::TextBody> = shapes.iter().filter(|s| matches!(s.kind, ShapeKind::Shape)).filter_map(|s| s.text.as_ref()).collect();
+        let text_box = (!bodies.is_empty()).then(|| TextBoxInfo {
+            anchor: common(bodies.iter().map(|b| b.anchor)),
+            insets: [0, 1, 2, 3].map(|i| common(bodies.iter().map(|b| b.insets[i]))),
+            wrap: common(bodies.iter().map(|b| b.wrap)),
+            auto_grow: common(bodies.iter().map(|b| b.auto_grow)),
+        });
+        let lock_aspect = common(shapes.iter().map(|s| s.access.lock_aspect));
+        Some(FormatInfo { can_fill: !fillable.is_empty(), can_arrows: shapes.iter().any(|s| can_have_arrows(s)), fill, line, can_shadow: !shadowable.is_empty(), shadow, lock_aspect, text_box })
     }
 }

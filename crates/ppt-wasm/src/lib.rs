@@ -1404,14 +1404,43 @@ impl App {
         self.touch(changed)
     }
 
+    /// "Lock aspect ratio" for the selection.
+    #[wasm_bindgen(js_name = setLockAspect)]
+    pub fn set_lock_aspect(&mut self, on: bool) -> bool {
+        let changed = self.editor.set_lock_aspect(on);
+        self.touch(changed)
+    }
+
+    /// Changes the text box settings of the selected shapes; what `spec` leaves out stays.
+    /// `spec`: `{ anchor: "top" | "middle" | "bottom", left, top, right, bottom (margins, EMU), wrap, autoGrow }`.
+    #[wasm_bindgen(js_name = setTextBoxSpec)]
+    pub fn set_text_box_spec(&mut self, spec: JsValue) -> bool {
+        let anchor = js_str(&spec, "anchor").map(|a| match a.as_str() {
+            "middle" => ppt_model::Anchor::Middle,
+            "bottom" => ppt_model::Anchor::Bottom,
+            _ => ppt_model::Anchor::Top,
+        });
+        let inset = |key: &str| js_num(&spec, key).map(|v| v.round() as i64);
+        let text = ppt_editor::TextBoxSpec {
+            anchor,
+            insets: [inset("left"), inset("top"), inset("right"), inset("bottom")],
+            wrap: Reflect::get(&spec, &"wrap".into()).ok().and_then(|v| v.as_bool()),
+            auto_grow: Reflect::get(&spec, &"autoGrow".into()).ok().and_then(|v| v.as_bool()),
+        };
+        let changed = self.editor.set_text_box_spec(&mut self.engine, text);
+        self.touch(changed)
+    }
+
     /// The selection's fill and outline for the format pane, or null when nothing is selected:
-    /// `{ canFill, canArrows, canShadow, fill, line, shadow }`. `fill` is null when the shapes differ, else
+    /// `{ canFill, canArrows, canShadow, fill, line, shadow, lockAspect, textBox }`. `lockAspect` is
+    /// null when the shapes differ; `textBox` is null without text shapes, else
+    /// `{ anchor, left, top, right, bottom, wrap, autoGrow }` with null for what differs (margins in EMU). `fill` is null when the shapes differ, else
     /// `{ type, color, alpha, kind, angle, stops }` as in `setFillSpec`; `line` likewise
     /// (`{ visible, color, alpha, widthPt, dash, head, tail }`).
-    #[wasm_bindgen(js_name = fillLineInfo)]
-    pub fn fill_line_info(&self) -> JsValue {
+    #[wasm_bindgen(js_name = formatInfo)]
+    pub fn format_info(&self) -> JsValue {
         use ppt_model::{GradientKind, Paint};
-        let Some(info) = self.editor.fill_line_info() else { return JsValue::NULL };
+        let Some(info) = self.editor.format_info() else { return JsValue::NULL };
         let set = |o: &Object, k: &str, v: JsValue| {
             let _ = Reflect::set(o, &k.into(), &v);
         };
@@ -1423,6 +1452,29 @@ impl App {
         set(&out, "canFill", info.can_fill.into());
         set(&out, "canArrows", info.can_arrows.into());
         set(&out, "canShadow", info.can_shadow.into());
+        set(&out, "lockAspect", info.lock_aspect.map_or(JsValue::NULL, JsValue::from_bool));
+        set(
+            &out,
+            "textBox",
+            match info.text_box {
+                None => JsValue::NULL,
+                Some(tb) => {
+                    let o = Object::new();
+                    let opt_bool = |v: Option<bool>| v.map_or(JsValue::NULL, JsValue::from_bool);
+                    set(&o, "anchor", tb.anchor.map_or(JsValue::NULL, |a| match a {
+                        ppt_model::Anchor::Top => "top".into(),
+                        ppt_model::Anchor::Middle => "middle".into(),
+                        ppt_model::Anchor::Bottom => "bottom".into(),
+                    }));
+                    for (key, v) in ["left", "top", "right", "bottom"].iter().zip(tb.insets) {
+                        set(&o, key, v.map_or(JsValue::NULL, |v| (v as f64).into()));
+                    }
+                    set(&o, "wrap", opt_bool(tb.wrap));
+                    set(&o, "autoGrow", opt_bool(tb.auto_grow));
+                    o.into()
+                }
+            },
+        );
         set(
             &out,
             "shadow",

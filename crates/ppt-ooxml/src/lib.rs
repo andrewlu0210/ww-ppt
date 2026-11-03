@@ -807,7 +807,7 @@ fn access(c_nv_pr: Node) -> Access {
         .flat_map(|l| l.descendants())
         .find(|n| n.tag_name().name() == "decorative")
         .is_some_and(|d| attr_bool(d, "val").unwrap_or(true));
-    Access { alt_text: c_nv_pr.attribute("descr").unwrap_or_default().to_string(), decorative, hidden: attr_bool(c_nv_pr, "hidden").unwrap_or(false), locked: is_locked(c_nv_pr) }
+    Access { alt_text: c_nv_pr.attribute("descr").unwrap_or_default().to_string(), decorative, hidden: attr_bool(c_nv_pr, "hidden").unwrap_or(false), locked: is_locked(c_nv_pr), lock_aspect: locks_of(c_nv_pr).is_some_and(|l| attr_bool(l, "noChangeAspect").unwrap_or(false)) }
 }
 
 /// The non-visual "locks" element next to `cNvPr` (`a:spLocks`, `a:picLocks`, ...), if any.

@@ -1773,11 +1773,11 @@ fn a_line_takes_arrowheads_and_the_pane_reads_back_mixed_values() {
     let arrow = LineEnd { kind: EndKind::Triangle, width: 1, length: 1 };
     assert!(e.set_line_spec(LineSpec { tail: Some(arrow), ..Default::default() }));
     assert_eq!(e.pres.shape(0, line_id).unwrap().line.unwrap().tail, arrow);
-    let info = e.fill_line_info().unwrap();
+    let info = e.format_info().unwrap();
     assert!(info.can_arrows && !info.can_fill);
     // A rectangle and a line together: the outlines differ.
     e.selection = vec![id, line_id];
-    let info = e.fill_line_info().unwrap();
+    let info = e.format_info().unwrap();
     assert!(info.can_fill && info.can_arrows);
     assert_eq!(info.line, None);
     assert_eq!(info.fill, Some(Some(Paint::Solid(Color::BLACK))));
@@ -1795,7 +1795,7 @@ fn the_shadow_is_set_in_detail() {
     assert!(e.set_shadow_spec(ShadowSpec { rgb: Some((200, 0, 0)), alpha: Some(200), dist: Some(0), dir: Some(-90.0), ..Default::default() }));
     let s = e.pres.shape(0, id).unwrap().shadow.unwrap();
     assert_eq!((s.color, s.dist, s.dir), (Color { r: 200, g: 0, b: 0, a: 200 }, 0, 270.0));
-    let info = e.fill_line_info().unwrap();
+    let info = e.format_info().unwrap();
     assert!(info.can_shadow);
     assert_eq!(info.shadow, Some(Some(s)));
     // The same again is not a step; removing it is.
@@ -1804,4 +1804,54 @@ fn the_shadow_is_set_in_detail() {
     assert!(e.pres.shape(0, id).unwrap().shadow.is_none());
     // A shape without a shadow stays without one when only "hidden" is asked.
     assert!(!e.set_shadow_spec(ShadowSpec { visible: Some(false), ..Default::default() }));
+}
+
+#[test]
+fn lock_aspect_keeps_proportions_while_resizing() {
+    let (mut e, id) = editor();
+    let mut eng = engine();
+    e.selection = vec![id];
+    // A 1in square made 2in × 1in at its bottom right corner would be 2:1; locked it stays 1:1.
+    assert!(e.set_lock_aspect(true));
+    assert!(e.pres.shape(0, id).unwrap().access.lock_aspect);
+    assert!(!e.set_lock_aspect(true), "same value, no step");
+    e.pointer_down(&mut eng, &ev(2.0 * IN as f64, 2.0 * IN as f64), &TOL);
+    e.pointer_move(&mut eng, &ev(4.0 * IN as f64, 2.0 * IN as f64), &TOL);
+    e.pointer_up(&mut eng, &ev(4.0 * IN as f64, 2.0 * IN as f64));
+    let x = xfrm(&e, id);
+    assert_eq!(x.w, x.h, "{x:?}");
+    // The right edge handle scales the height too (the box grows about its middle).
+    let (cy_before, w_before) = (x.y + x.h / 2, x.w);
+    let right_mid = (x.x + x.w) as f64;
+    e.pointer_down(&mut eng, &ev(right_mid, cy_before as f64), &TOL);
+    e.pointer_move(&mut eng, &ev(right_mid + IN as f64, cy_before as f64), &TOL);
+    e.pointer_up(&mut eng, &ev(right_mid + IN as f64, cy_before as f64));
+    let y = xfrm(&e, id);
+    assert!(y.w > w_before && y.w == y.h, "{y:?}");
+    assert!((y.y + y.h / 2 - cy_before).abs() <= 1, "centered vertically");
+}
+
+#[test]
+fn the_text_box_settings_are_set_and_an_auto_fit_shape_follows_its_text() {
+    let mut eng = engine();
+    let (mut e, id) = editor();
+    use ppt_model::{Paragraph, Run};
+    let para = |t: &str| Paragraph { runs: vec![Run { text: t.into(), ..Default::default() }], ..Default::default() };
+    e.pres.slides[0].shapes[0].text = Some(TextBody { paragraphs: vec![para("line one"), para("line two"), para("line three")], defaults: e.pres.text_defaults.clone(), ..Default::default() });
+    e.selection = vec![id];
+    let spec = TextBoxSpec { anchor: Some(Anchor::Middle), insets: [Some(91_440), None, Some(0), None], wrap: Some(false), ..Default::default() };
+    assert!(e.set_text_box_spec(&mut eng, spec.clone()));
+    let body = e.pres.shape(0, id).unwrap().text.clone().unwrap();
+    assert_eq!((body.anchor, body.insets[0], body.insets[2], body.wrap), (Anchor::Middle, 91_440, 0, false));
+    assert!(!e.set_text_box_spec(&mut eng, spec), "same values, no step");
+    // "Resize shape to fit text" resizes right away.
+    let before_h = xfrm(&e, id).h;
+    assert!(e.set_text_box_spec(&mut eng, TextBoxSpec { auto_grow: Some(true), ..Default::default() }));
+    assert_ne!(xfrm(&e, id).h, before_h);
+    let info = e.format_info().unwrap();
+    assert_eq!(info.text_box.unwrap().auto_grow, Some(true));
+    // One undo for that step, then the earlier one.
+    e.undo(&mut eng);
+    assert_eq!(xfrm(&e, id).h, before_h);
+    assert!(!e.pres.shape(0, id).unwrap().text.clone().unwrap().auto_grow);
 }

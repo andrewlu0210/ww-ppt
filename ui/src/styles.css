@@ -2827,3 +2827,26 @@ input:focus-visible,
 .format-pane .rb-btn {
   padding: 2px 4px;
 }
+
+.fp-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fp-margins {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+}
+
+.fp-margins .fp-field input[type="number"] {
+  width: 46px;
+}
+
+.fp-alt {
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}

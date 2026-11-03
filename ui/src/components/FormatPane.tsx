@@ -4,8 +4,9 @@ import type { App } from "../wasm/ppt_wasm";
 import type { Command } from "../lib/commands";
 import { ColorPicker } from "./ColorPicker";
 import { SHADOWS } from "./FormatGroups";
+import type { Status } from "../lib/status";
 
-// What `App::fillLineInfo` returns.
+// What `App::formatInfo` returns.
 interface Stop {
   pos: number;
   color: string;
@@ -41,7 +42,20 @@ interface ShadowInfo {
   distPt?: number;
   angle?: number;
 }
+interface TextBoxInfo {
+  anchor: "top" | "middle" | "bottom" | null;
+  left: number | null;
+  top: number | null;
+  right: number | null;
+  bottom: number | null;
+  wrap: boolean | null;
+  autoGrow: boolean | null;
+}
 interface Info {
+  /** Lock aspect ratio; null when the shapes differ. */
+  lockAspect: boolean | null;
+  /** null when no selected shape has a text body. */
+  textBox: TextBoxInfo | null;
   canFill: boolean;
   canArrows: boolean;
   canShadow: boolean;
@@ -53,10 +67,12 @@ interface Info {
 }
 
 export type FillSpec = { type: "none" } | { type: "solid"; color: string; alpha: number } | { type: "gradient"; kind: "linear" | "radial"; angle: number; stops: Stop[] };
+export type TextBoxSpec = Partial<{ anchor: "top" | "middle" | "bottom"; left: number; top: number; right: number; bottom: number; wrap: boolean; autoGrow: boolean }>;
 export type ShadowSpec = Partial<{ visible: boolean; color: string; alpha: number; blurPt: number; distPt: number; angle: number }>;
 export type LineSpec = Partial<{ visible: boolean; color: string; alpha: number; widthPt: number; dash: string; head: End; tail: End }>;
 
 const DEFAULT_COLOR = "#4472C4";
+const EMU_PER_CM = 360_000;
 
 /** PowerPoint's preset shadows as (direction °, distance pt, blur pt), to tell which one a shadow is. */
 const SHADOW_SHAPES: Record<string, [number, number, number]> = { bottomRight: [45, 3, 4], bottom: [90, 3, 4], right: [0, 3, 4], bottomLeft: [135, 3, 4], center: [0, 0, 5] };
@@ -185,6 +201,7 @@ function Radios({ name, value, options, onPick, disabled }: { name: string; valu
 }
 
 interface Props {
+  status: Status;
   engine: App | null;
   /** Re-read the selection when this changes (document revision, selection). */
   version: string;
@@ -196,10 +213,10 @@ interface Props {
  * 設定圖形格式: the selected shapes' fill and outline. Every change is one command and one undo step;
  * with different values in the selection the controls show nothing chosen until one is picked.
  */
-export function FormatPane({ engine, version, run, onClose }: Props) {
+export function FormatPane({ status, engine, version, run, onClose }: Props) {
   const [info, setInfo] = useState<Info | null>(null);
   useEffect(() => {
-    setInfo(engine ? ((engine.fillLineInfo() as Info | null) ?? null) : null);
+    setInfo(engine ? ((engine.formatInfo() as Info | null) ?? null) : null);
   }, [engine, version]);
 
   const fill = info?.fill ?? null;
@@ -207,6 +224,23 @@ export function FormatPane({ engine, version, run, onClose }: Props) {
   const setFill = (spec: FillSpec) => run({ kind: "fillSpec", spec });
   const setLine = (spec: LineSpec) => run({ kind: "lineSpec", spec });
   const setShadow = (spec: ShadowSpec) => run({ kind: "shadowSpec", spec });
+  const setTextBox = (spec: TextBoxSpec) => run({ kind: "textBoxSpec", spec });
+  // --- size and position (centimetres on screen, EMU in the engine)
+  const f = status.frame;
+  const cm = (emu: number | undefined | null) => (emu === undefined || emu === null ? undefined : emu / EMU_PER_CM);
+  const setFrame = (patch: Partial<{ x: number; y: number; w: number; h: number; rot: number }>) => f && run({ kind: "setFrame", x: f.x, y: f.y, w: f.w, h: f.h, rot: f.rot, ...patch });
+  const aspect = info?.lockAspect === true && f && f.w > 0 && f.h > 0 ? f.h / f.w : null;
+  const setWidth = (cmValue: number) => {
+    const w = Math.max(1, Math.round(cmValue * EMU_PER_CM));
+    setFrame(aspect ? { w, h: Math.max(1, Math.round(w * aspect)) } : { w });
+  };
+  const setHeight = (cmValue: number) => {
+    const h = Math.max(1, Math.round(cmValue * EMU_PER_CM));
+    setFrame(aspect ? { h, w: Math.max(1, Math.round(h / aspect)) } : { h });
+  };
+  const tb = info?.textBox ?? null;
+  // The alternative text of a single selected object (read again when the selection changes).
+  const alt = engine && status.selectionCount === 1 ? (engine.altText() as { text: string; decorative: boolean } | null) : null;
   const shadow = info?.shadow ?? null;
   const preset = shadowPreset(shadow);
 
@@ -422,8 +456,95 @@ export function FormatPane({ engine, version, run, onClose }: Props) {
               )}
             </Section>
           )}
+          <Section title={t("format.sizeSection")}>
+            <div className="fp-subhead">{t("format.sizeGroup")}</div>
+            <Num label={t("design.height")} unit={t("design.cmUnit")} value={cm(f?.h)} min={0.01} step={0.1} disabled={!f} onCommit={setHeight} />
+            <Num label={t("design.width")} unit={t("design.cmUnit")} value={cm(f?.w)} min={0.01} step={0.1} disabled={!f} onCommit={setWidth} />
+            <Num label={t("format.rotation")} unit="°" value={f?.single ? f.rot : undefined} step={1} disabled={!f?.single} onCommit={(rot) => setFrame({ rot })} />
+            <label className="fp-check">
+              <input type="checkbox" checked={info.lockAspect === true} ref={(el) => {
+                  if (el) el.indeterminate = info.lockAspect === null;
+                }} onChange={(e) => run({ kind: "lockAspect", on: e.target.checked })} />
+              {t("format.lockAspect")}
+            </label>
+            <div className="fp-subhead">{t("format.positionGroup")}</div>
+            <Num label={t("format.horizontal")} unit={t("design.cmUnit")} value={cm(f?.x)} step={0.1} disabled={!f} onCommit={(v) => setFrame({ x: Math.round(v * EMU_PER_CM) })} />
+            <Num label={t("format.vertical")} unit={t("design.cmUnit")} value={cm(f?.y)} step={0.1} disabled={!f} onCommit={(v) => setFrame({ y: Math.round(v * EMU_PER_CM) })} />
+            {tb && (
+              <>
+                <div className="fp-subhead">{t("format.textBoxGroup")}</div>
+                <label className="fp-field wide">
+                  <span>{t("format.verticalAlign")}</span>
+                  <select value={tb.anchor ?? ""} onChange={(e) => setTextBox({ anchor: e.target.value as "top" | "middle" | "bottom" })}>
+                    {tb.anchor === null && (
+                      <option value="" disabled>
+                        —
+                      </option>
+                    )}
+                    <option value="top">{t("format.anchorTop")}</option>
+                    <option value="middle">{t("format.anchorMiddle")}</option>
+                    <option value="bottom">{t("format.anchorBottom")}</option>
+                  </select>
+                </label>
+                <div className="fp-subhead">{t("format.margins")}</div>
+                <div className="fp-margins">
+                  {(["left", "right", "top", "bottom"] as const).map((side) => (
+                    <Num key={side} label={t(`format.${side}`)} unit={t("design.cmUnit")} value={cm(tb[side])} min={0} step={0.1} onCommit={(v) => setTextBox({ [side]: Math.round(v * EMU_PER_CM) })} />
+                  ))}
+                </div>
+                <label className="fp-check">
+                  <input type="checkbox" checked={tb.wrap === true} ref={(el) => {
+                    if (el) el.indeterminate = tb.wrap === null;
+                  }} onChange={(e) => setTextBox({ wrap: e.target.checked })} />
+                  {t("format.wrapText")}
+                </label>
+                <label className="fp-field wide">
+                  <span>{t("format.autofit")}</span>
+                  <select value={tb.autoGrow === null ? "" : tb.autoGrow ? "shape" : "none"} onChange={(e) => setTextBox({ autoGrow: e.target.value === "shape" })}>
+                    {tb.autoGrow === null && (
+                      <option value="" disabled>
+                        —
+                      </option>
+                    )}
+                    <option value="none">{t("format.autofitNone")}</option>
+                    <option value="shape">{t("format.autofitShape")}</option>
+                  </select>
+                </label>
+              </>
+            )}
+            {alt && <AltTextBox key={version} initial={alt} run={run} />}
+            <div className="fp-subhead">{t("format.propertiesGroup")}</div>
+            <label className="fp-check">
+              <input type="checkbox" checked={status.locked === true} onChange={(e) => run({ kind: "lock", on: e.target.checked })} />
+              {t("format.lockObject")}
+            </label>
+          </Section>
         </div>
       )}
     </aside>
+  );
+}
+
+/** Alternative text of the selected object: the description (committed when the field is left) and the decorative mark. */
+function AltTextBox({ initial, run }: { initial: { text: string; decorative: boolean }; run: (c: Command) => void }) {
+  const [text, setText] = useState(initial.text);
+  return (
+    <>
+      <div className="fp-subhead">{t("ribbon.altText")}</div>
+      <textarea
+        className="fp-alt"
+        rows={3}
+        value={text}
+        disabled={initial.decorative}
+        placeholder={t("alt.example")}
+        aria-label={t("ribbon.altText")}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => text.trim() !== initial.text && run({ kind: "altText", text, decorative: false })}
+      />
+      <label className="fp-check">
+        <input type="checkbox" checked={initial.decorative} onChange={(e) => run({ kind: "altText", text: e.target.checked ? "" : text, decorative: e.target.checked })} />
+        {t("checker.markDecorative")}
+      </label>
+    </>
   );
 }

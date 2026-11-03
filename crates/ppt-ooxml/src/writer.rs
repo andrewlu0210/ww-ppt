@@ -382,6 +382,52 @@ fn anchor_code(a: Anchor) -> &'static str {
 }
 
 /// Element `n` (in `src`) with attribute `name` set to `value`.
+/// Sets attribute `name` in an element's opening tag (as `open_tag` gives it, without the closing `>`).
+fn set_attr_in_tag(tag: &mut String, name: &str, value: &str) {
+    let key = format!(" {name}=\"");
+    if let Some(i) = tag.find(&key) {
+        let start = i + key.len();
+        if let Some(j) = tag[start..].find('"') {
+            tag.replace_range(start..start + j, &esc(value));
+            return;
+        }
+    }
+    tag.push_str(&format!(r#" {name}="{}""#, esc(value)));
+}
+
+/// A loaded `a:bodyPr` with the text box settings that changed (vertical alignment, margins, word wrap, auto-fit)
+/// written back; other attributes and children (text warp, 3-D, ...) are kept. Shrinking the text on overflow
+/// (`a:normAutofit`) stays unless the shape was made to resize to its text.
+fn patch_body_pr(src: &str, c: Node, body: &TextBody, old: Option<&TextBody>) -> String {
+    let mut tag = open_tag(src, c);
+    set_attr_in_tag(&mut tag, "anchor", anchor_code(body.anchor));
+    for (name, v) in ["lIns", "tIns", "rIns", "bIns"].iter().zip(body.insets) {
+        set_attr_in_tag(&mut tag, name, &v.to_string());
+    }
+    set_attr_in_tag(&mut tag, "wrap", if body.wrap { "square" } else { "none" });
+    let grow_changed = old.is_none_or(|o| o.auto_grow != body.auto_grow);
+    let mut kids: Vec<String> = Vec::new();
+    for k in c.children().filter(|k| k.is_element()) {
+        let name = k.tag_name().name();
+        let autofit = matches!(name, "spAutoFit" | "noAutofit" | "normAutofit");
+        if autofit && grow_changed && (name != "normAutofit" || body.auto_grow) {
+            continue;
+        }
+        kids.push(src[k.range()].to_string());
+    }
+    if grow_changed && !c.children().any(|k| k.is_element() && k.tag_name().name() == "normAutofit" && !body.auto_grow) {
+        // The auto-fit choice follows the text warp, before any 3-D settings.
+        let at = c.children().filter(|k| k.is_element()).take_while(|k| k.tag_name().name() == "prstTxWarp").count();
+        kids.insert(at, if body.auto_grow { "<a:spAutoFit/>" } else { "<a:noAutofit/>" }.to_string());
+    }
+    if kids.is_empty() {
+        format!("{tag}/>")
+    } else {
+        let close = tag.split_whitespace().next().unwrap_or("<a:bodyPr").replacen('<', "</", 1);
+        format!("{tag}>{}{close}>", kids.concat())
+    }
+}
+
 fn with_attr(src: &str, n: Node, name: &str, value: &str) -> String {
     let start = n.range().start;
     let mut xml = src[n.range()].to_string();
@@ -748,7 +794,7 @@ fn locks_xml(name: &str, base: &str, locked: bool) -> String {
 
 /// The non-visual `cNvSpPr` (or `cNvPicPr`, ...) next to `cNvPr` rewritten to lock or unlock the shape;
 /// other attributes and children are kept.
-fn patch_locks(src: &str, c_nv_pr: Node, locked: bool) -> Option<(Range<usize>, String)> {
+fn patch_locks(src: &str, c_nv_pr: Node, locked: bool, aspect: bool) -> Option<(Range<usize>, String)> {
     let owner = c_nv_pr.next_siblings().skip(1).find(|n| n.is_element() && n.tag_name().name().starts_with("cNv"))?;
     let name = locks_name(owner.tag_name().name());
     let attrs = lock_attrs(name);
@@ -761,6 +807,14 @@ fn patch_locks(src: &str, c_nv_pr: Node, locked: bool) -> Option<(Range<usize>, 
         }
         found = true;
         let mut tag = open_tag(src, c);
+        // "Lock aspect ratio" is its own attribute.
+        if let Some(i) = tag.find(" noChangeAspect=\"") {
+            let end = tag[i + 17..].find('"').map_or(tag.len(), |j| i + 17 + j + 1);
+            tag.replace_range(i..end, "");
+        }
+        if aspect {
+            tag.push_str(r#" noChangeAspect="1""#);
+        }
         for a in &attrs {
             if *a == "noGrp" && !locked {
                 continue;
@@ -782,8 +836,8 @@ fn patch_locks(src: &str, c_nv_pr: Node, locked: bool) -> Option<(Range<usize>, 
             inner.push_str(&format!("{tag}>{kids}{close}>"));
         }
     }
-    if !found && locked {
-        inner.push_str(&locks_xml(name, "", true));
+    if !found && (locked || aspect) {
+        inner.push_str(&locks_xml(name, if aspect { r#"noChangeAspect="1""# } else { "" }, locked));
     }
     let open = open_tag(src, owner);
     let close = open.split_whitespace().next().unwrap_or("<p:cNvSpPr").replacen('<', "</", 1);
@@ -861,8 +915,8 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
     let mut edits = Vec::new();
     if names_changed && let Some(c) = el.descendants().find(|n| n.tag_name().name() == "cNvPr") {
         edits.push((c.range(), patch_c_nv_pr(&wrapped, c, shape)));
-        if shape.access.locked != p.access.locked
-            && let Some(edit) = patch_locks(&wrapped, c, shape.access.locked)
+        if (shape.access.locked != p.access.locked || shape.access.lock_aspect != p.access.lock_aspect)
+            && let Some(edit) = patch_locks(&wrapped, c, shape.access.locked, shape.access.lock_aspect)
         {
             edits.push(edit);
         }
@@ -894,10 +948,9 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
                 match (child(el, "txBody"), &shape.text) {
                     (Some(tx), Some(body)) => {
                         let mut kept = String::new();
-                        let anchor_changed = p.text.as_ref().is_none_or(|t| t.anchor != body.anchor);
                         for c in tx.children().filter(|c| c.is_element() && c.tag_name().name() != "p") {
-                            if c.tag_name().name() == "bodyPr" && anchor_changed {
-                                kept.push_str(&with_attr(&wrapped, c, "anchor", anchor_code(body.anchor)));
+                            if c.tag_name().name() == "bodyPr" && p.text.as_ref().is_none_or(|t| (t.anchor, t.insets, t.wrap, t.auto_grow) != (body.anchor, body.insets, body.wrap, body.auto_grow)) {
+                                kept.push_str(&patch_body_pr(&wrapped, c, body, p.text.as_ref()));
                             } else {
                                 kept.push_str(&wrapped[c.range()]);
                             }
@@ -1038,7 +1091,7 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
                 sp_pr.push_str(&format!("<a:effectLst>{}</a:effectLst>", shadow_xml(sh)));
             }
             sp_pr.push_str("</p:spPr>");
-            let locks = locks_xml("spLocks", "", shape.access.locked);
+            let locks = locks_xml("spLocks", if shape.access.lock_aspect { r#"noChangeAspect="1""# } else { "" }, shape.access.locked);
             let tx_box = if text_box { r#" txBox="1""# } else { "" };
             let c_nv_sp_pr = if locks.is_empty() { format!("<p:cNvSpPr{tx_box}/>") } else { format!("<p:cNvSpPr{tx_box}>{locks}</p:cNvSpPr>") };
             let tx = shape.text.as_ref().map(|t| new_tx_body_xml(t, out)).unwrap_or_default();
@@ -1046,7 +1099,7 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
         }
         ShapeKind::Table(table) => Some(format!(
             r#"<p:graphicFrame><p:nvGraphicFramePr>{c_nv_pr}<p:cNvGraphicFramePr>{}</p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>{}<a:graphic><a:graphicData uri="{TABLE_URI}">{}</a:graphicData></a:graphic></p:graphicFrame>"#,
-            locks_xml("graphicFrameLocks", r#"noGrp="1""#, shape.access.locked),
+            locks_xml("graphicFrameLocks", if shape.access.lock_aspect { r#"noGrp="1" noChangeAspect="1""# } else { r#"noGrp="1""# }, shape.access.locked),
             xfrm_xml("p:xfrm", &shape.xfrm),
             table_xml(table, None, &mut |l| link_rel(out, l))
         )),
@@ -1055,7 +1108,7 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             let rid = out.rel_for(&format!("{REL_BASE}image"), &part, false);
             Some(format!(
                 r#"<p:pic><p:nvPicPr>{c_nv_pr}<p:cNvPicPr>{}</p:cNvPicPr>{nv_pr}</p:nvPicPr><p:blipFill><a:blip r:embed="{rid}"/>{}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}{}{}</p:spPr></p:pic>"#,
-                locks_xml("picLocks", r#"noChangeAspect="1""#, shape.access.locked),
+                locks_xml("picLocks", if shape.access.lock_aspect { r#"noChangeAspect="1""# } else { "" }, shape.access.locked),
                 src_rect_xml(crop),
                 xfrm_xml("a:xfrm", &shape.xfrm),
                 geometry_xml(&shape.geometry),

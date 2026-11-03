@@ -101,6 +101,10 @@ export type Command =
   | { kind: "lineSpec"; spec: import("../components/FormatPane").LineSpec }
   /** Changes to the selection's drop shadow (`App::setShadowSpec`). */
   | { kind: "shadowSpec"; spec: import("../components/FormatPane").ShadowSpec }
+  /** Changes to the selection's text box settings (`App::setTextBoxSpec`). */
+  | { kind: "textBoxSpec"; spec: import("../components/FormatPane").TextBoxSpec }
+  /** "Lock aspect ratio" for the selection. */
+  | { kind: "lockAspect"; on: boolean }
   /** Open, close or toggle the Format Shape pane. */
   | { kind: "formatPane"; open?: boolean }
   /** Remove the current slide's recorded narration. */

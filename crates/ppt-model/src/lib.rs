@@ -671,6 +671,8 @@ pub struct Access {
     pub hidden: bool,
     /// Locked against moving, resizing and rotating (`a:spLocks noMove noResize`, PowerPoint's Lock).
     pub locked: bool,
+    /// Resizing keeps the proportions (`noChangeAspect`, PowerPoint's "Lock aspect ratio").
+    pub lock_aspect: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

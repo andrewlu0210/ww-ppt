@@ -1345,6 +1345,12 @@ export function App() {
         case "shadowSpec":
           engine.setShadowSpec(c.spec);
           break;
+        case "textBoxSpec":
+          engine.setTextBoxSpec(c.spec);
+          break;
+        case "lockAspect":
+          engine.setLockAspect(c.on);
+          break;
         case "lineColor":
           engine.setLineColor(c.color);
           break;
@@ -1725,6 +1731,7 @@ export function App() {
             )}
             {viewPrefs.format && (
               <FormatPane
+                status={status}
                 engine={engineRef.current}
                 version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}`}
                 run={run}

@@ -71,3 +71,43 @@ fn edited_fill_and_outline_round_trip() {
         }
     }
 }
+
+#[test]
+fn lock_aspect_and_text_box_settings_round_trip() {
+    let mut pres = deck();
+    // A shape that exists (patched in place), with text: lock the aspect ratio and change the text box.
+    let existing = pres.slides.iter().flat_map(|s| &s.shapes).find(|s| matches!(s.kind, ShapeKind::Shape) && !s.geometry.is_line() && s.text.is_some()).map(|s| s.name.clone()).expect("a shape with text");
+    for slide in &mut pres.slides {
+        for s in slide.shapes.iter_mut().filter(|s| s.name == existing) {
+            s.access.lock_aspect = true;
+            let body = s.text.as_mut().unwrap();
+            body.anchor = ppt_model::Anchor::Bottom;
+            body.insets = [111_000, 222_000, 333_000, 444_000];
+            body.wrap = false;
+            body.auto_grow = true;
+        }
+    }
+    // A new shape, and a new locked, unlocked-aspect pair.
+    let (a, b) = (pres.alloc_id(), pres.alloc_id());
+    let mut locked = Shape::new(a, "locked-aspect", Xfrm::new(1_000_000, 1_000_000, 1_000_000, 1_000_000));
+    locked.access.lock_aspect = true;
+    let free = Shape::new(b, "free-aspect", Xfrm::new(3_000_000, 1_000_000, 1_000_000, 1_000_000));
+    pres.slides[0].shapes.push(locked);
+    pres.slides[0].shapes.push(free);
+
+    let again = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
+    assert!(find(&again, &existing).access.lock_aspect);
+    let body = find(&again, &existing).text.clone().unwrap();
+    assert_eq!((body.anchor, body.insets, body.wrap, body.auto_grow), (ppt_model::Anchor::Bottom, [111_000, 222_000, 333_000, 444_000], false, true));
+    assert!(find(&again, "locked-aspect").access.lock_aspect);
+    assert!(!find(&again, "free-aspect").access.lock_aspect);
+    // Turning it off again on a loaded shape removes the attribute.
+    let mut pres2 = again;
+    for slide in &mut pres2.slides {
+        for s in slide.shapes.iter_mut().filter(|s| s.name == "locked-aspect" || s.name == existing) {
+            s.access.lock_aspect = false;
+        }
+    }
+    let third = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres2).unwrap()).unwrap();
+    assert!(!find(&third, "locked-aspect").access.lock_aspect && !find(&third, &existing).access.lock_aspect);
+}

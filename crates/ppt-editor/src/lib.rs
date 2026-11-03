@@ -10,7 +10,7 @@ mod check;
 mod design;
 mod diagram;
 mod draw;
-mod fillline;
+mod formatinfo;
 mod find;
 mod footer;
 mod format;
@@ -19,8 +19,10 @@ mod layout;
 mod narration;
 mod painter;
 mod richedit;
+mod shapeprops;
 mod spell;
-pub use fillline::{FillLineInfo, FillSpec, LineSpec, ShadowSpec};
+pub use formatinfo::{FillSpec, FormatInfo, LineSpec, ShadowSpec, TextBoxInfo};
+pub use shapeprops::TextBoxSpec;
 pub mod show;
 mod table;
 mod view;
@@ -884,9 +886,11 @@ impl Editor {
             DragKind::Resize(handle) => {
                 let Some(&(id, orig)) = origs.first() else { return false };
                 let is_line = self.pres.shape(self.slide, id).is_some_and(|s| s.geometry.is_line());
-                let mut new = resize(&orig, handle, dx, dy, ev.shift, if is_line { 0.0 } else { MIN_SIZE });
+                // "Lock aspect ratio" does what Shift does.
+                let locked_aspect = self.pres.shape(self.slide, id).is_some_and(|s| s.access.lock_aspect);
+                let mut new = resize(&orig, handle, dx, dy, ev.shift || locked_aspect, if is_line { 0.0 } else { MIN_SIZE });
                 self.guides.clear();
-                if !ev.alt && !ev.shift && orig.rot == 0.0 && !is_line {
+                if !ev.alt && !ev.shift && !locked_aspect && orig.rot == 0.0 && !is_line {
                     new = self.snap_resize(id, new, handle, tol.snap);
                 }
                 let before = self.drag.as_ref().and_then(|d| d.before.as_ref()).and_then(|b| b.pres.shape(self.slide, id).cloned());
@@ -1847,6 +1851,8 @@ impl Editor {
         let id = self.pres.alloc_id();
         let mut shape = Shape::new(id, format!("{} {}", ppt_model::lang().pick("圖片", "图片", "Picture"), id.0), xfrm);
         shape.kind = ShapeKind::Picture { media: Some(key), crop: Default::default() };
+        // A new picture keeps its proportions when resized, as in PowerPoint.
+        shape.access.lock_aspect = true;
         self.pres.slides[self.slide].shapes.push(shape);
         self.selection = vec![id];
         self.push_undo(before);
@@ -2061,10 +2067,17 @@ fn resize(orig: &Xfrm, handle: Handle, dx: f64, dy: f64, keep_aspect: bool, min:
     let (ow, oh) = (orig.w as f64, orig.h as f64);
     let mut w = (ow + sx * ldx).max(min);
     let mut h = (oh + sy * ldy).max(min);
-    if keep_aspect && sx != 0.0 && sy != 0.0 && ow > 0.0 && oh > 0.0 {
-        let scale = (w / ow).max(h / oh);
-        w = ow * scale;
-        h = oh * scale;
+    if keep_aspect && ow > 0.0 && oh > 0.0 {
+        if sx != 0.0 && sy != 0.0 {
+            let scale = (w / ow).max(h / oh);
+            w = ow * scale;
+            h = oh * scale;
+        } else if sx != 0.0 {
+            // An edge handle scales both sides; the other one grows about the center.
+            h = oh * (w / ow);
+        } else if sy != 0.0 {
+            w = ow * (h / oh);
+        }
     }
     // Shift the center so the opposite edges stay put.
     let (lcx, lcy) = (sx * (w - ow) / 2.0, sy * (h - oh) / 2.0);

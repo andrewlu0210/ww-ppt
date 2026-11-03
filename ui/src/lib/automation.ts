@@ -259,7 +259,7 @@ async function step(cmd: string, h: Hooks) {
     // What the Format Shape pane shows: `panetext`.
     case "panetext": {
       const pane = document.querySelector<HTMLElement>(".format-pane");
-      await log(`panetext ${JSON.stringify({ open: !!pane, text: pane?.innerText.replace(/\s+/g, " ").trim() ?? null, inputs: pane?.querySelectorAll("input,select").length ?? 0 })}`);
+      await log(`panetext ${JSON.stringify({ open: !!pane, text: pane?.innerText.replace(/\s+/g, " ").trim() ?? null, inputs: pane?.querySelectorAll("input,select").length ?? 0, values: [...(pane?.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input,select") ?? [])].map((i) => (i instanceof HTMLInputElement && (i.type === "checkbox" || i.type === "radio") ? (i.checked ? "on" : "off") : i.value)) })}`);
       break;
     }
     case "mediaclips":
