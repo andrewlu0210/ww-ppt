@@ -2551,19 +2551,23 @@ input:focus-visible,
   cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M20 4l-7.5 7.5'/><path d='M10.5 9.5l4 4c-.8 3.2-3.2 5-8.5 5 1.8-1.7 1.2-3.7 2.2-5.2z' fill='white'/></svg>") 4 20, copy !important;
 }
 
-/* Reading view navigation bar: floats at the bottom centre of the show. */
+/* Reading view navigation bar: its own strip under the slide (the slide is drawn above it). */
+.editor-area.showing.reading .slide-show {
+  bottom: 36px;
+}
+
 .reading-bar {
   position: absolute;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 1;
+  height: 36px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(30, 30, 30, 0.78);
+  justify-content: center;
+  gap: 10px;
+  background: #1c1c1c;
   color: #fff;
   font-size: 12px;
   font-variant-numeric: tabular-nums;

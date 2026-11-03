@@ -872,6 +872,29 @@ export function App() {
     [startShow],
   );
 
+  // Reading view: the slide is drawn above the navigation bar, not under it.
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || !reading || showMode !== "slides") return;
+    const host = document.querySelector<HTMLElement>(".slide-show");
+    const canvas = document.querySelector<HTMLCanvasElement>(".canvas-host canvas");
+    if (!host || !canvas) return;
+    const place = () => {
+      const origin = canvas.getBoundingClientRect();
+      const r = host.getBoundingClientRect();
+      engine.setShowViewport(r.left - origin.left, r.top - origin.top, r.width, r.height);
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(host);
+    window.addEventListener("resize", place);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", place);
+      engine.setShowViewport(0, 0, 0, 0);
+    };
+  }, [reading, showMode]);
+
   // Sounds and videos follow the show: slides, clicks and the black or white screen.
   useEffect(() => {
     const media = showMediaRef.current;
