@@ -1349,6 +1349,106 @@ impl App {
         self.touch(changed)
     }
 
+    /// The Font dialog: sets what `spec` names on the selected text, as one undo step.
+    /// `spec`: `{ family, eaFamily, size, bold, italic, underline, strike, baseline ("normal" |
+    /// "super" | "sub"), spacing (pt), color ("#RRGGBB") }`.
+    #[wasm_bindgen(js_name = setFontSpec)]
+    pub fn set_font_spec(&mut self, spec: JsValue) -> bool {
+        let flag = |key: &str| Reflect::get(&spec, &key.into()).ok().and_then(|v| v.as_bool());
+        let family = js_str(&spec, "family").filter(|f| !f.is_empty());
+        let ea_family = js_str(&spec, "eaFamily");
+        let size = js_num(&spec, "size").map(|v| (v as f32).clamp(1.0, 1000.0));
+        let spacing = js_num(&spec, "spacing").map(|v| (v as f32).clamp(-20.0, 100.0));
+        let baseline = js_str(&spec, "baseline").map(|b| match b.as_str() {
+            "super" => 0.3,
+            "sub" => -0.25,
+            _ => 0.0,
+        });
+        let color = js_str(&spec, "color").and_then(|c| parse_hex(&c));
+        let (bold, italic, underline, strike) = (flag("bold"), flag("italic"), flag("underline"), flag("strike"));
+        let changed = self.editor.apply_text_style(&mut self.engine, |s| {
+            if let Some(f) = &family {
+                s.latin_font = f.clone();
+            }
+            if let Some(f) = &ea_family {
+                s.ea_font = f.clone();
+            }
+            if let Some(v) = size {
+                s.size_pt = v;
+            }
+            if let Some(v) = bold {
+                s.bold = v;
+            }
+            if let Some(v) = italic {
+                s.italic = v;
+            }
+            if let Some(v) = underline {
+                s.underline = v;
+            }
+            if let Some(v) = strike {
+                s.strike = v;
+            }
+            if let Some(v) = baseline {
+                s.baseline = v;
+            }
+            if let Some(v) = spacing {
+                s.spacing_pt = v;
+            }
+            if let Some(c) = color {
+                s.color = c;
+            }
+        });
+        self.touch(changed)
+    }
+
+    /// The Paragraph dialog: sets what `spec` names on the selected paragraphs, as one undo step.
+    /// `spec`: `{ align, indentLeft (pt), special ("none" | "first" | "hanging"), by (pt),
+    /// spaceBefore (pt), spaceAfter (pt), lineSpacing (multiple of single) }`.
+    #[wasm_bindgen(js_name = setParagraphSpec)]
+    pub fn set_paragraph_spec(&mut self, spec: JsValue) -> bool {
+        let align = js_str(&spec, "align").map(|a| match a.as_str() {
+            "center" => Align::Center,
+            "right" => Align::Right,
+            "justify" => Align::Justify,
+            _ => Align::Left,
+        });
+        let pt = |key: &str, lo: f64, hi: f64| js_num(&spec, key).map(|v| v.clamp(lo, hi));
+        let left = pt("indentLeft", 0.0, 1000.0).map(|v| (v * 12700.0).round() as i64);
+        let by = pt("by", 0.0, 1000.0).map(|v| (v * 12700.0).round() as i64);
+        let special = js_str(&spec, "special");
+        let before = pt("spaceBefore", 0.0, 1000.0).map(|v| v as f32);
+        let after = pt("spaceAfter", 0.0, 1000.0).map(|v| v as f32);
+        let line = pt("lineSpacing", 0.1, 10.0).map(|v| v as f32);
+        let changed = self.editor.apply_paragraph(&mut self.engine, |p| {
+            if let Some(a) = align {
+                p.align = a;
+            }
+            if let Some(v) = left {
+                p.mar_l = v;
+            }
+            match (special.as_deref(), by) {
+                (Some("none"), _) => p.indent = 0,
+                (Some("first"), Some(b)) => p.indent = b,
+                // A hanging indent pulls the first line left of the margin, which cannot go below zero.
+                (Some("hanging"), Some(b)) => {
+                    p.indent = -b;
+                    p.mar_l = p.mar_l.max(b);
+                }
+                _ => {}
+            }
+            if let Some(v) = before {
+                p.space_before = v;
+            }
+            if let Some(v) = after {
+                p.space_after = v;
+            }
+            if let Some(v) = line {
+                p.line_spacing = v;
+            }
+        });
+        self.touch(changed)
+    }
+
     #[wasm_bindgen(js_name = setLineSpacing)]
     pub fn set_line_spacing(&mut self, multiple: f32) -> bool {
         let changed = self.editor.apply_paragraph(&mut self.engine, |p| p.line_spacing = multiple);
@@ -3040,6 +3140,11 @@ impl App {
             set("baseline", f.style.baseline.into());
             set("charSpacing", f.style.spacing_pt.into());
             set("lineSpacing", f.line_spacing.into());
+            set("eaFont", f.style.ea_font.clone().into());
+            set("indentLeft", (f.mar_l as f64 / 12700.0).into());
+            set("indentFirst", (f.indent as f64 / 12700.0).into());
+            set("spaceBefore", f.space_before.into());
+            set("spaceAfter", f.space_after.into());
             set("textColor", hex(f.style.color).into());
             set("link", f.style.link.as_ref().filter(|l| l.external).map(|l| l.target.clone()).unwrap_or_default().into());
             let align = match f.align {

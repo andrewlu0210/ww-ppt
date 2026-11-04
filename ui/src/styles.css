@@ -2992,3 +2992,43 @@ input:focus-visible,
   background: #3b82f6;
   color: #fff;
 }
+
+/* Font and Paragraph dialogs */
+.para-dialog {
+  width: 380px;
+  gap: 8px;
+  padding: 16px 18px;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.para-label {
+  flex: 1;
+}
+
+.para-input {
+  width: 150px;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+select.para-input {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.para-color {
+  width: 150px;
+  height: 24px;
+  padding: 0;
+}
+
+.para-checks {
+  gap: 16px;
+  margin-top: 2px;
+}

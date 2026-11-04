@@ -16,6 +16,9 @@ export interface ContextEnv {
   /** Opens the Format Shape pane. */
   openFormatPane: () => void;
   openLink: () => void;
+  /** The Font and Paragraph dialogs. */
+  openFont: () => void;
+  openParagraph: () => void;
   openAltText: () => void;
   endEditing: () => void;
 }
@@ -32,8 +35,8 @@ export function buildContextMenu(kind: ContextKind, env: ContextEnv): MenuItem[]
     { label: t("ribbon.paste"), shortcut: "⌘V", disabled: !status.canPaste, onSelect: () => run({ kind: "paste" }) },
   ];
   const textItems: MenuItem[] = [
-    { label: t("ctx.font"), onSelect: () => env.openTab("常用") },
-    { label: t("ctx.paragraph"), onSelect: () => env.openTab("常用") },
+    { label: t("ctx.font"), onSelect: env.openFont },
+    { label: t("ctx.paragraph"), onSelect: env.openParagraph },
     { label: t("ribbon.bullets"), checked: !!status.bullet, onSelect: () => run({ kind: "bullets" }) },
     {
       label: t("ctx.numberingStyle"),

@@ -37,6 +37,10 @@ export type Command =
   | { kind: "moveSlide"; from: number; to: number }
   | { kind: "toggle"; which: "bold" | "italic" | "underline" | "strike" | "superscript" | "subscript" }
   | { kind: "charSpacing"; pt: number }
+  /** The Font dialog: what the spec names is set in one undo step (`App::setFontSpec`). */
+  | { kind: "fontSpec"; spec: FontSpec }
+  /** The Paragraph dialog (`App::setParagraphSpec`). */
+  | { kind: "paragraphSpec"; spec: ParagraphSpec }
   | { kind: "clearFormatting" }
   | { kind: "lineSpacing"; multiple: number }
   | { kind: "textAnchor"; anchor: "top" | "middle" | "bottom" }
@@ -122,6 +126,31 @@ export type Command =
   | { kind: "gridSpacing"; emu: number }
   | { kind: "addGuide"; vertical: boolean }
   | { kind: "spellCheck"; on: boolean };
+
+export interface FontSpec {
+  family?: string;
+  eaFamily?: string;
+  size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  baseline?: "normal" | "super" | "sub";
+  /** Extra space between characters, in points. */
+  spacing?: number;
+  color?: string;
+}
+
+export interface ParagraphSpec {
+  align?: "left" | "center" | "right" | "justify";
+  /** Points. */
+  indentLeft?: number;
+  special?: "none" | "first" | "hanging";
+  by?: number;
+  spaceBefore?: number;
+  spaceAfter?: number;
+  lineSpacing?: number;
+}
 
 /** A gallery table style with the colors its preview needs (`App::tableStyles()`). */
 export interface TableStyleInfo {

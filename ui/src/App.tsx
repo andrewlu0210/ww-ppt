@@ -47,6 +47,8 @@ import { AnimationBadges } from "./components/AnimationTab";
 import { FindBar, type FindBarHandle } from "./components/FindBar";
 import { SpellMenu, type SpellHit } from "./components/SpellMenu";
 import { ContextMenu } from "./components/ContextMenu";
+import { FontDialog } from "./components/FontDialog";
+import { ParagraphDialog } from "./components/ParagraphDialog";
 import { AltTextForm } from "./components/AltTextDialog";
 import { buildContextMenu, type ContextKind } from "./lib/contextMenu";
 import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
@@ -242,6 +244,8 @@ export function App() {
   // SmartArt text pane: open, the row being edited (shared with the ribbon), and focus requests.
   const [videoOpen, setVideoOpen] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
+  /** The Font or Paragraph dialog from the right-click menu. */
+  const [textDialog, setTextDialog] = useState<"font" | "paragraph" | null>(null);
   // Format painter: copied a format and waiting for the target to apply it to.
   const [painter, setPainter] = useState<"once" | "sticky" | null>(null);
   const [diagramPane, setDiagramPane] = useState(false);
@@ -1220,6 +1224,13 @@ export function App() {
         case "lineSpacing":
           engine.setLineSpacing(c.multiple);
           break;
+        case "fontSpec":
+          await loadFonts([c.spec.family, c.spec.eaFamily].filter((f): f is string => !!f));
+          engine.setFontSpec(c.spec);
+          break;
+        case "paragraphSpec":
+          engine.setParagraphSpec(c.spec);
+          break;
         case "textAnchor":
           engine.setTextAnchor(c.anchor);
           break;
@@ -1690,6 +1701,8 @@ export function App() {
                   openTab: (tab) => setTabRequest((q) => ({ tab, n: q.n + 1 })),
                   openFormatPane: () => void run({ kind: "formatPane", open: true }),
                   openLink: () => setLinkRequest((n) => n + 1),
+                  openFont: () => setTextDialog("font"),
+                  openParagraph: () => setTextDialog("paragraph"),
                   openAltText: () => setAltPopup({ x: ctxMenu.x, y: ctxMenu.y }),
                   endEditing: () => {
                     engineRef.current?.keyDown("Escape", false, false, false, false);
@@ -1767,6 +1780,8 @@ export function App() {
           </div>
         )}
       </main>
+      {textDialog === "font" && <FontDialog status={status} fonts={fonts} run={run} onClose={() => { setTextDialog(null); focusCanvas(); }} />}
+      {textDialog === "paragraph" && <ParagraphDialog status={status} run={run} onClose={() => { setTextDialog(null); focusCanvas(); }} />}
       {zoomOpen && <ZoomDialog percent={status.zoomPercent} relative={status.zoom} fit={status.zoomFit} run={run} onClose={() => { setZoomOpen(false); focusCanvas(); }} />}
       {videoOpen && <VideoDialog engine={engineRef.current} name={doc.name} onClose={() => setVideoOpen(false)} />}
       <StatusBar status={status} fontsLoading={fontsLoading} notesOpen={notesPrefs.open} viewMode={reading ? "reading" : viewMode} hasNarration={hasNarration} sorterZoom={viewPrefs.sorterSize / SORTER_BASE} a11yIssues={a11yIssues.length} run={run} onZoomDialog={() => setZoomOpen(true)} />

@@ -188,6 +188,12 @@ pub struct TextFormat {
     pub numbering: Option<String>,
     pub level: u8,
     pub line_spacing: f32,
+    /// Left margin, first-line offset (negative: hanging) in EMU, and the space before and
+    /// after the paragraph in points.
+    pub mar_l: i64,
+    pub indent: i64,
+    pub space_before: f32,
+    pub space_after: f32,
 }
 
 #[derive(Clone)]
@@ -1422,6 +1428,10 @@ impl Editor {
                 numbering: numbering_of(p),
                 level: p.level,
                 line_spacing: p.line_spacing,
+                mar_l: p.mar_l,
+                indent: p.indent,
+                space_before: p.space_before,
+                space_after: p.space_after,
             });
         }
         let body = match self.range_text_body() {
@@ -1436,6 +1446,10 @@ impl Editor {
             numbering: numbering_of(p),
             level: p.level,
             line_spacing: p.line_spacing,
+            mar_l: p.mar_l,
+            indent: p.indent,
+            space_before: p.space_before,
+            space_after: p.space_after,
         })
     }
 

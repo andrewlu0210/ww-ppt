@@ -48,6 +48,14 @@ export interface Status {
   charSpacing?: number;
   /** Line spacing of the current paragraph, as a multiple of single. */
   lineSpacing?: number;
+  /** East Asian typeface of the text (the Font dialog). */
+  eaFont?: string;
+  /** Paragraph left margin and first-line offset (negative: hanging), in points. */
+  indentLeft?: number;
+  indentFirst?: number;
+  /** Space before and after the paragraph, in points. */
+  spaceBefore?: number;
+  spaceAfter?: number;
   /** Vertical text position in the edited or selected shape. */
   textAnchor?: "top" | "middle" | "bottom";
   /** Frame of the single selected shape or selected group (EMU, degrees). */
