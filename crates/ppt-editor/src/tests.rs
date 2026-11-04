@@ -1164,6 +1164,56 @@ fn shapes_are_drawn_by_dragging_or_clicking() {
 }
 
 #[test]
+fn slides_are_copied_cut_and_pasted_within_and_across_decks() {
+    use ppt_model::ShapeKind;
+    let mut eng = engine();
+    let png = std::sync::Arc::new(std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../src-tauri/icons/32x32.png")).unwrap());
+    let mut a = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    assert!(a.add_slide(&mut eng, None));
+    assert!(a.add_picture(&mut eng, "from-a/pic.png".into(), png.clone(), 32, 32));
+    assert!(a.set_slide_hidden(&mut eng, 1, true));
+    a.pres.slides[1].notes = "notes".into();
+    let clip = a.copy_slide(1).unwrap();
+    assert!(a.copy_slide(9).is_none());
+
+    // Same deck: an identical slide after slide 1, with shapes of its own.
+    let n = a.pres.slides.len();
+    assert_eq!(a.paste_slide(&mut eng, &clip, Some(0), true), 0);
+    assert_eq!(a.pres.slides.len(), n + 1);
+    assert_eq!(a.slide, 1);
+    let (src, pasted) = (&a.pres.slides[2], &a.pres.slides[1]);
+    assert_eq!((pasted.shapes.len(), pasted.hidden, pasted.notes.as_str()), (src.shapes.len(), true, "notes"));
+    assert!(pasted.shapes.iter().all(|s| src.shapes.iter().all(|o| o.id != s.id)));
+    assert!(a.undo(&mut eng) && a.pres.slides.len() == n);
+
+    // Another deck: the layout of the same name, the picture comes along, and `None` pastes at the end.
+    let mut b = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    let before = b.pres.slides.len();
+    assert_eq!(b.paste_slide(&mut eng, &clip, None, false), 0);
+    assert_eq!(b.pres.slides.len(), before + 1);
+    let slide = b.pres.slides.last().unwrap();
+    assert_eq!(slide.layout, clip.slide.layout);
+    assert!(slide.source.is_none() && slide.shapes.iter().all(|s| s.source.is_none()));
+    let pic = slide.shapes.iter().find_map(|s| if let ShapeKind::Picture { media: Some(k), .. } = &s.kind { Some(k.clone()) } else { None }).unwrap();
+    assert_eq!(*b.pres.media.get(&pic).unwrap(), *png);
+    // It is written and read back.
+    let saved = ppt_ooxml::save_pptx(&b.pres).unwrap();
+    let re = ppt_ooxml::parse_pptx(&saved).unwrap();
+    assert_eq!(re.slides.len(), before + 1);
+    assert!(re.slides.last().unwrap().hidden);
+    assert!(b.undo(&mut eng) && b.pres.slides.len() == before);
+
+    // A different picture under the same key is kept apart.
+    let mut c = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    c.pres.media.insert("from-a/pic.png".into(), std::sync::Arc::new(vec![1, 2, 3]));
+    assert_eq!(c.paste_slide(&mut eng, &clip, None, false), 0);
+    let key = c.pres.slides.last().unwrap().shapes.iter().find_map(|s| if let ShapeKind::Picture { media: Some(k), .. } = &s.kind { Some(k.clone()) } else { None }).unwrap();
+    assert_ne!(key, "from-a/pic.png");
+    assert_eq!(*c.pres.media.get("from-a/pic.png").unwrap(), vec![1, 2, 3]);
+    assert_eq!(*c.pres.media.get(&key).unwrap(), *png);
+}
+
+#[test]
 fn slides_are_hidden_and_shown_again_and_saved() {
     let mut eng = engine();
     let mut e = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());

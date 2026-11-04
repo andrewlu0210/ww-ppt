@@ -710,6 +710,7 @@ export const zhHans: Messages = {
   "slide.hasTransition": "有切换效果",
   "slide.hide": "隐藏幻灯片",
   "slide.hidden": "已隐藏",
+  "slide.pasteDropped": "有 {count} 个对象（图表、SmartArt 等）无法粘贴到另一份演示文稿，已跳过。",
   "slide.duplicate": "复制幻灯片",
   "slide.delete": "删除幻灯片",
 

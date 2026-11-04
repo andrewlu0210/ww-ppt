@@ -116,9 +116,14 @@ export function buildSlideMenu(index: number | null, env: SlideMenuEnv): MenuIte
     items: env.layoutNames.map((label, i) => ({ label, checked: status.slideLayout === i, onSelect: () => run({ kind: "applyLayout", layout: i }) })),
   };
   const newSlide: MenuItem = { label: t("ribbon.newSlide"), onSelect: () => run({ kind: "newSlide" }) };
-  if (index === null) return [newSlide, layout];
+  const paste: MenuItem = { label: t("ribbon.paste"), shortcut: "⌘V", disabled: !status.canPasteSlide, onSelect: () => run({ kind: "slideClip", op: "paste", after: index }) };
+  if (index === null) return [paste, SEP, newSlide, layout];
   const hidden = !!status.hiddenSlides?.[index];
   return [
+    { label: t("ribbon.cut"), shortcut: "⌘X", disabled: status.slideCount <= 1, onSelect: () => run({ kind: "slideClip", op: "cut", index }) },
+    { label: t("ribbon.copy"), shortcut: "⌘C", onSelect: () => run({ kind: "slideClip", op: "copy", index }) },
+    paste,
+    SEP,
     newSlide,
     { label: t("slide.duplicate"), onSelect: () => run({ kind: "duplicateSlide", index }) },
     { label: t("slide.delete"), disabled: status.slideCount <= 1, onSelect: () => run({ kind: "deleteSlide", index }) },

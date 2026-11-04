@@ -11,7 +11,7 @@ use std::sync::Arc;
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use ppt_editor::show::{Blank, Screen, SlideShow};
 use ppt_model::anim::{PRESETS, Player, SlideStage, Trigger, effect_elements};
-use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, FindMatch, FindOptions, FindPlace, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
+use ppt_editor::{AlignTo, BorderSet, CursorIcon, Editor, FindMatch, SlideClip, FindOptions, FindPlace, Handle, Modifiers, PointerEvent, Toggle, Tolerance, ZOrder, utf16_to_byte_offset};
 use ppt_geometry::shape_affine;
 use ppt_model::{Align, Background, Color, EMU_PER_PT, Gradient, GradientKind, Paint, Presentation, tr};
 use ppt_ooxml::design;
@@ -47,6 +47,11 @@ struct Gpu {
 #[wasm_bindgen]
 pub struct App {
     editor: Editor,
+    /// The slide clipboard, with the serial of the deck it was copied from. It outlives the deck,
+    /// so a slide can be pasted into another file opened afterwards.
+    slide_clip: Option<(u64, SlideClip)>,
+    /// Counts the decks loaded, to tell whether the clipboard's slide is from this one.
+    deck_serial: u64,
     engine: TextEngine,
     images: ImageCache,
     gpu: Gpu,
@@ -310,6 +315,8 @@ pub async fn create_app(canvas: HtmlCanvasElement, dpr: f64) -> Result<App, JsVa
         pan: (0.0, 0.0),
         caret_on: true,
         dirty: true,
+        slide_clip: None,
+        deck_serial: 0,
         last_frame_ms: 0.0,
         last_scene_ms: 0.0,
         media_counter: 0,
@@ -671,6 +678,7 @@ impl App {
     }
 
     fn reset_document(&mut self, pres: Presentation) {
+        self.deck_serial += 1;
         self.editor.load(pres);
         self.editor.refresh_tables(&mut self.engine);
         self.images.clear();
@@ -2223,6 +2231,34 @@ impl App {
         self.touch(changed)
     }
 
+    /// Copies slide `index` to the slide clipboard.
+    #[wasm_bindgen(js_name = copySlide)]
+    pub fn copy_slide(&mut self, index: usize) -> bool {
+        self.slide_clip = self.editor.copy_slide(index).map(|c| (self.deck_serial, c)).or(self.slide_clip.take());
+        self.slide_clip.is_some()
+    }
+
+    /// Moves slide `index` to the slide clipboard (not the only slide).
+    #[wasm_bindgen(js_name = cutSlide)]
+    pub fn cut_slide(&mut self, index: usize) -> bool {
+        if self.editor.pres.slides.len() <= 1 || !self.copy_slide(index) {
+            return false;
+        }
+        let changed = self.editor.delete_slide(&mut self.engine, index);
+        self.touch(changed)
+    }
+
+    /// Pastes the clipboard's slide after slide `after` (`-1`: at the end). Returns how many
+    /// objects could not come along from another deck, or -1 when nothing was pasted.
+    #[wasm_bindgen(js_name = pasteSlide)]
+    pub fn paste_slide(&mut self, after: i32) -> i32 {
+        let Some((serial, clip)) = self.slide_clip.clone() else { return -1 };
+        let after = usize::try_from(after).ok();
+        let dropped = self.editor.paste_slide(&mut self.engine, &clip, after, serial == self.deck_serial);
+        self.touch(true);
+        dropped as i32
+    }
+
     /// Hides slide `index` from the slide show, or shows it again.
     #[wasm_bindgen(js_name = setSlideHidden)]
     pub fn set_slide_hidden(&mut self, index: usize, hidden: bool) -> bool {
@@ -3116,6 +3152,7 @@ impl App {
         set("transitionSlides", marks.into());
         let hidden: Array = e.pres.slides.iter().map(|s| JsValue::from(s.hidden)).collect();
         set("hiddenSlides", hidden.into());
+        set("canPasteSlide", self.slide_clip.is_some().into());
         if let Some(a) = e.text_anchor() {
             let a = match a {
                 ppt_model::Anchor::Top => "top",

@@ -35,6 +35,9 @@ export type Command =
   | { kind: "duplicateSlide"; index?: number }
   /** Hide a slide from the slide show (default: the current one), or show it again. */
   | { kind: "hideSlide"; index?: number; on: boolean }
+  /** The slide clipboard: copy or cut slide `index`, or paste after it (null: at the end). */
+  | { kind: "slideClip"; op: "copy" | "cut"; index: number }
+  | { kind: "slideClip"; op: "paste"; after: number | null }
   | { kind: "deleteSlide"; index?: number }
   | { kind: "moveSlide"; from: number; to: number }
   | { kind: "toggle"; which: "bold" | "italic" | "underline" | "strike" | "superscript" | "subscript" }

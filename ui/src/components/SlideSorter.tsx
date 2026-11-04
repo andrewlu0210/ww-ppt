@@ -100,6 +100,18 @@ export function SlideSorter({ count, current, thumbs, transitions, hidden, size,
         e.preventDefault();
         onContextMenu(null, e.clientX, e.clientY);
       }}
+      onCopy={(e) => {
+        e.preventDefault();
+        run({ kind: "slideClip", op: "copy", index: current });
+      }}
+      onCut={(e) => {
+        e.preventDefault();
+        if (count > 1) run({ kind: "slideClip", op: "cut", index: current });
+      }}
+      onPaste={(e) => {
+        e.preventDefault();
+        run({ kind: "slideClip", op: "paste", after: current });
+      }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={() => finishDrop(dropAt ?? count)}
       style={{ "--sorter-size": `${size}px` } as React.CSSProperties}

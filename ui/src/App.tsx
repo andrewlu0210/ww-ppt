@@ -1308,6 +1308,14 @@ export function App() {
         case "resetBackground":
           engine.resetBackground();
           break;
+        case "slideClip":
+          if (c.op === "copy") engine.copySlide(c.index);
+          else if (c.op === "cut") engine.cutSlide(c.index);
+          else if (c.op === "paste") {
+            const dropped = engine.pasteSlide(c.after ?? -1);
+            if (dropped > 0) setError(t("slide.pasteDropped", { count: dropped }));
+          }
+          break;
         case "hideSlide":
           engine.setSlideHidden(c.index ?? (engine.status() as Status).slideIndex, c.on);
           break;

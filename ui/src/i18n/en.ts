@@ -710,6 +710,7 @@ export const en: Messages = {
   "slide.hasTransition": "Has transition",
   "slide.hide": "Hide Slide",
   "slide.hidden": "Hidden",
+  "slide.pasteDropped": "{count} object (a chart, SmartArt or the like) could not be pasted into another presentation and was left out.|{count} objects (charts, SmartArt and the like) could not be pasted into another presentation and were left out.",
   "slide.duplicate": "Duplicate Slide",
   "slide.delete": "Delete Slide",
 

@@ -58,6 +58,8 @@ export interface Status {
   spaceAfter?: number;
   /** Per slide: hidden from the slide show. */
   hiddenSlides?: boolean[];
+  /** The slide clipboard holds a slide. */
+  canPasteSlide?: boolean;
   /** Vertical text position in the edited or selected shape. */
   textAnchor?: "top" | "middle" | "bottom";
   /** Frame of the single selected shape or selected group (EMU, degrees). */

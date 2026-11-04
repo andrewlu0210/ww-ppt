@@ -712,6 +712,7 @@ export const zhHant = {
   "slide.hasTransition": "有轉場",
   "slide.hide": "隱藏投影片",
   "slide.hidden": "已隱藏",
+  "slide.pasteDropped": "有 {count} 個物件（圖表、SmartArt 等）無法貼到另一份簡報，已略過。",
   "slide.duplicate": "複製投影片",
   "slide.delete": "刪除投影片",
 

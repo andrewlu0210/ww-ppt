@@ -196,6 +196,16 @@ pub struct TextFormat {
     pub space_after: f32,
 }
 
+/// A slide on the slide clipboard, with what it needs to land in another deck.
+#[derive(Clone)]
+pub struct SlideClip {
+    slide: Slide,
+    /// Name of the slide's layout, to find the same one in the deck it is pasted into.
+    layout_name: Option<String>,
+    /// The pictures it shows, by key.
+    media: Vec<(String, std::sync::Arc<Vec<u8>>)>,
+}
+
 #[derive(Clone)]
 struct Snapshot {
     pres: Presentation,
@@ -1895,6 +1905,16 @@ impl Editor {
         self.end_text_edit(engine);
         let Some(src) = self.pres.slides.get(index).cloned() else { return false };
         let before = self.snapshot();
+        let copy = self.fresh_copy(src);
+        self.pres.slides.insert(index + 1, copy);
+        self.slide = index + 1;
+        self.selection.clear();
+        self.push_undo(before);
+        true
+    }
+
+    /// A copy of `src` whose shapes have ids of their own.
+    fn fresh_copy(&mut self, src: Slide) -> Slide {
         let mut copy = Slide { background_shapes: Vec::new(), shapes: Vec::new(), ..src.clone() };
         for s in src.background_shapes {
             copy.background_shapes.push(Shape { id: self.pres.alloc_id(), ..s });
@@ -1910,11 +1930,102 @@ impl Editor {
         if let Some(t) = &mut copy.timing {
             std::sync::Arc::make_mut(t).remap(&ids);
         }
-        self.pres.slides.insert(index + 1, copy);
-        self.slide = index + 1;
+        copy
+    }
+
+    /// Takes slide `index` for the slide clipboard.
+    pub fn copy_slide(&self, index: usize) -> Option<SlideClip> {
+        let slide = self.pres.slides.get(index)?.clone();
+        let layout_name = slide.layout.and_then(|l| self.pres.layouts.get(l)).map(|l| l.name.clone());
+        let mut keys: Vec<&String> = slide
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.kind {
+                ShapeKind::Picture { media: Some(k), .. } => Some(k),
+                _ => None,
+            })
+            .collect();
+        if let Some(ppt_model::Background::Picture { media }) = &slide.background {
+            keys.push(media);
+        }
+        let mut media: Vec<(String, std::sync::Arc<Vec<u8>>)> = Vec::new();
+        for k in keys {
+            if !media.iter().any(|(m, _)| m == k) {
+                if let Some(bytes) = self.pres.media.get(k) {
+                    media.push((k.clone(), bytes));
+                }
+            }
+        }
+        Some(SlideClip { slide, layout_name, media })
+    }
+
+    /// Pastes the clipboard's slide after slide `after` (at the end when `None`) and goes to it.
+    /// From the same deck the slide is copied as is. From another one it takes the layout of the
+    /// same name (else the default one), brings its pictures along, and is written from the
+    /// editor's own model; charts, SmartArt and other objects only their own package can describe
+    /// are left out. Returns how many objects were left out.
+    pub fn paste_slide(&mut self, engine: &mut TextEngine, clip: &SlideClip, after: Option<usize>, same_deck: bool) -> usize {
+        self.end_text_edit(engine);
+        let before = self.snapshot();
+        let mut slide = clip.slide.clone();
+        let mut dropped = 0;
+        if !same_deck {
+            let layout = clip
+                .layout_name
+                .as_ref()
+                .and_then(|n| self.pres.layouts.iter().position(|l| l.name.eq_ignore_ascii_case(n)))
+                .unwrap_or(if self.pres.layouts.len() > 1 { 1 } else { 0 });
+            let fresh = self.pres.slide_from_layout(layout);
+            slide.layout = fresh.layout;
+            slide.background_shapes = fresh.background_shapes;
+            slide.source = None;
+            let total = slide.shapes.len();
+            slide.shapes.retain(|s| !matches!(s.kind, ShapeKind::Chart(_) | ShapeKind::Diagram { .. } | ShapeKind::Opaque { .. }));
+            dropped = total - slide.shapes.len();
+            if dropped > 0 {
+                // The animations may point at what was left out.
+                slide.timing = None;
+            }
+            // Pictures: keep the key when the deck has no other picture under it.
+            let mut keys: HashMap<String, String> = HashMap::new();
+            for (key, bytes) in &clip.media {
+                let new = if self.pres.media.get(key).is_none() {
+                    key.clone()
+                } else if self.pres.media.get(key).is_some_and(|b| *b == **bytes) {
+                    key.clone()
+                } else {
+                    let mut n = 1;
+                    while self.pres.media.contains_key(&format!("pasted{n}/{key}")) {
+                        n += 1;
+                    }
+                    format!("pasted{n}/{key}")
+                };
+                if !self.pres.media.contains_key(&new) {
+                    self.pres.media.insert(new.clone(), bytes.clone());
+                }
+                keys.insert(key.clone(), new);
+            }
+            for s in &mut slide.shapes {
+                s.source = None;
+                if let ShapeKind::Picture { media: Some(k), .. } = &mut s.kind {
+                    if let Some(n) = keys.get(k) {
+                        *k = n.clone();
+                    }
+                }
+            }
+            if let Some(ppt_model::Background::Picture { media }) = &mut slide.background {
+                if let Some(n) = keys.get(media) {
+                    *media = n.clone();
+                }
+            }
+        }
+        let copy = self.fresh_copy(slide);
+        let at = after.map_or(self.pres.slides.len(), |i| (i + 1).min(self.pres.slides.len()));
+        self.pres.slides.insert(at, copy);
+        self.slide = at;
         self.selection.clear();
         self.push_undo(before);
-        true
+        dropped
     }
 
     pub fn delete_slide(&mut self, engine: &mut TextEngine, index: usize) -> bool {
