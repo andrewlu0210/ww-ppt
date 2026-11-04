@@ -97,3 +97,36 @@ export function buildContextMenu(kind: ContextKind, env: ContextEnv): MenuItem[]
     { label: t("ribbon.guides"), checked: !!status.showGuides, onSelect: () => run({ kind: "showGuides", on: !status.showGuides }) },
   ];
 }
+
+export interface SlideMenuEnv {
+  status: Status;
+  run: (c: Command) => void;
+  layoutNames: string[];
+  openFormatPane: () => void;
+}
+
+/**
+ * The menu of the slide thumbnails (slide pane and slide sorter). `index` is the slide
+ * that was hit, already the current one; null is the empty part of the pane.
+ */
+export function buildSlideMenu(index: number | null, env: SlideMenuEnv): MenuItem[] {
+  const { status, run } = env;
+  const layout: MenuItem = {
+    label: t("ctx.layout"),
+    items: env.layoutNames.map((label, i) => ({ label, checked: status.slideLayout === i, onSelect: () => run({ kind: "applyLayout", layout: i }) })),
+  };
+  const newSlide: MenuItem = { label: t("ribbon.newSlide"), onSelect: () => run({ kind: "newSlide" }) };
+  if (index === null) return [newSlide, layout];
+  const hidden = !!status.hiddenSlides?.[index];
+  return [
+    newSlide,
+    { label: t("slide.duplicate"), onSelect: () => run({ kind: "duplicateSlide", index }) },
+    { label: t("slide.delete"), disabled: status.slideCount <= 1, onSelect: () => run({ kind: "deleteSlide", index }) },
+    SEP,
+    layout,
+    { label: t("ribbon.reset"), onSelect: () => run({ kind: "resetSlide" }) },
+    { label: t("ctx.background"), onSelect: env.openFormatPane },
+    SEP,
+    { label: t("slide.hide"), checked: hidden, onSelect: () => run({ kind: "hideSlide", index, on: !hidden }) },
+  ];
+}

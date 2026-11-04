@@ -853,6 +853,8 @@ pub struct SlideSource {
     /// The background and background graphics setting as loaded.
     pub background: Option<Background>,
     pub hide_background_graphics: bool,
+    /// Whether the slide was hidden from the show.
+    pub hidden: bool,
 }
 
 /// A slide layout: what a new slide based on it starts with.

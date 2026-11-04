@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { Thumb } from "./Thumb";
 import type { Command } from "../lib/commands";
 import { focusCanvas } from "./CanvasHost";
-import { focusables, moveFocus } from "../lib/keyboard";
 
 interface Props {
   count: number;
@@ -11,41 +10,20 @@ interface Props {
   thumbs: Map<number, ImageData>;
   /** Slides with a transition get a mark under their number. */
   transitions?: boolean[];
+  /** Hidden slides: number struck through, thumbnail dimmed. */
+  hidden?: boolean[];
   onSelect: (index: number) => void;
   run: (c: Command) => void;
   /** Accessible names ("投影片 2：標題"). */
   labels?: string[];
-}
-
-interface Menu {
-  x: number;
-  y: number;
-  index: number;
-  /** Opened from the keyboard: the menu takes focus. */
-  byKey?: boolean;
+  /** Right click (or Shift+F10) on a slide, or on the empty part of the pane (`index` null). */
+  onContextMenu: (index: number | null, x: number, y: number, byKey?: boolean) => void;
 }
 
 /** Slide thumbnails: click to open, drag to reorder, right-click for slide commands. */
-export function SlidePane({ count, current, thumbs, transitions, onSelect, run, labels }: Props) {
+export function SlidePane({ count, current, thumbs, transitions, hidden, onSelect, run, labels, onContextMenu }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
-  const [menu, setMenu] = useState<Menu | null>(null);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [menu]);
-
-  useEffect(() => {
-    if (menu?.byKey) document.querySelector<HTMLElement>(".slide-pane .context-menu button:not(:disabled)")?.focus();
-  }, [menu]);
-  const closeMenu = () => {
-    const byKey = menu?.byKey;
-    setMenu(null);
-    if (byKey) requestAnimationFrame(() => document.querySelector<HTMLElement>(".slide-item.current")?.focus());
-  };
 
   // Keep the current slide visible.
   useEffect(() => {
@@ -65,7 +43,6 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
   // Keyboard: ↑/↓ Home/End pick a slide, ⌘↑/⌘↓ move it, Delete removes it,
   // Enter goes to the slide, Shift+F10 opens the slide menu.
   const onKey = (e: React.KeyboardEvent) => {
-    if (menu) return;
     const go = (i: number) => {
       const to = Math.max(0, Math.min(count - 1, i));
       onSelect(to);
@@ -103,7 +80,7 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
       case "ContextMenu": {
         if (e.key === "F10" && !e.shiftKey) return;
         const r = document.querySelectorAll<HTMLElement>(".slide-item")[current]?.getBoundingClientRect();
-        if (r) setMenu({ x: r.left + 24, y: r.top + 24, index: current, byKey: true });
+        if (r) onContextMenu(current, r.left + 24, r.top + 24, true);
         break;
       }
       default:
@@ -113,12 +90,19 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
   };
 
   return (
-    <nav className="slide-pane" aria-label={t("group.slides")} onDragOver={(e) => e.preventDefault()} onDrop={() => finishDrop(dropAt ?? count)} onKeyDown={onKey}>
+    <nav
+      className="slide-pane"
+      aria-label={t("group.slides")}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(null, e.clientX, e.clientY);
+      }}
+      onDragOver={(e) => e.preventDefault()} onDrop={() => finishDrop(dropAt ?? count)} onKeyDown={onKey}>
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="slide-slot">
           {dropAt === i && dragFrom !== null && <div className="drop-line" />}
           <button
-            className={i === current ? "slide-item current" : "slide-item"}
+            className={["slide-item", i === current && "current", hidden?.[i] && "hidden-slide"].filter(Boolean).join(" ")}
             draggable
             onDragStart={(e) => {
               setDragFrom(i);
@@ -136,12 +120,13 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
             onClick={() => onSelect(i)}
             onContextMenu={(e) => {
               e.preventDefault();
+              e.stopPropagation();
               onSelect(i);
-              setMenu({ x: e.clientX, y: e.clientY, index: i });
+              onContextMenu(i, e.clientX, e.clientY);
             }}
             onMouseDown={(e) => e.button === 0 && e.preventDefault()}
             aria-current={i === current}
-            aria-label={labels?.[i] ?? t("slide.label", { n: i + 1 })}
+            aria-label={(labels?.[i] ?? t("slide.label", { n: i + 1 })) + (hidden?.[i] ? `（${t("slide.hidden")}）` : "")}
           >
             <span className="slide-no">
               {i + 1}
@@ -158,41 +143,6 @@ export function SlidePane({ count, current, thumbs, transitions, onSelect, run, 
         </div>
       ))}
       {dropAt === count && dragFrom !== null && <div className="drop-line" />}
-      {menu && (
-        <div
-          className="context-menu"
-          role="menu"
-          style={{ left: menu.x, top: menu.y }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") closeMenu();
-            else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Tab") moveFocus(focusables(e.currentTarget), e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey) ? -1 : 1);
-            else return;
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-        >
-          {(
-            [
-              [t("ribbon.newSlide"), { kind: "newSlide" }],
-              [t("slide.duplicate"), { kind: "duplicateSlide", index: menu.index }],
-              [t("slide.delete"), { kind: "deleteSlide", index: menu.index }],
-            ] as [string, Command][]
-          ).map(([label, cmd]) => (
-            <button
-              key={label}
-              disabled={label === t("slide.delete") && count <= 1}
-              role="menuitem"
-              onClick={() => {
-                run(cmd);
-                closeMenu();
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
     </nav>
   );
 }

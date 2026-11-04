@@ -413,6 +413,7 @@ impl Parser<'_> {
             layout: slide.layout,
             background: slide.background.clone(),
             hide_background_graphics: slide.hide_background_graphics,
+            hidden: slide.hidden,
         }));
         Ok(slide)
     }

@@ -710,6 +710,8 @@ export const zhHant = {
   // SlidePane.tsx
   "slide.label": "投影片 {n}",
   "slide.hasTransition": "有轉場",
+  "slide.hide": "隱藏投影片",
+  "slide.hidden": "已隱藏",
   "slide.duplicate": "複製投影片",
   "slide.delete": "刪除投影片",
 

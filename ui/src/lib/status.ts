@@ -56,6 +56,8 @@ export interface Status {
   /** Space before and after the paragraph, in points. */
   spaceBefore?: number;
   spaceAfter?: number;
+  /** Per slide: hidden from the slide show. */
+  hiddenSlides?: boolean[];
   /** Vertical text position in the edited or selected shape. */
   textAnchor?: "top" | "middle" | "bottom";
   /** Frame of the single selected shape or selected group (EMU, degrees). */

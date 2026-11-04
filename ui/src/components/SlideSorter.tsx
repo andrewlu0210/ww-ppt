@@ -8,6 +8,8 @@ interface Props {
   current: number;
   thumbs: Map<number, ImageData>;
   transitions?: boolean[];
+  /** Hidden slides: number struck through, thumbnail dimmed. */
+  hidden?: boolean[];
   /** Thumbnail width in CSS pixels. */
   size: number;
   onSelect: (index: number) => void;
@@ -16,10 +18,12 @@ interface Props {
   run: (c: Command) => void;
   /** Accessible names ("投影片 2：標題"). */
   labels?: string[];
+  /** Right click on a slide, or on the empty part of the grid (`index` null). */
+  onContextMenu: (index: number | null, x: number, y: number) => void;
 }
 
 /** 投影片瀏覽: every slide in a grid; drag to reorder, Delete to remove. */
-export function SlideSorter({ count, current, thumbs, transitions, size, onSelect, onOpen, run, labels }: Props) {
+export function SlideSorter({ count, current, thumbs, transitions, hidden, size, onSelect, onOpen, run, labels, onContextMenu }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
@@ -92,6 +96,10 @@ export function SlideSorter({ count, current, thumbs, transitions, size, onSelec
       role="listbox"
       aria-label={t("ribbon.sorter")}
       onKeyDown={onKey}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu(null, e.clientX, e.clientY);
+      }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={() => finishDrop(dropAt ?? count)}
       style={{ "--sorter-size": `${size}px` } as React.CSSProperties}
@@ -101,8 +109,8 @@ export function SlideSorter({ count, current, thumbs, transitions, size, onSelec
           key={i}
           role="option"
           aria-selected={i === current}
-          aria-label={labels?.[i] ?? t("slide.label", { n: i + 1 })}
-          className={["sorter-item", i === current && "current", dragFrom !== null && dropAt === i && "drop-before", dragFrom !== null && dropAt === i + 1 && i === count - 1 && "drop-after"].filter(Boolean).join(" ")}
+          aria-label={(labels?.[i] ?? t("slide.label", { n: i + 1 })) + (hidden?.[i] ? `（${t("slide.hidden")}）` : "")}
+          className={["sorter-item", i === current && "current", hidden?.[i] && "hidden-slide", dragFrom !== null && dropAt === i && "drop-before", dragFrom !== null && dropAt === i + 1 && i === count - 1 && "drop-after"].filter(Boolean).join(" ")}
           draggable
           onDragStart={(e) => {
             setDragFrom(i);
@@ -119,6 +127,12 @@ export function SlideSorter({ count, current, thumbs, transitions, size, onSelec
             setDropAt(null);
           }}
           onClick={() => onSelect(i)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onSelect(i);
+            onContextMenu(i, e.clientX, e.clientY);
+          }}
           onDoubleClick={() => onOpen(i)}
         >
           <span className="sorter-card">

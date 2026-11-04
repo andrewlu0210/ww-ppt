@@ -708,6 +708,8 @@ export const en: Messages = {
   // SlidePane.tsx
   "slide.label": "Slide {n}",
   "slide.hasTransition": "Has transition",
+  "slide.hide": "Hide Slide",
+  "slide.hidden": "Hidden",
   "slide.duplicate": "Duplicate Slide",
   "slide.delete": "Delete Slide",
 

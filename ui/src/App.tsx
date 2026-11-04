@@ -50,7 +50,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import { FontDialog } from "./components/FontDialog";
 import { ParagraphDialog } from "./components/ParagraphDialog";
 import { AltTextForm } from "./components/AltTextDialog";
-import { buildContextMenu, type ContextKind } from "./lib/contextMenu";
+import { buildContextMenu, buildSlideMenu, type ContextKind } from "./lib/contextMenu";
 import { SHAPE_CATEGORIES, type PresetIcon } from "./components/ShapeGallery";
 import type { HeaderFooterInfo } from "./components/HeaderFooterDialog";
 import type { AltTextInfo } from "./components/AltTextDialog";
@@ -192,6 +192,8 @@ export function App() {
   const [linkRequest, setLinkRequest] = useState(0);
   const [tabRequest, setTabRequest] = useState<{ tab: string; n: number }>({ tab: "", n: 0 });
   /** The right-click menu (objects, text, blank area), and the alt text form it can open. */
+  /** The menu of the slide thumbnails (`index` null: the empty part of the pane). */
+  const [slideMenu, setSlideMenu] = useState<{ x: number; y: number; index: number | null; byKey?: boolean } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; kind: ContextKind } | null>(null);
   const [altPopup, setAltPopup] = useState<{ x: number; y: number } | null>(null);
   const [tableStyles, setTableStyles] = useState<TableStyleInfo[]>([]);
@@ -1306,6 +1308,9 @@ export function App() {
         case "resetBackground":
           engine.resetBackground();
           break;
+        case "hideSlide":
+          engine.setSlideHidden(c.index ?? (engine.status() as Status).slideIndex, c.on);
+          break;
         case "hideBackgroundGraphics":
           engine.setHideBackgroundGraphics(c.on);
           break;
@@ -1632,6 +1637,8 @@ export function App() {
             current={status.slideIndex}
             thumbs={thumbs}
             transitions={status.transitionSlides}
+            hidden={status.hiddenSlides}
+            onContextMenu={(index, x, y) => setSlideMenu({ x, y, index })}
             size={viewPrefs.sorterSize}
             labels={slideLabels}
             onSelect={(i) => {
@@ -1650,6 +1657,8 @@ export function App() {
         <SlidePane
           count={status.slideCount}
           transitions={status.transitionSlides}
+          hidden={status.hiddenSlides}
+          onContextMenu={(index, x, y, byKey) => setSlideMenu({ x, y, index, byKey })}
           current={status.slideIndex}
           thumbs={thumbs}
           labels={slideLabels}
@@ -1780,6 +1789,21 @@ export function App() {
           </div>
         )}
       </main>
+      {slideMenu && (
+        <div className="menu-layer">
+          <ContextMenu
+            x={slideMenu.x}
+            y={slideMenu.y}
+            label={t("ctx.menu")}
+            items={buildSlideMenu(slideMenu.index, { status, run, layoutNames, openFormatPane: () => void run({ kind: "formatPane", open: true }) })}
+            onClose={() => {
+              const byKey = slideMenu.byKey;
+              setSlideMenu(null);
+              if (byKey) requestAnimationFrame(() => document.querySelector<HTMLElement>(".slide-item.current")?.focus());
+            }}
+          />
+        </div>
+      )}
       {textDialog === "font" && <FontDialog status={status} fonts={fonts} run={run} onClose={() => { setTextDialog(null); focusCanvas(); }} />}
       {textDialog === "paragraph" && <ParagraphDialog status={status} run={run} onClose={() => { setTextDialog(null); focusCanvas(); }} />}
       {zoomOpen && <ZoomDialog percent={status.zoomPercent} relative={status.zoom} fit={status.zoomFit} run={run} onClose={() => { setZoomOpen(false); focusCanvas(); }} />}

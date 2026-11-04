@@ -33,6 +33,8 @@ export type Command =
   | { kind: "table"; command: "rowAbove" | "rowBelow" | "colLeft" | "colRight" | "deleteRow" | "deleteCol" }
   | { kind: "newSlide"; layout?: number }
   | { kind: "duplicateSlide"; index?: number }
+  /** Hide a slide from the slide show (default: the current one), or show it again. */
+  | { kind: "hideSlide"; index?: number; on: boolean }
   | { kind: "deleteSlide"; index?: number }
   | { kind: "moveSlide"; from: number; to: number }
   | { kind: "toggle"; which: "bold" | "italic" | "underline" | "strike" | "superscript" | "subscript" }

@@ -49,6 +49,19 @@ impl Editor {
         true
     }
 
+    /// Hides slide `index` from the slide show, or shows it again (`p:sld/@show`).
+    pub fn set_slide_hidden(&mut self, engine: &mut TextEngine, index: usize, hidden: bool) -> bool {
+        self.end_text_edit(engine);
+        let Some(slide) = self.pres.slides.get(index) else { return false };
+        if slide.hidden == hidden {
+            return false;
+        }
+        let before = self.snapshot();
+        self.pres.slides[index].hidden = hidden;
+        self.push_undo(before);
+        true
+    }
+
     /// Gives every slide the current slide's background settings (套用到全部).
     pub fn apply_background_to_all(&mut self, engine: &mut TextEngine) -> bool {
         self.end_text_edit(engine);

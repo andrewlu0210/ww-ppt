@@ -3062,3 +3062,26 @@ select.para-input {
 .rb-launcher:disabled {
   opacity: 0.4;
 }
+
+/* A context menu placed with viewport coordinates (slide pane and sorter). */
+.menu-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.menu-layer .ctx-root {
+  pointer-events: auto;
+}
+
+/* Hidden slides: number struck through, thumbnail dimmed. */
+.hidden-slide .slide-no,
+.hidden-slide .sorter-no {
+  text-decoration: line-through;
+}
+
+.hidden-slide .slide-thumb,
+.hidden-slide .sorter-thumb {
+  opacity: 0.45;
+}

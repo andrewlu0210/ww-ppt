@@ -1356,7 +1356,7 @@ fn slide_xml_without_narration_timing(slide: &Slide, template: Option<&SlideSour
         let ns: Vec<(String, String)> = [("a", "http://schemas.openxmlformats.org/drawingml/2006/main"), ("p", "http://schemas.openxmlformats.org/presentationml/2006/main")].iter().map(|(p, u)| (p.to_string(), u.to_string())).collect();
         let timing = edited_timing(slide, &ns, out).unwrap_or_default();
         let bg = slide.background.as_ref().map(|b| background_xml(b, out)).unwrap_or_default();
-        let show = if slide.hide_background_graphics { r#" showMasterSp="0""# } else { "" };
+        let show = format!("{}{}", if slide.hide_background_graphics { r#" showMasterSp="0""# } else { "" }, if slide.hidden { r#" show="0""# } else { "" });
         return format!(
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld {NS_DECLS}{extra}{show}><p:cSld>{bg}<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{transition}{timing}</p:sld>"#
         );
@@ -1384,6 +1384,9 @@ fn slide_xml_without_narration_timing(slide: &Slide, template: Option<&SlideSour
     }
     if slide.hide_background_graphics != t.hide_background_graphics {
         edits.push(root_attr_edit(doc_text, root, "showMasterSp", if slide.hide_background_graphics { "0" } else { "1" }));
+    }
+    if slide.hidden != t.hidden {
+        edits.push(root_attr_edit(doc_text, root, "show", if slide.hidden { "0" } else { "1" }));
     }
     if slide.transition != t.transition {
         edits.push(transition_edit(doc_text, root, slide.transition.as_ref()));
@@ -1453,6 +1456,7 @@ fn slide_unchanged(slide: &Slide, src: &SlideSource) -> bool {
     slide.narration.is_none()
         && slide.background == src.background
         && slide.hide_background_graphics == src.hide_background_graphics
+        && slide.hidden == src.hidden
         && slide.transition == src.transition
         && slide.timing == src.timing
         && slide.layout == src.layout

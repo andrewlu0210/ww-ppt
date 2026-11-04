@@ -1164,6 +1164,26 @@ fn shapes_are_drawn_by_dragging_or_clicking() {
 }
 
 #[test]
+fn slides_are_hidden_and_shown_again_and_saved() {
+    let mut eng = engine();
+    let mut e = Editor::new(ppt_ooxml::parse_pptx(&ppt_ooxml::template_package()).unwrap());
+    assert!(e.add_slide(&mut eng, None));
+    assert!(e.set_slide_hidden(&mut eng, 1, true));
+    assert!(!e.set_slide_hidden(&mut eng, 1, true), "unchanged");
+    assert!(!e.set_slide_hidden(&mut eng, 9, true), "no such slide");
+    assert!(e.pres.slides[1].hidden && !e.pres.slides[0].hidden);
+    let saved = ppt_ooxml::save_pptx(&e.pres).unwrap();
+    assert!(zip_part(&saved, "ppt/slides/slide2.xml").contains(r#" show="0""#));
+    let mut re = Editor::new(ppt_ooxml::parse_pptx(&saved).unwrap());
+    assert!(re.pres.slides[1].hidden && !re.pres.slides[0].hidden);
+    // Showing it again rewrites the attribute of the loaded slide.
+    assert!(re.set_slide_hidden(&mut eng, 1, false));
+    let again = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&re.pres).unwrap()).unwrap();
+    assert!(again.slides.iter().all(|s| !s.hidden));
+    assert!(re.undo(&mut eng) && re.pres.slides[1].hidden);
+}
+
+#[test]
 fn backgrounds_are_set_reset_applied_to_all_and_saved() {
     use ppt_model::Background;
     let mut eng = engine();

@@ -2223,6 +2223,13 @@ impl App {
         self.touch(changed)
     }
 
+    /// Hides slide `index` from the slide show, or shows it again.
+    #[wasm_bindgen(js_name = setSlideHidden)]
+    pub fn set_slide_hidden(&mut self, index: usize, hidden: bool) -> bool {
+        let changed = self.editor.set_slide_hidden(&mut self.engine, index, hidden);
+        self.touch(changed)
+    }
+
     #[wasm_bindgen(js_name = applyBackgroundToAll)]
     pub fn apply_background_to_all(&mut self) -> bool {
         let changed = self.editor.apply_background_to_all(&mut self.engine);
@@ -3107,6 +3114,8 @@ impl App {
         }
         let marks: Array = e.pres.slides.iter().map(|s| JsValue::from(s.transition.as_ref().is_some_and(|t| t.animates()))).collect();
         set("transitionSlides", marks.into());
+        let hidden: Array = e.pres.slides.iter().map(|s| JsValue::from(s.hidden)).collect();
+        set("hiddenSlides", hidden.into());
         if let Some(a) = e.text_anchor() {
             let a = match a {
                 ppt_model::Anchor::Top => "top",

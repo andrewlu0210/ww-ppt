@@ -708,6 +708,8 @@ export const zhHans: Messages = {
   // SlidePane.tsx
   "slide.label": "幻灯片 {n}",
   "slide.hasTransition": "有切换效果",
+  "slide.hide": "隐藏幻灯片",
+  "slide.hidden": "已隐藏",
   "slide.duplicate": "复制幻灯片",
   "slide.delete": "删除幻灯片",
 
