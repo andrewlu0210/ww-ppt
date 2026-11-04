@@ -1,5 +1,4 @@
 import { t } from "../i18n";
-import type { Appearance } from "../lib/appearance";
 import { useEffect, useState, type ReactNode } from "react";
 import { icons } from "./icons";
 import { ColorPicker } from "./ColorPicker";
@@ -136,12 +135,11 @@ interface Props {
   textPaneOpen: boolean;
   /** The selected object's alternative text, read when the dialog opens. */
   loadAltText: () => AltTextInfo | null;
-  appearance: Appearance;
   /** Switch to a tab (`n` changes with each request, so the same tab can be asked for again). */
   tabRequest?: { tab: string; n: number };
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, hasNarration, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, appearance, tabRequest }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, hasNarration, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, tabRequest }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -664,16 +662,6 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
               </div>
               <GridMenu status={status} run={run} />
               <Button icon={icons.notes} label={t("ribbon.notes")} active={notesOpen} onClick={() => run({ kind: "toggleNotes" })} />
-            </Group>
-            <Group label={t("group.appearance")}>
-              <label className="rb-field">
-                {t("ribbon.interface")}
-                <select value={appearance} onChange={(e) => run({ kind: "appearance", value: e.target.value as Appearance })} onMouseDown={(e) => e.stopPropagation()}>
-                  <option value="system">{t("ribbon.followSystem")}</option>
-                  <option value="light">{t("ribbon.light")}</option>
-                  <option value="dark">{t("ribbon.dark")}</option>
-                </select>
-              </label>
             </Group>
             <Group label={t("group.zoom")}>
               <Button icon={icons.zoomIn} label={t("ribbon.zoomIn")} onClick={() => run({ kind: "zoom", factor: 1.25 })} />

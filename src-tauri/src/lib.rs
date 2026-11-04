@@ -9,7 +9,7 @@ mod video;
 use ppt_fonts::{FontService, ResolvedFont};
 use ppt_model::{Lang, lang, set_lang, tr};
 use tauri::ipc::Response;
-use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, RunEvent, State};
 
@@ -134,11 +134,40 @@ fn on_open_urls(app: &tauri::AppHandle, urls: &[tauri::Url]) {
 fn detect_lang() -> Lang {
     #[cfg(target_os = "macos")]
     {
+        // A language picked in Preferences wins over the system's.
+        if let Some(lang) = std::fs::read_to_string(language_pref_path()).ok().and_then(|v| Lang::from_tag(v.trim())) {
+            return lang;
+        }
         let langs: Vec<String> = objc2_foundation::NSLocale::preferredLanguages().iter().map(|l| l.to_string()).collect();
         Lang::detect(langs.iter().map(String::as_str))
     }
     #[cfg(not(target_os = "macos"))]
     Lang::En
+}
+
+/// Where the language chosen in Preferences is kept (absent: follow the system). The native
+/// menus are built before the web view exists, so they cannot read the frontend's storage.
+fn language_pref_path() -> std::path::PathBuf {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    home.join("Library/Application Support/com.ww.ppt/language")
+}
+
+/// Remembers the language picked in Preferences for the next launch: "zh-Hant", "zh-Hans",
+/// "en", or "system" to follow the system again.
+#[tauri::command]
+fn set_language_pref(value: String) -> Result<(), String> {
+    let path = language_pref_path();
+    if value == "system" {
+        return match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        };
+    }
+    if !matches!(value.as_str(), "zh-Hant" | "zh-Hans" | "en") {
+        return Err("unsupported language".into());
+    }
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, value).map_err(|e| e.to_string())
 }
 
 /// The app's display name: "旺-Point" in Chinese, "Want-Point" in English.
@@ -157,9 +186,10 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
             None => b.build(app),
         }
     };
-    let about = AboutMetadata { name: Some(name.into()), ..Default::default() };
     let app_menu = SubmenuBuilder::new(app, name)
-        .item(&PredefinedMenuItem::about(app, Some(&tr("關於 {}", "关于 {}", "About {}", &[&name])), Some(about))?)
+        .item(&item("about", &tr("關於 {}", "关于 {}", "About {}", &[&name]), None)?)
+        .separator()
+        .item(&item("preferences", m("偏好設定…", "偏好设置…", "Preferences…"), Some("CmdOrCtrl+,"))?)
         .separator()
         .item(&PredefinedMenuItem::hide(app, Some(&tr("隱藏 {}", "隐藏 {}", "Hide {}", &[&name])))?)
         .item(&PredefinedMenuItem::hide_others(app, Some(m("隱藏其他", "隐藏其他", "Hide Others")))?)
@@ -264,6 +294,7 @@ pub fn run() {
             list_fonts,
             resolve_font,
             startup_files,
+            set_language_pref,
             set_show_deck,
             get_show_deck,
             video::export_video,

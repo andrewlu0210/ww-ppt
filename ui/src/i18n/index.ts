@@ -1,6 +1,7 @@
 // Interface language: Traditional Chinese, Simplified Chinese or English,
-// chosen from the system's preferred languages at startup (macOS can also set
-// a language per app in System Settings). Anything else falls back to English.
+// chosen at startup: the language picked in Preferences, else the first supported
+// one among the system's preferred languages (macOS can also set a language per app
+// in System Settings). Anything else falls back to English.
 
 import { en } from "./en";
 import { zhHans } from "./zh-Hans";
@@ -18,7 +19,20 @@ export function matchLang(tag: string): Lang | null {
   return /-(cn|sg|my)\b/.test(t) ? "zh-Hans" : "zh-Hant";
 }
 
+/** The language chosen in Preferences, or null to follow the system. */
+export function storedLang(): Lang | null {
+  try {
+    const v = localStorage.getItem("ww-ppt.language");
+    if (v === "zh-Hant" || v === "zh-Hans" || v === "en") return v;
+  } catch {
+    // Storage unavailable: follow the system.
+  }
+  return null;
+}
+
 function detect(): Lang {
+  const chosen = storedLang();
+  if (chosen) return chosen;
   for (const tag of navigator.languages ?? [navigator.language]) {
     const lang = matchLang(tag);
     if (lang) return lang;

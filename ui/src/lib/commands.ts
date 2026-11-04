@@ -1,4 +1,3 @@
-import type { Appearance } from "./appearance";
 
 // Every user command, dispatched by App.tsx to the engine.
 export type Command =
@@ -112,7 +111,6 @@ export type Command =
   /** Remove the current slide's recorded narration. */
   | { kind: "clearNarration" }
   | { kind: "toggleRuler" }
-  | { kind: "appearance"; value: Appearance }
   | { kind: "selectionPane"; open?: boolean }
   | { kind: "textPane"; open?: boolean }
   | { kind: "smartArt"; command: "addAfter" | "addBefore" | "addChild" | "delete" | "promote" | "demote" | "moveUp" | "moveDown" }

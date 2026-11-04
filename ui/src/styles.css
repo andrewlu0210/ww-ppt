@@ -2867,3 +2867,128 @@ input:focus-visible,
 .fp-buttons button:disabled {
   opacity: 0.4;
 }
+
+/* About window (its own native window, loaded with ?about) */
+.about-page {
+  height: 100vh;
+  padding: 24px 32px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  /* Centered, so the space above the icon and below the maker line match. */
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  background: var(--surface);
+  color: var(--text);
+  user-select: none;
+  cursor: default;
+}
+
+.about-icon {
+  width: 112px;
+  height: 112px;
+  border-radius: 24px;
+  margin-bottom: 22px;
+}
+
+.about-name {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.about-version,
+.about-desc {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.about-version {
+  margin-bottom: 12px;
+}
+
+.about-desc {
+  line-height: 1.5;
+}
+
+.about-maker {
+  align-self: stretch;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Preferences window (its own native window, loaded with ?preferences) */
+.prefs-page {
+  height: 100vh;
+  padding: 22px 24px 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  user-select: none;
+  cursor: default;
+}
+
+.prefs-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.prefs-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.prefs-row select {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  padding: 0 8px;
+}
+
+.prefs-hint {
+  margin: -6px 0 0 152px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.prefs-note {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.prefs-buttons {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.prefs-buttons button {
+  min-width: 84px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.prefs-buttons button.primary {
+  border-color: transparent;
+  background: #3b82f6;
+  color: #fff;
+}

@@ -60,9 +60,12 @@ import { ZoomDialog } from "./components/ZoomDialog";
 import { CheckerPane, type A11yIssue } from "./components/CheckerPane";
 import { A11yMirror } from "./components/A11yMirror";
 import { announce } from "./lib/announce";
+import { openAbout } from "./components/AboutWindow";
+import { openPreferences } from "./components/PreferencesWindow";
+import { autosaveSeconds } from "./lib/prefs";
 import type { BackgroundInfo, ColorSchemeInfo, FontSchemeInfo, ThemeInfo } from "./components/DesignTab";
 import { setThemePalette } from "./components/ColorPicker";
-import { applyAppearance, cssColor, loadAppearance } from "./lib/appearance";
+import { applyAppearance, cssColor, loadAppearance, type Appearance } from "./lib/appearance";
 import { t } from "./i18n";
 
 const THUMB_WIDTH = 320;
@@ -118,7 +121,6 @@ interface ViewPrefs {
 /** Ruler, gridlines and sorter size, remembered per machine. */
 /** Autosave a few seconds after editing stops, at most this often. */
 const AUTOSAVE_IDLE_MS = 3000;
-const AUTOSAVE_EVERY_MS = 30_000;
 
 const newSessionId = () => crypto.randomUUID();
 
@@ -291,6 +293,12 @@ export function App() {
   }, [viewPrefs]);
   const [appearance, setAppearance] = useState(loadAppearance);
   useEffect(() => applyAppearance(appearance, () => engineRef.current?.setWorkspaceColor(cssColor("--workspace"))), [appearance]);
+  // The Preferences window changes the appearance too.
+  useEffect(() => {
+    if (!inTauri) return;
+    const unlisten = listen<Appearance>("appearance-changed", (e) => setAppearance(e.payload));
+    return () => void unlisten.then((f) => f());
+  }, []);
   const [spellOn, setSpellOn] = useState(loadSpellPref);
   const [spellMenu, setSpellMenu] = useState<{ x: number; y: number; hit: SpellHit; guesses: string[] | null } | null>(null);
   /** Misspellings by checked text, so unchanged texts aren't sent again. */
@@ -337,12 +345,15 @@ export function App() {
       }
       return;
     }
+    // Preferences can turn the autosave off or change its interval.
+    const everyMs = autosaveSeconds() * 1000;
+    if (everyMs === 0) return;
     const now = Date.now();
     a.since ||= now;
-    // A few seconds after editing stops, at most every AUTOSAVE_EVERY_MS, and not
+    // A few seconds after editing stops, at most every everyMs, and not
     // postponed for longer than that by continuous editing.
-    const idle = now - a.since >= AUTOSAVE_EVERY_MS ? 0 : AUTOSAVE_IDLE_MS;
-    const wait = Math.max(idle, a.last + AUTOSAVE_EVERY_MS - now);
+    const idle = now - a.since >= everyMs ? 0 : AUTOSAVE_IDLE_MS;
+    const wait = Math.max(idle, a.last + everyMs - now);
     a.timer = window.setTimeout(() => {
       const engine = engineRef.current;
       if (!engine || !dirtyRef.current || autosaved.current === engine.revision()) return;
@@ -1019,10 +1030,6 @@ export function App() {
         if (c.mode === "normal") focusCanvas();
         return;
       }
-      if (c.kind === "appearance") {
-        setAppearance(c.value);
-        return;
-      }
       if (c.kind === "toggleRuler") {
         setViewPrefs((p) => ({ ...p, ruler: !p.ruler }));
         return;
@@ -1447,6 +1454,14 @@ export function App() {
         if (id.startsWith("insert_") || id === "find" || id === "replace") setViewMode("normal");
         else if (["cut", "copy", "paste", "delete", "duplicate", "select_all", "group", "ungroup"].includes(id)) return;
       }
+      if (id === "preferences") {
+        void openPreferences();
+        return;
+      }
+      if (id === "about") {
+        void openAbout();
+        return;
+      }
       if (id === "find" || id === "replace") {
         findRef.current?.open(id === "replace");
         return;
@@ -1594,7 +1609,6 @@ export function App() {
         loadBackground={() => (engineRef.current?.background() as BackgroundInfo | undefined) ?? null}
         viewMode={viewMode}
         rulerOn={viewPrefs.ruler}
-        appearance={appearance}
         paneOpen={viewPrefs.pane}
         checkerOpen={viewPrefs.checker}
         textPaneOpen={diagramShown}
