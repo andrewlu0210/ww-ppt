@@ -90,10 +90,18 @@ function Button(props: { icon: ReactNode; label: string; onClick: (e: React.Mous
   );
 }
 
-function Group({ label, children }: { label: string; children: ReactNode }) {
+/** `launcher`: opens the group's dialog (the small corner arrow of a PowerPoint group). */
+function Group({ label, children, launcher, launcherLabel, launcherDisabled }: { label: string; children: ReactNode; launcher?: () => void; launcherLabel?: string; launcherDisabled?: boolean }) {
   return (
     <div className="rb-group" role="group" aria-label={label}>
       <div className="rb-items">{children}</div>
+      {launcher && (
+        <button className="rb-launcher" title={launcherLabel} aria-label={launcherLabel} disabled={launcherDisabled} onMouseDown={keepFocus} onClick={launcher}>
+          <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">
+            <path d="M1 1h4M1 1v4M3.5 3.5 8 8M8 5v3H5" fill="none" stroke="currentColor" strokeWidth="1" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -137,9 +145,12 @@ interface Props {
   loadAltText: () => AltTextInfo | null;
   /** Switch to a tab (`n` changes with each request, so the same tab can be asked for again). */
   tabRequest?: { tab: string; n: number };
+  /** Open the Font and Paragraph dialogs (the corner arrows of those groups). */
+  onFontDialog: () => void;
+  onParagraphDialog: () => void;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, hasNarration, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, tabRequest }: Props) {
+export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, hasNarration, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, tabRequest, onFontDialog, onParagraphDialog }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -258,7 +269,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 <Button icon={icons.resetSlide} label={t("ribbon.reset")} disabled={(status.slideLayout ?? -1) < 0} onClick={() => run({ kind: "resetSlide" })} />
               </div>
             </Group>
-            <Group label={t("group.font")}>
+            <Group label={t("group.font")} launcher={onFontDialog} launcherLabel={t("ctx.font")} launcherDisabled={!text}>
               <div className="rb-col">
                 <div className="rb-row">
                   <Combobox
@@ -315,7 +326,7 @@ export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThu
                 </div>
               </div>
             </Group>
-            <Group label={t("group.paragraph")}>
+            <Group label={t("group.paragraph")} launcher={onParagraphDialog} launcherLabel={t("ctx.paragraph")} launcherDisabled={!text}>
               <div className="rb-col">
                 <div className="rb-row">
                   <Button iconOnly icon={icons.bulletList} label={t("ribbon.bullets")} active={status.bullet} disabled={!text} onClick={() => run({ kind: "bullets" })} />

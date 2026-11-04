@@ -1612,7 +1612,7 @@ export function App() {
           {dirty && <span className="dirty-dot" title={t("title.unsaved")} />}
         </span>
       </header>
-      <Ribbon hasNarration={hasNarration} tabRequest={tabRequest} painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
+      <Ribbon onFontDialog={() => setTextDialog("font")} onParagraphDialog={() => setTextDialog("paragraph")} hasNarration={hasNarration} tabRequest={tabRequest} painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
         theme={theme}
         colorSchemes={schemes.colors}
         fontSchemes={schemes.fonts}
