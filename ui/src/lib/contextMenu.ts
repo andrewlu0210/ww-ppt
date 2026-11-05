@@ -47,7 +47,8 @@ export function buildContextMenu(kind: ContextKind, env: ContextEnv): MenuItem[]
   const formatShape: MenuItem = { label: t("ctx.formatShape"), shortcut: "⌘1", onSelect: env.openFormatPane };
 
   if (kind === "text") {
-    return [...clipboard, SEP, { label: t("ctx.endEditing"), onSelect: env.endEditing }, ...textItems, SEP, link, SEP, formatShape];
+    const formatText: MenuItem = { label: t("ctx.formatTextEffects"), onSelect: env.openFormatPane };
+    return [...clipboard, SEP, { label: t("ctx.endEditing"), onSelect: env.endEditing }, ...textItems, SEP, link, SEP, formatShape, formatText];
   }
 
   if (kind === "object") {

@@ -1379,6 +1379,9 @@ export function App() {
         case "shadowSpec":
           engine.setShadowSpec(c.spec);
           break;
+        case "textEffectSpec":
+          engine.setTextEffectSpec(c.spec);
+          break;
         case "textBoxSpec":
           engine.setTextBoxSpec(c.spec);
           break;

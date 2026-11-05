@@ -111,6 +111,8 @@ export type Command =
   | { kind: "lineSpec"; spec: import("../components/FormatPane").LineSpec }
   /** Changes to the selection's drop shadow (`App::setShadowSpec`). */
   | { kind: "shadowSpec"; spec: import("../components/FormatPane").ShadowSpec }
+  /** Outline and shadow of the selected text. */
+  | { kind: "textEffectSpec"; spec: import("../components/FormatPane").TextEffectSpec }
   /** Changes to the selection's text box settings (`App::setTextBoxSpec`). */
   | { kind: "textBoxSpec"; spec: import("../components/FormatPane").TextBoxSpec }
   /** "Lock aspect ratio" for the selection. */

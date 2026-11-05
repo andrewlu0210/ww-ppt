@@ -42,6 +42,11 @@ interface ShadowInfo {
   distPt?: number;
   angle?: number;
 }
+/** What `App::textEffectInfo` returns: null parts mean the selected text differs. */
+interface TextEffectInfo {
+  outline: { visible: boolean; color?: string; alpha?: number; widthPt?: number } | null;
+  shadow: ShadowInfo | null;
+}
 interface TextBoxInfo {
   anchor: "top" | "middle" | "bottom" | null;
   left: number | null;
@@ -69,6 +74,7 @@ interface Info {
 export type FillSpec = { type: "none" } | { type: "solid"; color: string; alpha: number } | { type: "gradient"; kind: "linear" | "radial"; angle: number; stops: Stop[] };
 export type TextBoxSpec = Partial<{ anchor: "top" | "middle" | "bottom"; left: number; top: number; right: number; bottom: number; wrap: boolean; autoGrow: boolean }>;
 export type ShadowSpec = Partial<{ visible: boolean; color: string; alpha: number; blurPt: number; distPt: number; angle: number }>;
+export type TextEffectSpec = Partial<{ outline: Partial<{ visible: boolean; color: string; alpha: number; widthPt: number }>; shadow: ShadowSpec }>;
 export type LineSpec = Partial<{ visible: boolean; color: string; alpha: number; widthPt: number; dash: string; head: End; tail: End }>;
 
 const DEFAULT_COLOR = "#4472C4";
@@ -377,6 +383,12 @@ export function FormatPane({ status, engine, version, run, onClose }: Props) {
   const alt = engine && status.selectionCount === 1 ? (engine.altText() as { text: string; decorative: boolean } | null) : null;
   const shadow = info?.shadow ?? null;
   const preset = shadowPreset(shadow);
+  // The outline and shadow of the text (the selected text while editing, else all text of the shapes).
+  const [textFx, setTextFx] = useState<TextEffectInfo | null>(null);
+  useEffect(() => {
+    setTextFx(engine ? ((engine.textEffectInfo() as TextEffectInfo | null) ?? null) : null);
+  }, [engine, version]);
+  const setTextEffect = (spec: TextEffectSpec) => run({ kind: "textEffectSpec", spec });
 
   // --- line
   const lineVisible = line === null ? null : line.visible ? "solid" : "none";
@@ -513,6 +525,60 @@ export function FormatPane({ status, engine, version, run, onClose }: Props) {
                   <Num label={t("format.blur")} unit="pt" value={shadow.blurPt} min={0} max={100} step={0.5} onCommit={(blurPt) => setShadow({ blurPt })} />
                   <Num label={t("format.angle")} unit="°" value={shadow.angle} min={0} max={359} step={5} onCommit={(angle) => setShadow({ angle })} />
                   <Num label={t("format.distance")} unit="pt" value={shadow.distPt} min={0} max={200} step={0.5} onCommit={(distPt) => setShadow({ distPt })} />
+                </>
+              )}
+            </Section>
+          )}
+          {textFx && (
+            <Section title={t("format.textSection")}>
+              <div className="fp-subhead">{t("format.textOutline")}</div>
+              <label className="fp-field wide">
+                <span>{t("format.textOutline")}</span>
+                <select value={textFx.outline === null ? "" : textFx.outline.visible ? "solid" : "none"} onChange={(e) => setTextEffect({ outline: { visible: e.target.value === "solid" } })}>
+                  {textFx.outline === null && (
+                    <option value="" disabled>
+                      —
+                    </option>
+                  )}
+                  <option value="none">{t("format.outlineNone")}</option>
+                  <option value="solid">{t("format.outlineSolid")}</option>
+                </select>
+              </label>
+              {textFx.outline === null && <div className="pane-empty">{t("format.mixed")}</div>}
+              {textFx.outline?.visible && (
+                <>
+                  <div className="fp-row">
+                    <span className="fp-label">{t("format.color")}</span>
+                    <ColorPicker icon={<Swatch color={textFx.outline.color} alpha={textFx.outline.alpha} />} label="" value={textFx.outline.color} onPick={(color) => color && setTextEffect({ outline: { color } })} />
+                  </div>
+                  <Percent label={t("format.transparency")} value={Math.round((1 - textFx.outline.alpha!) * 100)} onCommit={(p) => setTextEffect({ outline: { alpha: 1 - p / 100 } })} />
+                  <Num label={t("format.lineWidth")} unit="pt" value={textFx.outline.widthPt} min={0} max={100} step={0.25} onCommit={(widthPt) => setTextEffect({ outline: { widthPt } })} />
+                </>
+              )}
+              <div className="fp-subhead">{t("format.textShadow")}</div>
+              <label className="fp-field wide">
+                <span>{t("format.textShadow")}</span>
+                <select value={textFx.shadow === null ? "" : textFx.shadow.visible ? "on" : "none"} onChange={(e) => setTextEffect({ shadow: { visible: e.target.value === "on" } })}>
+                  {textFx.shadow === null && (
+                    <option value="" disabled>
+                      —
+                    </option>
+                  )}
+                  <option value="none">{t("format.shadowNone")}</option>
+                  <option value="on">{t("format.shadowOn")}</option>
+                </select>
+              </label>
+              {textFx.shadow === null && <div className="pane-empty">{t("format.mixed")}</div>}
+              {textFx.shadow?.visible && (
+                <>
+                  <div className="fp-row">
+                    <span className="fp-label">{t("format.color")}</span>
+                    <ColorPicker icon={<Swatch color={textFx.shadow.color} alpha={textFx.shadow.alpha} />} label="" value={textFx.shadow.color} onPick={(color) => color && setTextEffect({ shadow: { color } })} />
+                  </div>
+                  <Percent label={t("format.transparency")} value={Math.round((1 - textFx.shadow.alpha!) * 100)} onCommit={(p) => setTextEffect({ shadow: { alpha: 1 - p / 100 } })} />
+                  <Num label={t("format.blur")} unit="pt" value={textFx.shadow.blurPt} min={0} max={100} step={0.5} onCommit={(blurPt) => setTextEffect({ shadow: { blurPt } })} />
+                  <Num label={t("format.angle")} unit="°" value={textFx.shadow.angle} min={0} max={359} step={5} onCommit={(angle) => setTextEffect({ shadow: { angle } })} />
+                  <Num label={t("format.distance")} unit="pt" value={textFx.shadow.distPt} min={0} max={200} step={0.5} onCommit={(distPt) => setTextEffect({ shadow: { distPt } })} />
                 </>
               )}
             </Section>
