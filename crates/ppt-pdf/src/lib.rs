@@ -390,10 +390,6 @@ impl Canvas for PdfCanvas<'_, '_> {
     }
 
     fn draw_glyph_run(&mut self, run: &GlyphRun) {
-        // Text shadows are not exported yet (see todo.md, "PDF 匯出").
-        if run.shadow {
-            return;
-        }
         let Some(first) = run.glyphs.first() else { return };
         let Some(font) = self.font(run.font) else { return };
         let size = run.size.max(0.01);
@@ -427,7 +423,15 @@ impl Canvas for PdfCanvas<'_, '_> {
         };
         self.surface.push_transform(&transform(run.transform * lean));
         self.surface.set_fill(Some(Fill { paint: rgb.into(), opacity: opacity(a), rule: FillRule::NonZero }));
-        self.surface.set_stroke(run.embolden.map(|w| Stroke { paint: rgb.into(), width: w, opacity: opacity(a), ..Default::default() }));
+        // An outline strokes over the fill; synthetic bold thickens the glyphs in their own color.
+        let stroke = match run.outline {
+            Some((color, width)) => {
+                let (orgb, oa) = rgba(color);
+                Some(Stroke { paint: orgb.into(), width, opacity: opacity(oa), ..Default::default() })
+            }
+            None => run.embolden.map(|w| Stroke { paint: rgb.into(), width: w, opacity: opacity(a), ..Default::default() }),
+        };
+        self.surface.set_stroke(stroke);
         self.surface.draw_glyphs(Point::from_xy(x0, y0), &glyphs, font, run.text, size, false);
         self.surface.set_stroke(None);
         self.surface.pop();
@@ -456,6 +460,33 @@ mod tests {
         assert!(text.contains("/FontFile2") || text.contains("/FontFile3"), "fonts are embedded");
         let all = export_pdf(&pres, &mut cx, PdfOptions { include_hidden: true }).unwrap();
         assert!(all.len() > pdf.len());
+    }
+
+    #[test]
+    fn text_outline_and_shadow_are_exported() {
+        let load = || ppt_ooxml::parse_pptx(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap()).unwrap();
+        let export = |pres: &ppt_model::Presentation| {
+            let mut engine = TextEngine::new(false);
+            engine.register_font(std::fs::read("/System/Library/Fonts/Helvetica.ttc").unwrap());
+            engine.set_fallbacks(vec!["Helvetica".into()]);
+            let mut images = ImageCache::default();
+            let mut cx = RenderCtx { engine: &mut engine, images: &mut images };
+            export_pdf(pres, &mut cx, PdfOptions::default()).unwrap()
+        };
+        let plain = export(&load());
+        let mut styled = load();
+        let mut changed = false;
+        for shape in styled.slides.iter_mut().flat_map(|s| s.shapes.iter_mut()) {
+            for run in shape.text.iter_mut().flat_map(|t| t.paragraphs.iter_mut()).flat_map(|p| p.runs.iter_mut()) {
+                run.style.outline = Some(ppt_model::TextOutline { color: ppt_model::Color::rgb(255, 0, 0), width: 19_050 });
+                run.style.shadow = Some(ppt_model::Shadow { color: ppt_model::Color { r: 0, g: 0, b: 0, a: 128 }, blur: 50_800, dist: 38_100, dir: 45.0 });
+                changed = true;
+            }
+        }
+        assert!(changed, "the sample has text");
+        let with_effects = export(&styled);
+        assert!(with_effects.starts_with(b"%PDF-"));
+        assert!(with_effects.len() > plain.len(), "outlines and shadow copies add drawing operations");
     }
 
     #[test]

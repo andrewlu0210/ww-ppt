@@ -1,5 +1,5 @@
 //! Draws text with outlines and shadows to a PNG, to look at.
-//! `cargo run -p ppt-vr --release --example text_effects -- out.png`
+//! `cargo run -p ppt-vr --release --example text_effects -- out.png` (also writes out.pdf next to it).
 
 use ppt_editor::Editor;
 use ppt_model::{Color, Run, Shadow, TextBody, TextOutline, Xfrm};
@@ -41,5 +41,6 @@ fn main() {
     let pres = e.pres.clone();
     let mut r = SlideRenderer::new().unwrap();
     r.ensure_fonts(pres.font_families());
-    r.render(&pres, &pres.slides[0], 1100).unwrap().save(out).unwrap();
+    r.render(&pres, &pres.slides[0], 1100).unwrap().save(&out).unwrap();
+    std::fs::write(out.with_extension("pdf"), r.export_pdf(&pres).unwrap()).unwrap();
 }
