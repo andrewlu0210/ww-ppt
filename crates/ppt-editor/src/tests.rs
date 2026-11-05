@@ -1925,3 +1925,61 @@ fn the_text_box_settings_are_set_and_an_auto_fit_shape_follows_its_text() {
     assert_eq!(xfrm(&e, id).h, before_h);
     assert!(!e.pres.shape(0, id).unwrap().text.clone().unwrap().auto_grow);
 }
+
+#[test]
+fn text_outline_and_shadow_apply_to_the_selected_text() {
+    let (mut e, id) = editor();
+    let mut eng = engine();
+    e.pres.slides[0].shapes[0].text = Some({
+        let mut b = TextBody::default();
+        b.set_plain_text("abcdef");
+        b
+    });
+    e.selection = vec![id];
+    assert_eq!(e.text_effect_info(), Some(TextEffectInfo { outline: Some(None), shadow: Some(None) }));
+
+    // Touching one detail gives the text the default outline or shadow with that change; one undo step.
+    let undo_len = e.undo.len();
+    let spec = TextEffectSpec { outline: TextOutlineSpec { rgb: Some((255, 0, 0)), width: Some(25_400), ..Default::default() }, shadow: ShadowSpec { blur: Some(127_000), ..Default::default() } };
+    assert!(e.set_text_effect_spec(&mut eng, spec.clone()));
+    assert_eq!(e.undo.len(), undo_len + 1);
+    let style = e.pres.shape(0, id).unwrap().text.as_ref().unwrap().style_at(1);
+    let outline = style.outline.unwrap();
+    assert_eq!((outline.color.r, outline.width), (255, 25_400));
+    assert_eq!(style.shadow.unwrap().blur, 127_000);
+    // The same again is not a step.
+    assert!(!e.set_text_effect_spec(&mut eng, spec));
+    assert_eq!(e.undo.len(), undo_len + 1);
+
+    // Only what the spec names changes, so other text formatting stays.
+    assert!(e.apply_text_style(&mut eng, |s| s.bold = true));
+    assert!(e.set_text_effect_spec(&mut eng, TextEffectSpec { outline: TextOutlineSpec { alpha: Some(100), ..Default::default() }, ..Default::default() }));
+    let style = e.pres.shape(0, id).unwrap().text.as_ref().unwrap().style_at(1);
+    assert!(style.bold && style.outline.unwrap().color.a == 100 && style.shadow.is_some());
+
+    // Undo restores the text without effects.
+    assert!(e.undo(&mut eng) && e.undo(&mut eng) && e.undo(&mut eng));
+    let style = e.pres.shape(0, id).unwrap().text.as_ref().unwrap().style_at(1);
+    assert!(style.outline.is_none() && style.shadow.is_none());
+}
+
+#[test]
+fn text_effects_of_a_text_selection_leave_the_rest_and_report_mixed_values() {
+    let (mut e, id) = editor();
+    let mut eng = engine();
+    e.pres.slides[0].shapes[0].text = Some({
+        let mut b = TextBody::default();
+        b.set_plain_text("abcdef");
+        b
+    });
+    e.selection = vec![id];
+    e.begin_text_edit(&mut eng, id, false);
+    e.text.as_mut().unwrap().rich.select_range(1..3);
+    assert!(e.set_text_effect_spec(&mut eng, TextEffectSpec { shadow: ShadowSpec { visible: Some(true), ..Default::default() }, ..Default::default() }));
+    // The selection has a shadow; widening it to everything shows the values differ.
+    assert!(matches!(e.text_effect_info(), Some(TextEffectInfo { shadow: Some(Some(_)), .. })));
+    e.text.as_mut().unwrap().rich.select_range(0..6);
+    assert_eq!(e.text_effect_info().unwrap().shadow, None);
+    let body = &e.text.as_ref().unwrap().rich.body;
+    assert!(body.style_at(1).shadow.is_none() && body.style_at(2).shadow.is_some() && body.style_at(4).shadow.is_none());
+}

@@ -1553,6 +1553,80 @@ impl App {
         self.touch(changed)
     }
 
+    /// Changes the outline and shadow of the selected text (the selection while editing, else all text
+    /// of the selected shapes); what `spec` leaves out stays. `spec`: `{ outline: { visible, color, alpha,
+    /// widthPt }, shadow: { visible, color, alpha, blurPt, distPt, angle } }`, both parts optional.
+    #[wasm_bindgen(js_name = setTextEffectSpec)]
+    pub fn set_text_effect_spec(&mut self, spec: JsValue) -> bool {
+        let part = |key: &str| Reflect::get(&spec, &key.into()).ok().filter(|v| v.is_object()).unwrap_or(JsValue::UNDEFINED);
+        let (outline, shadow) = (part("outline"), part("shadow"));
+        let pt = |o: &JsValue, key: &str| js_num(o, key).map(|v| (v * EMU_PER_PT).round() as i64);
+        let visible = |o: &JsValue| Reflect::get(o, &"visible".into()).ok().and_then(|v| v.as_bool());
+        let rgb = |o: &JsValue| js_str(o, "color").and_then(|c| parse_hex(&c)).map(|c| (c.r, c.g, c.b));
+        let alpha = |o: &JsValue| js_num(o, "alpha").map(|a| (a.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let spec = ppt_editor::TextEffectSpec {
+            outline: ppt_editor::TextOutlineSpec { visible: visible(&outline), rgb: rgb(&outline), alpha: alpha(&outline), width: pt(&outline, "widthPt") },
+            shadow: ppt_editor::ShadowSpec { visible: visible(&shadow), rgb: rgb(&shadow), alpha: alpha(&shadow), blur: pt(&shadow, "blurPt"), dist: pt(&shadow, "distPt"), dir: js_num(&shadow, "angle") },
+        };
+        let changed = self.editor.set_text_effect_spec(&mut self.engine, spec);
+        self.touch(changed)
+    }
+
+    /// The outline and shadow of the target text, or null without text. `{ outline, shadow }`: each is
+    /// null when the text differs, else `{ visible: false }` or `{ visible: true, color, alpha, ... }`
+    /// (`widthPt` for the outline; `blurPt`, `distPt`, `angle` for the shadow).
+    #[wasm_bindgen(js_name = textEffectInfo)]
+    pub fn text_effect_info(&self) -> JsValue {
+        let Some(info) = self.editor.text_effect_info() else { return JsValue::NULL };
+        let set = |o: &Object, k: &str, v: JsValue| {
+            let _ = Reflect::set(o, &k.into(), &v);
+        };
+        let out = Object::new();
+        set(
+            &out,
+            "outline",
+            match info.outline {
+                None => JsValue::NULL,
+                Some(None) => {
+                    let o = Object::new();
+                    set(&o, "visible", false.into());
+                    o.into()
+                }
+                Some(Some(ol)) => {
+                    let o = Object::new();
+                    set(&o, "visible", true.into());
+                    set(&o, "color", hex(ol.color).into());
+                    set(&o, "alpha", (ol.color.a as f64 / 255.0).into());
+                    set(&o, "widthPt", (ol.width as f64 / EMU_PER_PT).into());
+                    o.into()
+                }
+            },
+        );
+        set(
+            &out,
+            "shadow",
+            match info.shadow {
+                None => JsValue::NULL,
+                Some(None) => {
+                    let o = Object::new();
+                    set(&o, "visible", false.into());
+                    o.into()
+                }
+                Some(Some(sh)) => {
+                    let o = Object::new();
+                    set(&o, "visible", true.into());
+                    set(&o, "color", hex(sh.color).into());
+                    set(&o, "alpha", (sh.color.a as f64 / 255.0).into());
+                    set(&o, "blurPt", (sh.blur as f64 / EMU_PER_PT).into());
+                    set(&o, "distPt", (sh.dist as f64 / EMU_PER_PT).into());
+                    set(&o, "angle", sh.dir.into());
+                    o.into()
+                }
+            },
+        );
+        out.into()
+    }
+
     /// "Lock aspect ratio" for the selection.
     #[wasm_bindgen(js_name = setLockAspect)]
     pub fn set_lock_aspect(&mut self, on: bool) -> bool {

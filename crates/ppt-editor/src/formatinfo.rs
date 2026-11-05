@@ -92,7 +92,7 @@ fn can_shadow(s: &Shape) -> bool {
 }
 
 /// The shadow a shape gets when it is given one without details (PowerPoint's offset diagonal bottom right).
-fn default_shadow() -> Shadow {
+pub(crate) fn default_shadow() -> Shadow {
     Shadow { color: Color { r: 0, g: 0, b: 0, a: 102 }, blur: 50_800, dist: 38_100, dir: 45.0 }
 }
 

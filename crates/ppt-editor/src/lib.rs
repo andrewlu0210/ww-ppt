@@ -22,9 +22,11 @@ mod richedit;
 mod shapeprops;
 mod spell;
 pub use formatinfo::{FillSpec, FormatInfo, LineSpec, ShadowSpec, TextBoxInfo};
+pub use texteffect::{TextEffectInfo, TextEffectSpec, TextOutlineSpec};
 pub use shapeprops::TextBoxSpec;
 pub mod show;
 mod table;
+mod texteffect;
 mod view;
 
 use std::collections::HashMap;
