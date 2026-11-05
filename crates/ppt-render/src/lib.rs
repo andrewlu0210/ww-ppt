@@ -540,16 +540,39 @@ pub fn draw_body_layout(scene: &mut dyn Canvas, layout: &BodyLayout, tf: Affine)
     }
 }
 
+/// The copies of a text shadow to draw, as offsets in points and tints. A blurred shadow is a ring of
+/// translucent copies around the offset position, whose overlap adds up to the shadow's opacity.
+fn shadow_samples(shadow: &ppt_model::Shadow) -> Vec<(f64, f64, PColor)> {
+    let (sin, cos) = shadow.dir.to_radians().sin_cos();
+    let dist = shadow.dist as f64 / ppt_model::EMU_PER_PT;
+    let (dx, dy) = (cos * dist, sin * dist);
+    let radius = shadow.blur as f64 / ppt_model::EMU_PER_PT / 2.0;
+    let tint = |alpha: f64| PColor::from_rgba8(shadow.color.r, shadow.color.g, shadow.color.b, (alpha * 255.0).round().clamp(0.0, 255.0) as u8);
+    let total = shadow.color.a as f64 / 255.0;
+    if radius < 0.25 {
+        return vec![(dx, dy, tint(total))];
+    }
+    const RING: usize = 8;
+    // The centre and the ring overlap at the centre: n copies of opacity `a` give 1 - (1 - a)^n.
+    let each = 1.0 - (1.0 - total).powf(1.0 / (RING as f64 + 1.0));
+    let mut out = vec![(dx, dy, tint(each))];
+    for i in 0..RING {
+        let angle = std::f64::consts::TAU * i as f64 / RING as f64;
+        out.push((dx + radius * angle.cos(), dy + radius * angle.sin(), tint(each)));
+    }
+    out
+}
+
 /// Outline width for synthetic bold, relative to the font size.
 const SYNTHETIC_BOLD: f32 = 0.035;
 
 /// Draws a parley layout built from `text`, whose units are points; `tf` maps points to device space.
-pub fn draw_layout(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str, tf: Affine) {
+pub fn draw_layout(scene: &mut dyn Canvas, layout: &Layout<ppt_text::TextBrush>, text: &str, tf: Affine) {
     draw_layout_lines(scene, layout, text, tf, None);
 }
 
 /// [`draw_layout`], marking where each paragraph after the first starts when `lines` are known.
-fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str, tf: Affine, lines: Option<&[ppt_text::LineInfo]>) {
+fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<ppt_text::TextBrush>, text: &str, tf: Affine, lines: Option<&[ppt_text::LineInfo]>) {
     for (index, line) in layout.lines().enumerate() {
         if index > 0 && lines.and_then(|l| l.get(index)).is_some_and(|l| l.first) {
             scene.mark(Mark::Paragraph);
@@ -559,7 +582,7 @@ fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str,
             let PositionedLayoutItem::GlyphRun(glyph_run) = item else { continue };
             let run = glyph_run.run();
             let style = glyph_run.style();
-            let brush = color(style.brush);
+            let brush = color(style.brush.color);
             let coords: Vec<i16> = run.normalized_coords().iter().map(|c| c.to_bits()).collect();
             // vello applies this in font space (y up), so a positive x-skew leans glyphs to the right.
             let glyph_transform = run.synthesis().skew().map(|angle| Affine::skew((angle as f64).to_radians().tan(), 0.0));
@@ -574,6 +597,29 @@ fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str,
             if ranges.len() != glyphs.len() {
                 ranges = vec![0..0; glyphs.len()];
             }
+            let outline = style.brush.outline.map(|o| (color(o.color), (o.width as f64 / ppt_model::EMU_PER_PT) as f32));
+            // Synthetic bold when the family has no face heavy enough: thicken the outlines.
+            let embolden = run.synthesis().embolden().then_some(run.font_size() * SYNTHETIC_BOLD);
+            // A text shadow is the glyphs again, offset and tinted, drawn first.
+            if let Some(shadow) = style.brush.shadow {
+                let no_ranges = vec![0..0; glyphs.len()];
+                for (dx, dy, tint) in shadow_samples(&shadow) {
+                    scene.draw_glyph_run(&GlyphRun {
+                        font: run.font(),
+                        size: run.font_size(),
+                        coords: &coords,
+                        transform: tf * Affine::translate((dx, dy)),
+                        glyph_transform,
+                        color: tint,
+                        outline: None,
+                        shadow: true,
+                        glyphs: &glyphs,
+                        embolden,
+                        text,
+                        ranges: &no_ranges,
+                    });
+                }
+            }
             scene.draw_glyph_run(&GlyphRun {
                 font: run.font(),
                 size: run.font_size(),
@@ -581,9 +627,10 @@ fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<Color>, text: &str,
                 transform: tf,
                 glyph_transform,
                 color: brush,
+                outline,
+                shadow: false,
                 glyphs: &glyphs,
-                // Synthetic bold when the family has no face heavy enough: thicken the outlines.
-                embolden: run.synthesis().embolden().then_some(run.font_size() * SYNTHETIC_BOLD),
+                embolden,
                 text,
                 ranges: &ranges,
             });

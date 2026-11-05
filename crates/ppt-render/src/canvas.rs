@@ -18,6 +18,11 @@ pub struct GlyphRun<'a> {
     /// Applied in font space (y up), e.g. a skew for synthetic italics.
     pub glyph_transform: Option<Affine>,
     pub color: PColor,
+    /// Outline drawn over the fill: color and width in points (centered on the glyph edge).
+    pub outline: Option<(PColor, f32)>,
+    /// A text-shadow copy: the same glyphs in the shadow color, not text of its own (exports leave
+    /// it out of the selectable text).
+    pub shadow: bool,
     pub glyphs: &'a [vello::Glyph],
     /// Outline width (points) to thicken the glyphs with, for synthetic bold.
     pub embolden: Option<f32>,
@@ -115,6 +120,16 @@ impl Canvas for Scene {
         draw(Fill::NonZero.into());
         if let Some(w) = run.embolden {
             draw((&Stroke::new(w as f64)).into());
+        }
+        if let Some((outline, width)) = run.outline {
+            self.draw_glyphs(run.font)
+                .brush(outline)
+                .hint(false)
+                .transform(run.transform)
+                .glyph_transform(run.glyph_transform)
+                .font_size(run.size)
+                .normalized_coords(run.coords)
+                .draw(&Stroke::new(width as f64), run.glyphs.iter().copied());
         }
     }
 }

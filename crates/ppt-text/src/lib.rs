@@ -13,7 +13,15 @@ use parley::{
     Alignment, AlignmentOptions, BreakReason, FontContext, FontFamily, FontFamilyName, FontStyle, FontWeight, Layout,
     LayoutContext, LineHeight, StyleProperty, VerticalAlign, YieldData,
 };
-use ppt_model::{Align, Bullet as BulletDef, BulletKind, Color, EMU_PER_PT, Emu, Paragraph, RunStyle, Table, TextBody};
+use ppt_model::{Align, Bullet as BulletDef, BulletKind, Color, EMU_PER_PT, Emu, Paragraph, RunStyle, Shadow, Table, TextBody, TextOutline};
+
+/// What a run of glyphs is painted with: its fill color and its text effects.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextBrush {
+    pub color: Color,
+    pub outline: Option<TextOutline>,
+    pub shadow: Option<Shadow>,
+}
 
 pub use parley;
 
@@ -28,7 +36,7 @@ const STRUT_SIZE: f32 = 1.0;
 
 pub struct TextEngine {
     pub font_cx: FontContext,
-    pub layout_cx: LayoutContext<Color>,
+    pub layout_cx: LayoutContext<TextBrush>,
     /// Requested family (lowercase) → registered family to use instead.
     aliases: HashMap<String, String>,
     /// Families appended to every font stack, e.g. a CJK font for missing glyphs.
@@ -89,7 +97,7 @@ impl TextEngine {
     }
 
     /// Style properties shared by view-mode layout and the text editor.
-    pub fn run_properties(&self, style: &RunStyle, font_scale: f32) -> Vec<StyleProperty<'static, Color>> {
+    pub fn run_properties(&self, style: &RunStyle, font_scale: f32) -> Vec<StyleProperty<'static, TextBrush>> {
         let size = style.size_pt * font_scale;
         // Superscripts and subscripts are drawn smaller, shifted by a fraction of the full size.
         let shifted = style.baseline.abs() > 1e-4;
@@ -103,7 +111,7 @@ impl TextEngine {
             StyleProperty::FontStyle(if style.italic { FontStyle::Italic } else { FontStyle::Normal }),
             // Linked text shows in the theme's hyperlink color, underlined, like PowerPoint.
             StyleProperty::Underline(style.underline || style.link.is_some()),
-            StyleProperty::Brush(style.link.as_ref().and_then(|l| l.color).unwrap_or(style.color)),
+            StyleProperty::Brush(TextBrush { color: style.link.as_ref().and_then(|l| l.color).unwrap_or(style.color), outline: style.outline, shadow: style.shadow }),
         ]
     }
 
@@ -123,7 +131,7 @@ impl TextEngine {
         // non-empty body gets a negligible one; an empty body keeps its paragraph's size.
         let strut = if text.is_empty() { first_style.clone() } else { RunStyle { size_pt: STRUT_SIZE, ..first_style.clone() } };
         let default_props = self.run_properties(&strut, 1.0);
-        let mut span_props: Vec<(Range<usize>, Vec<StyleProperty<'static, Color>>)> = Vec::new();
+        let mut span_props: Vec<(Range<usize>, Vec<StyleProperty<'static, TextBrush>>)> = Vec::new();
         for (i, (p, range)) in body.paragraphs.iter().zip(&ranges).enumerate() {
             let line_height = SINGLE_LINE_HEIGHT * p.line_spacing * (1.0 - body.line_spacing_reduction);
             // The paragraph's `\n` (if any) ends its last line: it takes the last run's style
@@ -154,11 +162,11 @@ impl TextEngine {
                 builder.push(prop, range.clone());
             }
         }
-        let mut layout: Layout<Color> = builder.build(&text);
+        let mut layout: Layout<TextBrush> = builder.build(&text);
 
         // Bullets are shaped separately and drawn in the hanging indent.
         let numbers = list_numbers(&body.paragraphs, &ranges);
-        let bullets_shaped: Vec<Option<(Layout<Color>, String)>> = body
+        let bullets_shaped: Vec<Option<(Layout<TextBrush>, String)>> = body
             .paragraphs
             .iter()
             .zip(&ranges)
@@ -247,7 +255,7 @@ impl TextEngine {
 
     /// Shapes item `n`'s bullet: its own font, color and relative size, else the text's.
     /// Also returns the label's text.
-    fn layout_bullet(&mut self, bullet: &BulletDef, n: u32, style: &RunStyle, scale: f32) -> (Layout<Color>, String) {
+    fn layout_bullet(&mut self, bullet: &BulletDef, n: u32, style: &RunStyle, scale: f32) -> (Layout<TextBrush>, String) {
         let (text, font) = bullet.label(n);
         let mut style = RunStyle { size_pt: style.size_pt * bullet.size.unwrap_or(1.0), color: bullet.color.unwrap_or(style.color), ..style.clone() };
         if let Some(font) = font {
@@ -352,7 +360,7 @@ pub struct LineInfo {
 
 #[derive(Clone)]
 pub struct Bullet {
-    pub layout: Layout<Color>,
+    pub layout: Layout<TextBrush>,
     /// The label's text (for text extraction in exports).
     pub text: String,
     /// Offset of the bullet layout's origin in body layout space.
@@ -363,7 +371,7 @@ pub struct Bullet {
 #[derive(Clone)]
 pub struct BodyLayout {
     /// Every paragraph in one layout; coordinates are points.
-    pub layout: Layout<Color>,
+    pub layout: Layout<TextBrush>,
     /// The text the layout was built from.
     pub text: String,
     /// One entry per layout line.

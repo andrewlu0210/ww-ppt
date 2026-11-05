@@ -390,6 +390,10 @@ impl Canvas for PdfCanvas<'_, '_> {
     }
 
     fn draw_glyph_run(&mut self, run: &GlyphRun) {
+        // Text shadows are not exported yet (see todo.md, "PDF 匯出").
+        if run.shadow {
+            return;
+        }
         let Some(first) = run.glyphs.first() else { return };
         let Some(font) = self.font(run.font) else { return };
         let size = run.size.max(0.01);
