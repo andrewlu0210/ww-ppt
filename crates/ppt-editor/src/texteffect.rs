@@ -40,8 +40,8 @@ impl TextEffectSpec {
             s.outline = None;
         } else {
             let wants = o.visible == Some(true) || o.rgb.is_some() || o.alpha.is_some() || o.width.is_some();
-            // A new outline starts in the text's own color, like PowerPoint's default.
-            if let Some(mut outline) = s.outline.or_else(|| wants.then(|| TextOutline { color: s.color, width: TextOutline::DEFAULT_WIDTH })) {
+            // A new outline is the theme blue at 1 pt: in the text's own color it would not show.
+            if let Some(mut outline) = s.outline.or_else(|| wants.then_some(TextOutline { color: Color::rgb(0x44, 0x72, 0xC4), width: 12_700 })) {
                 if let Some((r, g, b)) = o.rgb {
                     outline.color = Color { r, g, b, a: outline.color.a };
                 }
