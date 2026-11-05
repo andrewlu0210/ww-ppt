@@ -23,3 +23,8 @@
 # Any further private sample decks (test7, test8, ...).
 /samples/vr/test*.pptx
 /samples/vr/test*.pdf
+
+# Local secrets (API key for the internal LLM service): never commit
+.env
+.env.*
+!.env.example
