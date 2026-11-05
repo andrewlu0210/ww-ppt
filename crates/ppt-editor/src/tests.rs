@@ -1983,3 +1983,36 @@ fn text_effects_of_a_text_selection_leave_the_rest_and_report_mixed_values() {
     let body = &e.text.as_ref().unwrap().rich.body;
     assert!(body.style_at(1).shadow.is_none() && body.style_at(2).shadow.is_some() && body.style_at(4).shadow.is_none());
 }
+
+#[test]
+fn format_painter_carries_text_outline_and_shadow() {
+    let (mut e, src) = editor();
+    let dst = add_rect(&mut e, 3 * IN, IN);
+    let mut eng = engine();
+    for (i, text) in ["abc", "xyz"].into_iter().enumerate() {
+        e.pres.slides[0].shapes[i].text = Some({
+            let mut b = TextBody::default();
+            b.set_plain_text(text);
+            b
+        });
+    }
+    e.selection = vec![src];
+    assert!(e.set_text_effect_spec(
+        &mut eng,
+        TextEffectSpec { outline: TextOutlineSpec { rgb: Some((0, 128, 0)), width: Some(19_050), ..Default::default() }, shadow: ShadowSpec { visible: Some(true), ..Default::default() } },
+    ));
+    assert!(e.copy_format());
+    e.selection = vec![dst];
+    assert!(e.paste_format(&mut eng));
+    let style = e.pres.shape(0, dst).unwrap().text.as_ref().unwrap().style_at(1);
+    assert_eq!(style.outline.map(|o| (o.color.g, o.width)), Some((128, 19_050)));
+    assert!(style.shadow.is_some());
+    // Painting from text without effects clears them again.
+    e.selection = vec![src];
+    assert!(e.set_text_effect_spec(&mut eng, TextEffectSpec { outline: TextOutlineSpec { visible: Some(false), ..Default::default() }, shadow: ShadowSpec { visible: Some(false), ..Default::default() } }));
+    assert!(e.copy_format());
+    e.selection = vec![dst];
+    assert!(e.paste_format(&mut eng));
+    let style = e.pres.shape(0, dst).unwrap().text.as_ref().unwrap().style_at(1);
+    assert!(style.outline.is_none() && style.shadow.is_none());
+}
