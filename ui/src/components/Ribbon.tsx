@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { icons } from "./icons";
 import { ColorPicker } from "./ColorPicker";
 import { LayoutPicker } from "./LayoutPicker";
@@ -19,7 +19,7 @@ import { LinkPicker } from "./LinkPicker";
 import { focusables, moveFocus, ownsArrows } from "../lib/keyboard";
 import { focusCanvas } from "./CanvasHost";
 import { FONT_SIZES, type Command, type TableStyleInfo } from "../lib/commands";
-import type { AnimationPreset, Status } from "../lib/status";
+import { ribbonStatusEqual, type AnimationPreset, type Status } from "../lib/status";
 
 /** Character spacing presets (points), as PowerPoint names them. */
 const CHAR_SPACINGS: [number, string][] = [
@@ -150,7 +150,7 @@ interface Props {
   onParagraphDialog: () => void;
 }
 
-export function Ribbon({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, hasNarration, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, tabRequest, onFontDialog, onParagraphDialog }: Props) {
+function RibbonImpl({ status, fonts, layoutNames, layoutThumbs, loadLayoutThumbs, run, linkRequest, painter, tableStyles, notesOpen, usePresenter, spellOn, animPresets, onTabChange, shapeIcons, loadHeaderFooter, theme, colorSchemes, fontSchemes, slideSize, loadBackground, viewMode, hasNarration, rulerOn, paneOpen, checkerOpen, textPaneOpen, loadAltText, tabRequest, onFontDialog, onParagraphDialog }: Props) {
   const [chosen, setTab] = useState<Tab>("常用");
   const tab = (isTableTab(chosen) && !status.inTable) || (chosen === PICTURE_TAB && !status.crop) || (chosen === SMARTART_TAB && !status.smartArt) ? "常用" : chosen;
   useEffect(() => onTabChange(tab), [tab, onTabChange]);
@@ -691,6 +691,14 @@ const GRID_SPACINGS = [0.1, 0.2, 0.25, 0.5, 1, 2];
 const EMU_PER_CM = 360_000;
 
 /** 格線及輔助線: spacing, snapping and new guides. */
+/** Redraws only when a prop or a status field the ribbon shows changes. */
+export const Ribbon = memo(RibbonImpl, (a, b) => {
+  for (const k of Object.keys(b) as (keyof Props)[]) {
+    if (k === "status" ? !ribbonStatusEqual(a.status, b.status) : !Object.is(a[k], b[k])) return false;
+  }
+  return true;
+});
+
 function GridMenu({ status, run }: { status: Status; run: (c: Command) => void }) {
   const spacing = (status.gridSpacing ?? 72_000) / EMU_PER_CM;
   return (

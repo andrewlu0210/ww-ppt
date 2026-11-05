@@ -42,7 +42,7 @@ import { cyclePanes } from "./lib/keyboard";
 import { mark, nextFrame, timed } from "./lib/perf";
 import { SHAPES_MARKER, type Command, type TableStyleInfo } from "./lib/commands";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
-import { EMPTY_STATUS, type AnimationPreset, type Status } from "./lib/status";
+import { EMPTY_STATUS, shareStatus, type AnimationPreset, type Status } from "./lib/status";
 import { AnimationBadges } from "./components/AnimationTab";
 import { FindBar, type FindBarHandle } from "./components/FindBar";
 import { SpellMenu, type SpellHit } from "./components/SpellMenu";
@@ -562,12 +562,27 @@ export function App() {
       const engine = engineRef.current;
       if (!engine) return;
       const s = engine.status() as Status;
-      setStatus(s);
+      setStatus((prev) => shareStatus(prev, s));
       if (s.revision !== thumbState.current.revision) scheduleThumbs(false);
     });
   }, [scheduleThumbs]);
 
   refreshRef.current = refresh;
+
+  // Stable callbacks, so the memoized ribbon and slide pane are not redrawn for nothing.
+  const openFontDialog = useCallback(() => setTextDialog("font"), []);
+  const openParagraphDialog = useCallback(() => setTextDialog("paragraph"), []);
+  const loadHeaderFooter = useCallback(() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null, []);
+  const loadBackground = useCallback(() => (engineRef.current?.background() as BackgroundInfo | undefined) ?? null, []);
+  const loadAltText = useCallback(() => (engineRef.current?.altText() as AltTextInfo | null | undefined) ?? null, []);
+  const openSlideMenu = useCallback((index: number | null, x: number, y: number, byKey?: boolean) => setSlideMenu({ x, y, index, byKey }), []);
+  const selectSlide = useCallback(
+    (i: number) => {
+      engineRef.current?.setSlide(i);
+      refresh();
+    },
+    [refresh],
+  );
 
   const findChanged = useCallback(
     (all: boolean) => {
@@ -1628,18 +1643,18 @@ export function App() {
           {dirty && <span className="dirty-dot" title={t("title.unsaved")} />}
         </span>
       </header>
-      <Ribbon onFontDialog={() => setTextDialog("font")} onParagraphDialog={() => setTextDialog("paragraph")} hasNarration={hasNarration} tabRequest={tabRequest} painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={() => (engineRef.current?.headerFooter() as HeaderFooterInfo | undefined) ?? null}
+      <Ribbon onFontDialog={openFontDialog} onParagraphDialog={openParagraphDialog} hasNarration={hasNarration} tabRequest={tabRequest} painter={painter} status={status} fonts={fonts} layoutNames={layoutNames} layoutThumbs={layoutThumbs} loadLayoutThumbs={loadLayoutThumbs} run={run} linkRequest={linkRequest} tableStyles={tableStyles} notesOpen={notesPrefs.open} usePresenter={usePresenter} spellOn={spellOn} animPresets={animPresets} onTabChange={setRibbonTab} shapeIcons={shapeIcons} loadHeaderFooter={loadHeaderFooter}
         theme={theme}
         colorSchemes={schemes.colors}
         fontSchemes={schemes.fonts}
         slideSize={slideSize}
-        loadBackground={() => (engineRef.current?.background() as BackgroundInfo | undefined) ?? null}
+        loadBackground={loadBackground}
         viewMode={viewMode}
         rulerOn={viewPrefs.ruler}
         paneOpen={viewPrefs.pane}
         checkerOpen={viewPrefs.checker}
         textPaneOpen={diagramShown}
-        loadAltText={() => (engineRef.current?.altText() as AltTextInfo | null | undefined) ?? null}
+        loadAltText={loadAltText}
       />
       <main className={["workspace", viewMode === "sorter" && !showing && "sorting", (viewPrefs.pane || viewPrefs.checker || viewPrefs.format || diagramShown) && !showing && "with-pane", viewPrefs.format && !showing && "with-format"].filter(Boolean).join(" ")}>
         {viewMode === "sorter" && !showing && (
@@ -1669,14 +1684,11 @@ export function App() {
           count={status.slideCount}
           transitions={status.transitionSlides}
           hidden={status.hiddenSlides}
-          onContextMenu={(index, x, y, byKey) => setSlideMenu({ x, y, index, byKey })}
+          onContextMenu={openSlideMenu}
           current={status.slideIndex}
           thumbs={thumbs}
           labels={slideLabels}
-          onSelect={(i) => {
-            engineRef.current?.setSlide(i);
-            refresh();
-          }}
+          onSelect={selectSlide}
           run={run}
         />
         <section className={showing ? (reading ? "editor-area showing reading" : "editor-area showing") : "editor-area"}>

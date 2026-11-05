@@ -162,3 +162,38 @@ export const EMPTY_STATUS: Status = {
   selectionName: "",
   hasText: false,
 };
+
+/**
+ * Reuses the previous status object's values where nothing changed, so
+ * memoized components can compare fields by reference. Returns `prev` itself
+ * when every field is unchanged (React then skips the render).
+ */
+export function shareStatus(prev: Status, next: Status): Status {
+  const p = prev as unknown as Record<string, unknown>;
+  const n = next as unknown as Record<string, unknown>;
+  let changed = Object.keys(p).length !== Object.keys(n).length;
+  for (const key of Object.keys(n)) {
+    const a = p[key];
+    const b = n[key];
+    if (a === b) continue;
+    if (typeof b === "object" && b !== null && typeof a === "object" && a !== null && JSON.stringify(a) === JSON.stringify(b)) {
+      n[key] = a;
+    } else {
+      changed = true;
+    }
+  }
+  return changed ? next : prev;
+}
+
+/** Status fields the ribbon never reads: changes to them alone do not redraw it. */
+const RIBBON_IGNORED = new Set(["scroll", "zoom", "zoomPercent", "zoomFit", "frameMs", "sceneMs", "revision", "selectionName", "hiddenSlides", "transitionSlides", "canPasteSlide", "diagramRequests", "diagramFocus", "diagramRange"]);
+
+/** True when two statuses differ in a field the ribbon shows. */
+export function ribbonStatusEqual(a: Status, b: Status): boolean {
+  if (a === b) return true;
+  const x = a as unknown as Record<string, unknown>;
+  const y = b as unknown as Record<string, unknown>;
+  const keys = new Set([...Object.keys(x), ...Object.keys(y)]);
+  for (const k of keys) if (!RIBBON_IGNORED.has(k) && x[k] !== y[k]) return false;
+  return true;
+}

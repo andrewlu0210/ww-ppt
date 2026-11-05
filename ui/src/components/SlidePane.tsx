@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Thumb } from "./Thumb";
 import type { Command } from "../lib/commands";
 import { focusCanvas } from "./CanvasHost";
@@ -21,7 +21,7 @@ interface Props {
 }
 
 /** Slide thumbnails: click to open, drag to reorder, right-click for slide commands. */
-export function SlidePane({ count, current, thumbs, transitions, hidden, onSelect, run, labels, onContextMenu }: Props) {
+function SlidePaneImpl({ count, current, thumbs, transitions, hidden, onSelect, run, labels, onContextMenu }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
 
@@ -158,3 +158,5 @@ export function SlidePane({ count, current, thumbs, transitions, hidden, onSelec
     </nav>
   );
 }
+
+export const SlidePane = memo(SlidePaneImpl);
