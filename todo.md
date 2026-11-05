@@ -73,8 +73,8 @@
       - [x] **引擎與 WASM**：已完成（2026-11-05）。`ppt-editor/src/texteffect.rs`：`TextEffectSpec`（`outline` 與沿用圖形的 `ShadowSpec`）、`set_text_effect_spec`（只改有指定的欄位；沒有變化時不產生復原步驟；走 `apply_text_style`，所以文字編輯中套用在選取範圍、否則套用在選取圖形的全部文字、表格選取範圍的每個儲存格，一步復原）、`text_effect_info`（外框與陰影各自在文字不同時回報「多種值」）。新增外框時預設是主題藍 #4472C4、1 pt（用文字本身的顏色會看不出來），陰影用圖形的預設陰影。WASM：`setTextEffectSpec`（`{ outline: { visible, color, alpha, widthPt }, shadow: { visible, color, alpha, blurPt, distPt, angle } }`）與 `textEffectInfo`。編輯器測試兩個（圖形全部文字、文字編輯中的選取範圍與混合值）。**未做**：`ui/src/wasm` 的繫結檔要等第 8 項重新建置（`npm run wasm`）才會更新。限制：表格選取範圍的狀態只回報第一個儲存格。
       - [x] **複製格式**：已完成（2026-11-05）。`painter.rs` 本來就整份複製 `RunStyle`（只保留目標的連結與欄位），所以外框與陰影不用改程式就會帶上，來源沒有效果時也會清掉目標的；補了測試 `format_painter_carries_text_outline_and_shadow`。
       - [x] **窗格介面**：已完成（2026-11-05），**待實機確認外觀與操作**。`FormatPane.tsx` 新增「文字選項」區段（有可格式化的文字時才出現）：文字外框（無／實線；色彩、透明度、寬度 pt）與文字陰影（無／有；色彩、透明度、模糊、角度、距離），選取文字不一致時顯示「—」與「多種值」提示；每次修改走 `textEffectSpec` 指令，一步復原。文字編輯中的右鍵選單新增「設定文字效果格式…」（和「設定圖形格式…」一樣開啟窗格）。三種語言已補，已重新建置 WASM，`npm run typecheck` 通過。限制：沒有文字填滿的選項（沿用字型色彩）；陰影沒有預設下拉（只有開關與細項）；VoiceOver 沿用窗格現有控制項的標籤。
-      - [ ] **測試**：模型與讀寫往返測試（含繼承、混合值）、編輯器測試（一步復原、只套用有改的欄位）、PDF 輸出測試。
-      - [ ] **PowerPoint 實機驗證**：在 `powerpoint-check-format.md` 補驗證項目與驗證檔（`format_check` 範例加文字外框與陰影），確認 PowerPoint 開啟不報修復、外觀一致；另開 PDF 檢查外框與陰影。
+      - [x] **測試**：已完成（2026-11-05），測試分散在各項：模型（`ppt-model` 依外框與陰影切分 run）、讀檔與繼承（`ppt-ooxml` `style.rs`）、存檔往返（`format_roundtrip` 含關閉）、編輯器（圖形全部文字、文字編輯中的選取範圍、混合值、不重複產生復原步驟、複製格式）、PDF（`text_outline_and_shadow_are_exported`）。
+      - [ ] **PowerPoint 實機驗證**：驗證檔與清單已備好（2026-11-05）。`cargo run -p ppt-vr --release --example format_check -- target/pp-check` 產生的 `format-check.pptx` 新增第 8 張「文字效果」，清單在 `powerpoint-check-format.md` 的「投影片 8」，也含 PDF 與反向（PowerPoint 存檔再讀回）。**待使用者用 PowerPoint 開啟確認**。
       - 限制（先寫明）：沒有文字漸層填滿、反射、光暈、立體；陰影沒有縮放（`sx`／`sy`）。
     - [x] **鎖定的群組**：已完成（2026-11-05）。讀檔時群組的 `grpSpLocks`（noMove＋noResize）讓成員全部視為鎖定；未改動的群組原樣寫回，改動後重寫的群組在成員全鎖定時寫出群組鎖定。**待用 PowerPoint 實機驗證**。
     - [x] **其他區域的右鍵選單**：已完成（2026-11-04）。評估時的現況如下：

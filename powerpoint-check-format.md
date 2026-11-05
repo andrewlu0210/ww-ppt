@@ -10,7 +10,7 @@ cargo run -p ppt-vr --release --example format_check -- target/pp-check
 
 會得到：
 
-- `target/pp-check/format-check.pptx`：7 張投影片，每張一個主題。
+- `target/pp-check/format-check.pptx`：8 張投影片，每張一個主題。
 - `target/pp-check/format-check/NN-主題.png`：本程式畫出來的樣子，用來和 PowerPoint 的畫面對照（看大致排法，不要求像素一致）。
 
 ## 二、先看最重要的一件事：有沒有「修復」
@@ -18,7 +18,7 @@ cargo run -p ppt-vr --release --example format_check -- target/pp-check
 用 PowerPoint 開 `format-check.pptx`。
 
 - [ ] 沒有「PowerPoint 發現內容有問題，要修復嗎？」的提示。
-- [ ] 7 張投影片都在，沒有被刪掉或變空白。
+- [ ] 8 張投影片都在，沒有被刪掉或變空白。
 
 有提示的話，記下是第幾張投影片之後出現、按修復後少了什麼，回報給我。
 
@@ -75,6 +75,19 @@ cargo run -p ppt-vr --release --example format_check -- target/pp-check
 
 - [ ] 6：「設定背景格式」顯示漸層填滿、線性、三色（藍、白、橘）、角度 90°。
 - [ ] 7：放射漸層（中心白、外圈藍）。
+
+### 投影片 8：文字效果（文字外框與陰影）
+
+- [ ] 開啟時沒有「修復」提示。
+- [ ] 1：文字有紅色 2 pt 外框，字色深灰。選取文字，PowerPoint 的「文字外框」顯示紅色、粗細 2 pt。
+- [ ] 2：空心字（字色透明、藍色 1.5 pt 外框）。PowerPoint 裡文字填滿顯示「無填滿」或透明，文字外框為藍色 1.5 pt。
+- [ ] 3：文字陰影，硬邊、偏右下（模糊 0、距離 4 pt、角度 45°）。
+- [ ] 4：文字陰影，模糊 6 pt、向下偏移 5 pt。
+- [ ] 5：外框（橘色 1 pt）加陰影同時存在。
+- [ ] 6：對照組，沒有任何效果。
+- [ ] 旺-Point 畫面與 PowerPoint 的外觀大致一致（旺-Point 的模糊陰影是半透明副本疊出來的近似，差一點可接受）。
+- [ ] 把旺-Point 匯出的 PDF（`cargo run -p ppt-vr --release --example text_effects -- out.png` 也會輸出 `out.pdf`；或用應用程式匯出這份 `format-check.pptx`）打開，外框與陰影都在，文字可選取，選取複製時沒有重複的字。
+- [ ] 反向：在 PowerPoint 裡對另一段文字設「文字外框」與「文字效果 > 陰影」，另存新檔，用旺-Point 開啟，外框與陰影有讀回來（窗格「文字選項」有顯示）。
 
 ## 四、反向：PowerPoint 存檔再讀回
 

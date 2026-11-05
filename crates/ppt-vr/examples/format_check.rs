@@ -4,7 +4,7 @@
 //! `cargo run -p ppt-vr --release --example format_check -- out-dir`
 //! (the checklist is in `powerpoint-check.md`).
 
-use ppt_editor::{Editor, FillSpec, LineSpec, ShadowSpec, TextBoxSpec};
+use ppt_editor::{Editor, FillSpec, LineSpec, ShadowSpec, TextBoxSpec, TextEffectSpec, TextOutlineSpec};
 use ppt_model::{Anchor, Background, Color, Dash, EndKind, Gradient, GradientKind, LineEnd, Paint, Run, Xfrm};
 use ppt_ooxml::{parse_pptx, save_pptx, template_package};
 use ppt_text::TextEngine;
@@ -181,6 +181,29 @@ fn main() {
     shape(&mut e, &mut eng, "rect", (4.2, 2.8, 4.8, 1.6), "背景：放射");
     e.set_fill_spec(FillSpec::Solid(rgba(0x20, 0x20, 0x20, 200)));
     e.set_background(&mut eng, Some(Background::Paint(Paint::Gradient(std::sync::Arc::new(gradient(vec![(0.0, Color::rgb(0xFF, 0xFF, 0xFF)), (1.0, blue)], GradientKind::Path { circle: true, focus: [0.5, 0.5, 0.5, 0.5] }))))));
+
+    // 8. Text outline and shadow (Text Options in the pane).
+    e.add_slide(&mut eng, None);
+    titles.push("文字效果");
+    let effect_cell = |i: usize| (0.6 + (i % 2) as f64 * 6.2, 1.0 + (i / 2) as f64 * 1.9, 5.8, 1.6);
+    let text_effect = |e: &mut Editor, eng: &mut TextEngine, i: usize, label: &str, hollow: bool, spec: TextEffectSpec| {
+        shape(e, eng, "rect", effect_cell(i), label);
+        e.set_fill_spec(FillSpec::Solid(Color::rgb(0xF2, 0xF2, 0xF2)));
+        e.apply_text_style(eng, move |s| {
+            s.size_pt = 32.0;
+            s.bold = true;
+            s.color = if hollow { rgba(0, 0, 0, 0) } else { Color::rgb(0x26, 0x26, 0x26) };
+        });
+        e.set_text_effect_spec(eng, spec);
+    };
+    let outline = |rgb: (u8, u8, u8), width_pt: f64| TextOutlineSpec { visible: Some(true), rgb: Some(rgb), width: Some((width_pt * 12_700.0) as i64), ..Default::default() };
+    let shadow = |blur_pt: f64, dist_pt: f64, angle: f64, alpha: u8| ShadowSpec { visible: Some(true), rgb: Some((0, 0, 0)), alpha: Some(alpha), blur: Some((blur_pt * 12_700.0) as i64), dist: Some((dist_pt * 12_700.0) as i64), dir: Some(angle), ..Default::default() };
+    text_effect(&mut e, &mut eng, 0, "1 外框 紅 2pt", false, TextEffectSpec { outline: outline((0xC0, 0, 0), 2.0), ..Default::default() });
+    text_effect(&mut e, &mut eng, 1, "2 空心字 藍外框", true, TextEffectSpec { outline: outline((0x1F, 0x4E, 0x9C), 1.5), ..Default::default() });
+    text_effect(&mut e, &mut eng, 2, "3 陰影 硬 右下", false, TextEffectSpec { shadow: shadow(0.0, 4.0, 45.0, 160), ..Default::default() });
+    text_effect(&mut e, &mut eng, 3, "4 陰影 模糊 6pt", false, TextEffectSpec { shadow: shadow(6.0, 5.0, 90.0, 140), ..Default::default() });
+    text_effect(&mut e, &mut eng, 4, "5 外框加陰影", false, TextEffectSpec { outline: outline((0xE3, 0x6C, 0x0A), 1.0), shadow: shadow(3.0, 4.0, 45.0, 150) });
+    text_effect(&mut e, &mut eng, 5, "6 對照組", false, TextEffectSpec::default());
 
     let bytes = save_pptx(&e.pres).unwrap();
     std::fs::write(out.join("format-check.pptx"), &bytes).unwrap();
