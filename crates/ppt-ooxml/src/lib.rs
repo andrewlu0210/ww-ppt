@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use package::{Package, REL_NS, Rel};
 use ppt_model::{
-    Access, Background, Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Shadow, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
+    Access, Background, Color, ContainerSource, Crop, CustomPath, Dash, EndKind, Gradient, GradientKind, LineEnd, Link, Paint, Emu, Geometry, Layout as ModelLayout, Line, ParaDefaults, Paragraph, ParsedShape,
     PathCmd, Placeholder, Presentation, Run, RunStyle, Shape, ShapeKind, ShapeSource, Slide, SlideSource, TextBody, Xfrm,
 };
 use ppt_model::table::TableStyle;
@@ -501,8 +501,18 @@ impl Parser<'_> {
                     if name == "grpSp" {
                         // Outer groups overwrite inner ones: members belong to the outermost group.
                         let id = self.pres.alloc_id();
+                        // A locked group (the lock sits on the group itself) locks all its members.
+                        let group_locked = path(n, &["nvGrpSpPr", "cNvPr"]).is_some_and(is_locked);
                         for shape in inner_out.iter_mut() {
                             shape.group = Some(id);
+                            if group_locked {
+                                shape.access.locked = true;
+                                if let Some(s) = &shape.source {
+                                    let mut src = (**s).clone();
+                                    src.parsed.access.locked = true;
+                                    shape.source = Some(Arc::new(src));
+                                }
+                            }
                         }
                     }
                     if let Some(src) = cx.source {
@@ -785,14 +795,7 @@ impl Parser<'_> {
             text,
             placeholder,
             group: None,
-            shadow: sp_pr.and_then(|p| path(p, &["effectLst", "outerShdw"])).and_then(|s| {
-                Some(Shadow {
-                    color: ctx.color_in(s, None)?,
-                    blur: attr_i64(s, "blurRad").unwrap_or(0),
-                    dist: attr_i64(s, "dist").unwrap_or(0),
-                    dir: attr_f64(s, "dir").unwrap_or(0.0) / 60_000.0,
-                })
-            }),
+            shadow: sp_pr.and_then(|p| path(p, &["effectLst", "outerShdw"])).and_then(|s| style::outer_shadow(s, ctx)),
             access: access(c_nv_pr),
             source: None,
         };
@@ -1213,6 +1216,8 @@ fn run_style(s: &LevelStyle, theme: &Theme) -> RunStyle {
         baseline: s.baseline.unwrap_or(0.0),
         spacing_pt: s.spacing.unwrap_or(0.0),
         color: s.color.unwrap_or(Color::BLACK),
+        outline: s.outline.flatten(),
+        shadow: s.shadow.flatten(),
         latin_font: theme.resolve_typeface(s.latin.as_deref().unwrap_or("+mn-lt")),
         ea_font: theme.resolve_typeface(s.ea.as_deref().unwrap_or("+mn-ea")),
         link: None,

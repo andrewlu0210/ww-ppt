@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use ppt_model::{Align, Anchor, Bullet, BulletKind, Color, Emu};
+use ppt_model::{Align, Anchor, Bullet, BulletKind, Color, Emu, Shadow, TextOutline};
+
+use crate::{FillSpecColor, fill_spec};
 use roxmltree::Node;
 
 pub(crate) fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
@@ -245,6 +247,26 @@ fn hsl_to_rgb(h: f64, s: f64, l: f64) -> Color {
     Color::rgb(to(hue(h + 1.0 / 3.0)), to(hue(h)), to(hue(h - 1.0 / 3.0)))
 }
 
+/// A text outline (`a:rPr/a:ln`): `Some(None)` when it is switched off, `None` when it says nothing
+/// about the color (so the level above decides).
+fn text_outline(ln: Node, ctx: &ColorCtx) -> Option<Option<TextOutline>> {
+    match fill_spec(ln, ctx).color() {
+        FillSpecColor::Solid(color) => Some(Some(TextOutline { color, width: attr_i64(ln, "w").unwrap_or(TextOutline::DEFAULT_WIDTH) })),
+        FillSpecColor::None => Some(None),
+        FillSpecColor::Unset => None,
+    }
+}
+
+/// `a:outerShdw` as a [`Shadow`] (shapes and text share it).
+pub(crate) fn outer_shadow(s: Node, ctx: &ColorCtx) -> Option<Shadow> {
+    Some(Shadow {
+        color: ctx.color_in(s, None)?,
+        blur: attr_i64(s, "blurRad").unwrap_or(0),
+        dist: attr_i64(s, "dist").unwrap_or(0),
+        dir: attr_f64(s, "dir").unwrap_or(0.0) / 60_000.0,
+    })
+}
+
 /// Partially specified paragraph/run properties for one list level.
 /// Resolved by layering: slide → layout → master → defaults.
 #[derive(Clone, Debug, Default)]
@@ -257,6 +279,10 @@ pub struct LevelStyle {
     pub baseline: Option<f32>,
     pub spacing: Option<f32>,
     pub color: Option<Color>,
+    /// `Some(None)` is an explicit "no outline" (`a:ln` with `a:noFill`).
+    pub outline: Option<Option<TextOutline>>,
+    /// `Some(None)` is an explicit "no shadow" (an `a:effectLst` without `a:outerShdw`).
+    pub shadow: Option<Option<Shadow>>,
     pub latin: Option<String>,
     pub ea: Option<String>,
     pub align: Option<Align>,
@@ -303,7 +329,7 @@ impl LevelStyle {
         macro_rules! take {
             ($($f:ident),*) => { $( if self.$f.is_none() { self.$f = fallback.$f.clone(); } )* };
         }
-        take!(size, bold, italic, underline, strike, baseline, spacing, color, latin, ea, align, line_spacing, bu_kind, bu_font, bu_color, bu_size, mar_l, indent, space_before, space_after);
+        take!(size, bold, italic, underline, strike, baseline, spacing, color, outline, shadow, latin, ea, align, line_spacing, bu_kind, bu_font, bu_color, bu_size, mar_l, indent, space_before, space_after);
         self
     }
 
@@ -327,6 +353,8 @@ impl LevelStyle {
             color: child(n, "solidFill")
                 .and_then(|f| ctx.color_in(f, None))
                 .or_else(|| path(n, &["gradFill", "gsLst", "gs"]).and_then(|gs| ctx.color_in(gs, None))),
+            outline: child(n, "ln").and_then(|l| text_outline(l, ctx)),
+            shadow: child(n, "effectLst").map(|e| child(e, "outerShdw").and_then(|s| outer_shadow(s, ctx))),
             latin: child(n, "latin").and_then(|f| f.attribute("typeface")).map(str::to_string),
             ea: child(n, "ea").and_then(|f| f.attribute("typeface")).map(str::to_string),
             ..Default::default()
@@ -466,5 +494,35 @@ mod tests {
         assert!((light.r as i32 - expect.r as i32).abs() <= 2 && (light.b as i32 - expect.b as i32).abs() <= 2, "{light:?}");
         let half = color(r#"<f><srgbClr val="FF0000"><alpha val="50000"/></srgbClr></f>"#).unwrap();
         assert_eq!(half.a, 128);
+    }
+
+    fn rpr(xml: &str) -> LevelStyle {
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        LevelStyle::parse_rpr(doc.root_element(), &ctx())
+    }
+
+    #[test]
+    fn text_outline_and_shadow_are_read_and_inherited() {
+        let own = rpr(r#"<rPr><a:ln xmlns:a="x" w="19050"><a:solidFill><a:srgbClr val="FF0000"><a:alpha val="50000"/></a:srgbClr></a:solidFill></a:ln><a:effectLst xmlns:a="x"><a:outerShdw blurRad="50800" dist="38100" dir="2700000"><a:srgbClr val="000000"><a:alpha val="40000"/></a:srgbClr></a:outerShdw></a:effectLst></rPr>"#);
+        let outline = own.outline.unwrap().unwrap();
+        assert_eq!((outline.width, outline.color.r, outline.color.a), (19050, 255, 128));
+        let shadow = own.shadow.unwrap().unwrap();
+        assert_eq!((shadow.blur, shadow.dist, shadow.dir), (50800, 38100, 45.0));
+
+        // A missing width uses PowerPoint's default.
+        let default_width = rpr(r#"<rPr><a:ln xmlns:a="x"><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:ln></rPr>"#);
+        assert_eq!(default_width.outline.unwrap().unwrap().width, TextOutline::DEFAULT_WIDTH);
+
+        // Nothing said: the level above decides.
+        let plain = rpr(r#"<rPr sz="1800"/>"#);
+        assert!(plain.outline.is_none() && plain.shadow.is_none());
+        let inherited = plain.clone().or(&own);
+        assert_eq!(inherited.outline, own.outline);
+        assert_eq!(inherited.shadow, own.shadow);
+
+        // Switched off explicitly: overrides the level above.
+        let off = rpr(r#"<rPr><a:ln xmlns:a="x"><a:noFill/></a:ln><a:effectLst xmlns:a="x"/></rPr>"#).or(&own);
+        assert_eq!(off.outline, Some(None));
+        assert_eq!(off.shadow, Some(None));
     }
 }

@@ -258,9 +258,22 @@ fn rpr_xml(tag: &str, s: &RunStyle, base: &RunStyle, text: &str, links: &mut Lin
         attrs.push_str(&format!(r#" baseline="{}""#, (s.baseline * 100_000.0).round() as i64));
     }
     attrs.push_str(r#" dirty="0""#);
+    // Schema order: ln, fill, effectLst, ..., latin, ea, ..., hlinkClick.
     let mut kids = String::new();
+    if s.outline != base.outline {
+        kids.push_str(&match &s.outline {
+            Some(o) => format!(r#"<a:ln w="{}"><a:solidFill>{}</a:solidFill></a:ln>"#, o.width.max(0), color_xml(o.color)),
+            None => "<a:ln><a:noFill/></a:ln>".to_string(),
+        });
+    }
     if s.color != base.color {
         kids.push_str(&format!("<a:solidFill>{}</a:solidFill>", color_xml(s.color)));
+    }
+    if s.shadow != base.shadow {
+        kids.push_str(&match &s.shadow {
+            Some(sh) => format!("<a:effectLst>{}</a:effectLst>", shadow_xml(sh)),
+            None => "<a:effectLst/>".to_string(),
+        });
     }
     if s.latin_font != base.latin_font && !s.latin_font.is_empty() {
         kids.push_str(&format!(r#"<a:latin typeface="{}"/>"#, esc(&s.latin_font)));
@@ -1304,8 +1317,11 @@ fn group_xml(members: &[Shape], out: &mut SlideOut) -> String {
     }
     let inner: String = members.iter().map(|s| shape_xml(s, out)).collect();
     let group = ppt_model::lang().pick("群組", "组合", "Group");
+    // A group whose members are all locked is saved locked itself, as PowerPoint does.
+    let locks = locks_xml("grpSpLocks", "", members.iter().all(|s| s.access.locked));
+    let c_nv_grp = if locks.is_empty() { "<p:cNvGrpSpPr/>".to_string() } else { format!("<p:cNvGrpSpPr>{locks}</p:cNvGrpSpPr>") };
     format!(
-        r#"<p:grpSp><p:nvGrpSpPr><p:cNvPr id="{id}" name="{group} {id}"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="{x0}" y="{y0}"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="{x0}" y="{y0}"/><a:chExt cx="{w}" cy="{h}"/></a:xfrm></p:grpSpPr>{inner}</p:grpSp>"#
+        r#"<p:grpSp><p:nvGrpSpPr><p:cNvPr id="{id}" name="{group} {id}"/>{c_nv_grp}<p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="{x0}" y="{y0}"/><a:ext cx="{w}" cy="{h}"/><a:chOff x="{x0}" y="{y0}"/><a:chExt cx="{w}" cy="{h}"/></a:xfrm></p:grpSpPr>{inner}</p:grpSp>"#
     )
 }
 

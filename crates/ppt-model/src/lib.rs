@@ -341,6 +341,20 @@ pub enum Align {
     Justify,
 }
 
+/// An outline drawn around the glyphs of a run (`a:rPr/a:ln`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextOutline {
+    /// The outline color; its alpha is the outline's opacity.
+    pub color: Color,
+    /// Line width, in EMU.
+    pub width: Emu,
+}
+
+impl TextOutline {
+    /// PowerPoint's default outline width when `a:ln` has no `w` (0.75 pt).
+    pub const DEFAULT_WIDTH: Emu = 9_525;
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunStyle {
     pub size_pt: f32,
@@ -354,6 +368,10 @@ pub struct RunStyle {
     /// Extra space between characters, in points (`spc`).
     pub spacing_pt: f32,
     pub color: Color,
+    /// Text outline (`a:rPr/a:ln`); `None` for no outline.
+    pub outline: Option<TextOutline>,
+    /// Text shadow (`a:rPr/a:effectLst/a:outerShdw`); `None` for no shadow.
+    pub shadow: Option<Shadow>,
     /// Resolved latin typeface (theme references like `+mn-lt` are already expanded).
     pub latin_font: String,
     /// Resolved East Asian typeface; may be empty.
@@ -438,6 +456,8 @@ impl Default for RunStyle {
             baseline: 0.0,
             spacing_pt: 0.0,
             color: Color::BLACK,
+            outline: None,
+            shadow: None,
             latin_font: "Calibri".to_string(),
             ea_font: String::new(),
             link: None,

@@ -126,3 +126,45 @@ fn a_gradient_background_with_several_stops_round_trips() {
     assert_eq!(g.stops[1].1, Color::rgb(0x2E, 0x75, 0xB6));
     assert!(matches!(g.kind, GradientKind::Linear { angle, .. } if (angle - 90.0).abs() < 0.01));
 }
+
+#[test]
+fn text_outline_and_shadow_round_trip() {
+    use ppt_model::TextOutline;
+    let mut pres = deck();
+    let first_text = |pres: &ppt_model::Presentation| {
+        pres.slides.iter().flat_map(|s| &s.shapes).find(|s| matches!(s.kind, ShapeKind::Shape) && s.text.as_ref().is_some_and(|t| t.paragraphs.iter().any(|p| p.runs.iter().any(|r| !r.text.is_empty())))).map(|s| s.name.clone()).expect("a shape with text")
+    };
+    let name = first_text(&pres);
+    let outline = TextOutline { color: Color { r: 200, g: 30, b: 60, a: 180 }, width: 19_050 };
+    let shadow = Shadow { color: Color { r: 0, g: 0, b: 0, a: 100 }, blur: 63_500, dist: 38_100, dir: 90.0 };
+    for slide in &mut pres.slides {
+        for s in slide.shapes.iter_mut().filter(|s| s.name == name) {
+            let run = s.text.as_mut().unwrap().paragraphs.iter_mut().flat_map(|p| p.runs.iter_mut()).find(|r| !r.text.is_empty()).unwrap();
+            run.style.outline = Some(outline);
+            run.style.shadow = Some(shadow);
+        }
+    }
+    let again = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
+    let run = |pres: &ppt_model::Presentation| find(pres, &name).text.as_ref().unwrap().paragraphs.iter().flat_map(|p| p.runs.clone()).find(|r| !r.text.is_empty()).unwrap();
+    let got = run(&again).style;
+    let o = got.outline.expect("the outline survives saving");
+    assert_eq!((o.width, o.color.r, o.color.g, o.color.b), (19_050, 200, 30, 60));
+    assert!(o.color.a.abs_diff(180) <= 1);
+    let sh = got.shadow.expect("the shadow survives saving");
+    assert_eq!((sh.blur, sh.dist), (63_500, 38_100));
+    assert!((sh.dir - 90.0).abs() < 0.01 && sh.color.a.abs_diff(100) <= 1);
+
+    // Switching them off again is saved as well.
+    let mut cleared = again.clone();
+    for slide in &mut cleared.slides {
+        for s in slide.shapes.iter_mut().filter(|s| s.name == name) {
+            for r in s.text.as_mut().unwrap().paragraphs.iter_mut().flat_map(|p| p.runs.iter_mut()) {
+                r.style.outline = None;
+                r.style.shadow = None;
+            }
+        }
+    }
+    let third = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&cleared).unwrap()).unwrap();
+    let style = run(&third).style;
+    assert!(style.outline.is_none() && style.shadow.is_none());
+}

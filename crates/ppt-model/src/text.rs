@@ -379,6 +379,30 @@ mod tests {
     }
 
     #[test]
+    fn outline_and_shadow_are_run_formatting() {
+        let outline = crate::TextOutline { color: crate::Color::rgb(255, 0, 0), width: crate::TextOutline::DEFAULT_WIDTH };
+        let shadow = crate::Shadow { color: crate::Color { r: 0, g: 0, b: 0, a: 128 }, blur: 38_100, dist: 38_100, dir: 45.0 };
+        assert!(RunStyle::default().outline.is_none() && RunStyle::default().shadow.is_none());
+
+        let mut b = body("abcdef");
+        b.apply_style(1..3, |s| s.outline = Some(outline));
+        b.apply_style(2..5, |s| s.shadow = Some(shadow));
+        // Runs split where either effect starts or stops.
+        assert_eq!(b.paragraphs[0].runs.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(), ["a", "b", "c", "de", "f"]);
+        // `style_at` reports the character before the caret.
+        assert_eq!(b.style_at(2).outline, Some(outline));
+        assert_eq!(b.style_at(4).shadow, Some(shadow));
+        assert_eq!(b.style_at(1).outline, None);
+
+        // Clearing them merges the runs back.
+        b.apply_style(0..6, |s| {
+            s.outline = None;
+            s.shadow = None;
+        });
+        assert_eq!(b.paragraphs[0].runs.len(), 1);
+    }
+
+    #[test]
     fn style_at_empty_paragraph_uses_end_style() {
         let mut b = body("a\n");
         b.paragraphs[1].end_style.size_pt = 40.0;

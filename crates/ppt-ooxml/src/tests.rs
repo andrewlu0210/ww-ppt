@@ -3,7 +3,7 @@ use std::io::{Cursor, Write};
 use ppt_model::{Align, Anchor, Color, ShapeKind};
 use zip::write::{SimpleFileOptions, ZipWriter};
 
-use super::parse_pptx;
+use super::{parse_pptx, save_pptx};
 
 const NS: &str = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main""#;
 
@@ -20,6 +20,13 @@ fn rels(entries: &[(&str, &str, &str)]) -> String {
 /// A minimal deck exercising theme colors, placeholder inheritance, shape
 /// styles and groups.
 fn sample_pptx() -> Vec<u8> {
+    sample_pptx_with_group_locks("")
+}
+
+/// The sample deck with `locks` inside the group's `p:cNvGrpSpPr`.
+fn sample_pptx_with_group_locks(locks: &str) -> Vec<u8> {
+    // A one-member group is not saved as a group, so the locked variant gets a second member.
+    let second = if locks.is_empty() { "" } else { r#"<p:sp><p:nvSpPr><p:cNvPr id="7" name="Child2"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="50" cy="50"/></a:xfrm><a:prstGeom prst="rect"/></p:spPr></p:sp>"# };
     let theme = format!(
         r#"<a:theme {NS}><a:themeElements>
             <a:clrScheme name="t"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
@@ -60,10 +67,11 @@ fn sample_pptx() -> Vec<u8> {
               <p:style><a:lnRef idx="2"><a:schemeClr val="accent1"><a:shade val="50000"/></a:schemeClr></a:lnRef><a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef>
                 <a:effectRef idx="0"><a:schemeClr val="accent1"/></a:effectRef><a:fontRef idx="minor"><a:schemeClr val="lt1"/></a:fontRef></p:style>
               <p:txBody><a:bodyPr anchor="ctr"/><a:p><a:pPr algn="ctr"/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:rPr b="1" sz="1200"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:rPr><a:t>B</a:t></a:r></a:p></p:txBody></p:sp>
-            <p:grpSp><p:nvGrpSpPr><p:cNvPr id="4" name="Group"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+            <p:grpSp><p:nvGrpSpPr><p:cNvPr id="4" name="Group"/><p:cNvGrpSpPr>{locks}</p:cNvGrpSpPr><p:nvPr/></p:nvGrpSpPr>
               <p:grpSpPr><a:xfrm><a:off x="1000" y="1000"/><a:ext cx="200" cy="200"/><a:chOff x="0" y="0"/><a:chExt cx="100" cy="100"/></a:xfrm></p:grpSpPr>
               <p:sp><p:nvSpPr><p:cNvPr id="5" name="Child"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
                 <p:spPr><a:xfrm><a:off x="50" y="0"/><a:ext cx="50" cy="50"/></a:xfrm><a:prstGeom prst="ellipse"/><a:noFill/><a:ln w="25400"><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:ln></p:spPr></p:sp>
+              {second}
             </p:grpSp>
             <p:pic><p:nvPicPr><p:cNvPr id="6" name="Pic"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
               <p:blipFill><a:blip r:embed="rId2"/></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="10" cy="10"/></a:xfrm></p:spPr></p:pic>
@@ -74,7 +82,9 @@ fn sample_pptx() -> Vec<u8> {
           <p:defaultTextStyle><a:lvl1pPr><a:defRPr sz="1800"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:defRPr></a:lvl1pPr></p:defaultTextStyle></p:presentation>"#
     );
 
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/></Types>"#.to_string();
     let parts: Vec<(&str, String)> = vec![
+        ("[Content_Types].xml", content_types),
         ("_rels/.rels", rels(&[("rId1", "officeDocument", "ppt/presentation.xml")])),
         ("ppt/presentation.xml", presentation),
         ("ppt/_rels/presentation.xml.rels", rels(&[("rId2", "slide", "slides/slide1.xml")])),
@@ -163,6 +173,31 @@ fn groups_are_flattened_with_child_transform() {
     assert_eq!((child.xfrm.x, child.xfrm.y, child.xfrm.w, child.xfrm.h), (1100, 1000, 100, 100));
     assert_eq!(child.fill, None);
     assert_eq!(child.line.unwrap().color, Color::rgb(0, 255, 0));
+}
+
+#[test]
+fn locked_group_locks_its_members_and_round_trips() {
+    const LOCKED: &str = r#"<a:grpSpLocks noGrp="1" noRot="1" noMove="1" noResize="1"/>"#;
+    let pres = parse_pptx(&sample_pptx_with_group_locks(LOCKED)).unwrap();
+    assert!(pres.slides[0].shapes[2].access.locked, "a locked group locks its members");
+    assert!(!pres.slides[0].shapes[1].access.locked);
+    assert!(!parse_pptx(&sample_pptx()).unwrap().slides[0].shapes[2].access.locked);
+
+    // Untouched, the lock survives saving.
+    let again = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
+    assert!(again.slides[0].shapes[2].access.locked);
+
+    // A changed locked group is rewritten and still locked.
+    let mut edited = pres.clone();
+    edited.slides[0].shapes[2].line = None;
+    let again = parse_pptx(&save_pptx(&edited).unwrap()).unwrap();
+    assert!(again.slides[0].shapes[2].access.locked);
+
+    // Unlocking the members drops the group's lock.
+    let mut unlocked = pres.clone();
+    unlocked.slides[0].shapes[2].access.locked = false;
+    let again = parse_pptx(&save_pptx(&unlocked).unwrap()).unwrap();
+    assert!(!again.slides[0].shapes[2].access.locked);
 }
 
 #[test]
