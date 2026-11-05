@@ -267,7 +267,8 @@ fn rpr_xml(tag: &str, s: &RunStyle, base: &RunStyle, text: &str, links: &mut Lin
         });
     }
     if s.color != base.color {
-        kids.push_str(&format!("<a:solidFill>{}</a:solidFill>", color_xml(s.color)));
+        // Fully transparent text is PowerPoint's "no fill".
+        kids.push_str(&if s.color.a == 0 { "<a:noFill/>".to_string() } else { format!("<a:solidFill>{}</a:solidFill>", color_xml(s.color)) });
     }
     if s.shadow != base.shadow {
         kids.push_str(&match &s.shadow {

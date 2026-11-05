@@ -352,7 +352,9 @@ impl LevelStyle {
             // Gradient text is approximated by its first stop for now.
             color: child(n, "solidFill")
                 .and_then(|f| ctx.color_in(f, None))
-                .or_else(|| path(n, &["gradFill", "gsLst", "gs"]).and_then(|gs| ctx.color_in(gs, None))),
+                .or_else(|| path(n, &["gradFill", "gsLst", "gs"]).and_then(|gs| ctx.color_in(gs, None)))
+                // No fill (hollow text, usually with an outline) is a fully transparent color.
+                .or_else(|| child(n, "noFill").map(|_| Color { r: 0, g: 0, b: 0, a: 0 })),
             outline: child(n, "ln").and_then(|l| text_outline(l, ctx)),
             shadow: child(n, "effectLst").map(|e| child(e, "outerShdw").and_then(|s| outer_shadow(s, ctx))),
             latin: child(n, "latin").and_then(|f| f.attribute("typeface")).map(str::to_string),
@@ -519,6 +521,9 @@ mod tests {
         let inherited = plain.clone().or(&own);
         assert_eq!(inherited.outline, own.outline);
         assert_eq!(inherited.shadow, own.shadow);
+
+        // "No fill" reads as transparent text.
+        assert_eq!(rpr(r#"<rPr><a:noFill xmlns:a="x"/></rPr>"#).color.map(|c| c.a), Some(0));
 
         // Switched off explicitly: overrides the level above.
         let off = rpr(r#"<rPr><a:ln xmlns:a="x"><a:noFill/></a:ln><a:effectLst xmlns:a="x"/></rPr>"#).or(&own);

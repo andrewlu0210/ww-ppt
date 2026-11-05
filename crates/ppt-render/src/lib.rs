@@ -602,6 +602,7 @@ fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<ppt_text::TextBrush
             let embolden = run.synthesis().embolden().then_some(run.font_size() * SYNTHETIC_BOLD);
             // A text shadow is the glyphs again, offset and tinted, drawn first.
             if let Some(shadow) = style.brush.shadow {
+                let hollow = style.brush.color.a == 0 && outline.is_some();
                 let no_ranges = vec![0..0; glyphs.len()];
                 for (dx, dy, tint) in shadow_samples(&shadow) {
                     scene.draw_glyph_run(&GlyphRun {
@@ -610,8 +611,9 @@ fn draw_layout_lines(scene: &mut dyn Canvas, layout: &Layout<ppt_text::TextBrush
                         coords: &coords,
                         transform: tf * Affine::translate((dx, dy)),
                         glyph_transform,
-                        color: tint,
-                        outline: None,
+                        // Hollow text casts a hollow shadow: only the outline's shape.
+                        color: if hollow { PColor::from_rgba8(0, 0, 0, 0) } else { tint },
+                        outline: if hollow { outline.map(|(_, width)| (tint, width)) } else { None },
                         shadow: true,
                         glyphs: &glyphs,
                         embolden,

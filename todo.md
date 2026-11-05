@@ -75,6 +75,7 @@
       - [x] **窗格介面**：已完成（2026-11-05），**待實機確認外觀與操作**。`FormatPane.tsx` 新增「文字選項」區段（有可格式化的文字時才出現）：文字外框（無／實線；色彩、透明度、寬度 pt）與文字陰影（無／有；色彩、透明度、模糊、角度、距離），選取文字不一致時顯示「—」與「多種值」提示；每次修改走 `textEffectSpec` 指令，一步復原。文字編輯中的右鍵選單新增「設定文字效果格式…」（和「設定圖形格式…」一樣開啟窗格）。三種語言已補，已重新建置 WASM，`npm run typecheck` 通過。限制：沒有文字填滿的選項（沿用字型色彩）；陰影沒有預設下拉（只有開關與細項）；VoiceOver 沿用窗格現有控制項的標籤。
       - [x] **測試**：已完成（2026-11-05），測試分散在各項：模型（`ppt-model` 依外框與陰影切分 run）、讀檔與繼承（`ppt-ooxml` `style.rs`）、存檔往返（`format_roundtrip` 含關閉）、編輯器（圖形全部文字、文字編輯中的選取範圍、混合值、不重複產生復原步驟、複製格式）、PDF（`text_outline_and_shadow_are_exported`）。
       - [ ] **PowerPoint 實機驗證**：驗證檔與清單已備好（2026-11-05）。`cargo run -p ppt-vr --release --example format_check -- target/pp-check` 產生的 `format-check.pptx` 新增第 8 張「文字效果」，清單在 `powerpoint-check-format.md` 的「投影片 8」，也含 PDF 與反向（PowerPoint 存檔再讀回）。**待使用者用 PowerPoint 開啟確認**。
+      - 修正（2026-11-05）：使用者用 PowerPoint 做的 `samples/vr/test18.pptx`（空心字加外框與陰影）原本顯示成實心字：`a:rPr` 直接帶 `a:noFill` 沒被讀到。現在讀成完全透明的字色（寫回時輸出 `a:noFill`），空心字的陰影只畫外框形狀。
       - 限制（先寫明）：沒有文字漸層填滿、反射、光暈、立體；陰影沒有縮放（`sx`／`sy`）。
     - [x] **鎖定的群組**：已完成（2026-11-05）。讀檔時群組的 `grpSpLocks`（noMove＋noResize）讓成員全部視為鎖定；未改動的群組原樣寫回，改動後重寫的群組在成員全鎖定時寫出群組鎖定。**待用 PowerPoint 實機驗證**。
     - [x] **其他區域的右鍵選單**：已完成（2026-11-04）。評估時的現況如下：
