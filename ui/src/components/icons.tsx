@@ -448,8 +448,11 @@ export const icons: Record<string, ReactNode> = {
   ),
   formatPainter: (
     <Svg>
-      <path d="M20 4l-7.5 7.5" />
-      <path d="M10.5 9.5l4 4c-.8 3.2-3.2 5-8.5 5 1.8-1.7 1.2-3.7 2.2-5.2z" />
+      {/* Paint brush: white handle, gray ferrule, wide orange bristles (like the Office format painter). */}
+      <path d="M20.5 3.5L12.5 11.5" strokeWidth="4.4" />
+      <path d="M20.5 3.5L12.5 11.5" stroke="#f5f5f5" strokeWidth="2.6" />
+      <path d="M11.2 11.2l1.6 1.6" stroke="#8a9099" strokeWidth="3" strokeLinecap="butt" />
+      <path d="M9 9l6 6-5.7 5.7-6-6z" fill="#f4a21d" stroke="#d9780a" strokeWidth="1" />
     </Svg>
   ),
   copy: (
