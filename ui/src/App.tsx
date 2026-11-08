@@ -860,7 +860,12 @@ export function App() {
       // Recording narration plays nothing (the microphone would hear it).
       if (!recorderRef.current) {
         const [w, h] = Array.from(engine.slideSize());
-        const media = new ShowMedia(engine, domSlideBox(w / Math.max(1, h)));
+        // What the viewer does to a video here (pause, play, seek) is told to the audience window too.
+        const media = new ShowMedia(engine, domSlideBox(w / Math.max(1, h)), {
+          audio: true,
+          muted: false,
+          onControl: (m) => void emitTo(AUDIENCE_LABEL, "show-media", m).catch(() => {}),
+        });
         showMediaRef.current = media.any ? media : null;
       }
       setReading(inWindow);

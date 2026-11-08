@@ -3136,3 +3136,8 @@ select.para-input {
 .media-controls input[type="range"] {
   accent-color: #fff;
 }
+
+/* The same bar over a video in a slide show: appears when the pointer is over the video. */
+.show-media-controls {
+  z-index: 2;
+}

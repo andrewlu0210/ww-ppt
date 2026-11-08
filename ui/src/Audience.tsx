@@ -6,7 +6,7 @@ import { lang } from "./i18n";
 import { SlideShow } from "./components/SlideShow";
 import { EMOJI_FAMILY, ensureFonts, FALLBACK_FAMILIES } from "./lib/fonts";
 import type { ShowCommand, ShowState } from "./lib/show";
-import { domSlideBox, ShowMedia } from "./lib/showMedia";
+import { domSlideBox, ShowMedia, type ControlMsg } from "./lib/showMedia";
 
 /**
  * Root of the audience window: the slides full screen on the second display.
@@ -66,6 +66,9 @@ export function Audience() {
         void invoke("automation_log", { line: `audience ${JSON.stringify(e.payload)}` });
       });
       cleanups.push(unlisten);
+      // The main window's viewer paused, played or moved a video: this window follows.
+      const unmedia = await listen<ControlMsg>("show-media", (e) => media.apply(e.payload));
+      cleanups.push(unmedia);
       const unshot = await listen<string>("audience-shot", async (e) => {
         app.invalidate();
         app.render();

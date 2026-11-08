@@ -223,10 +223,15 @@ async function step(cmd: string, h: Hooks) {
       layer.dispatchEvent(new KeyboardEvent("keydown", { key: args[0] === "Space" ? " " : args[0], altKey: has("alt"), bubbles: true }));
       break;
     }
+    // The pointer moves over the show: `showmove x y` (window px), for the video controls.
+    case "showmove":
+      (document.elementFromPoint(num(0), num(1)) ?? document.body).dispatchEvent(new PointerEvent("pointermove", { clientX: num(0), clientY: num(1), bubbles: true }));
+      break;
     case "showclick": {
       const layer = document.querySelector<HTMLElement>(".slide-show");
       if (!layer) throw new Error("no slide show");
-      layer.dispatchEvent(new PointerEvent("pointerdown", { button: num(0) || 0, bubbles: true }));
+      // `showclick [button [x y]]`: x and y are window (client) px; the default is the top left.
+      (args[1] ? (document.elementFromPoint(num(1), num(2)) ?? layer) : layer).dispatchEvent(new PointerEvent("pointerdown", { button: num(0) || 0, clientX: num(1) || 0, clientY: num(2) || 0, bubbles: true, cancelable: true }));
       break;
     }
     // Notes pane: type (as the user would, so WebKit's undo sees it) and read back.
