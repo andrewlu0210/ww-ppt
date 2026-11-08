@@ -851,6 +851,21 @@ impl App {
         self.dirty = true;
     }
 
+    /// Where the slide is on the canvas now, `[left, top, width, height]` in CSS px (it follows the
+    /// zoom, the scroll and the window size). Empty during a show, which has its own screen.
+    #[wasm_bindgen(js_name = slideRect)]
+    pub fn slide_rect(&self) -> Vec<f64> {
+        if self.show.is_some() {
+            return Vec::new();
+        }
+        let pres = &self.editor.pres;
+        let dpr = self.dpr.max(0.01);
+        let view = self.view();
+        let origin = view * Point::new(0.0, 0.0);
+        let far = view * Point::new(pres.slide_width as f64, pres.slide_height as f64);
+        vec![origin.x / dpr, origin.y / dpr, (far.x - origin.x) / dpr, (far.y - origin.y) / dpr]
+    }
+
     /// The zoom relative to the fitted size (1 = fit).
     pub fn zoom(&self) -> f64 {
         self.scale() / self.fit_scale()
@@ -2971,12 +2986,14 @@ impl App {
         let pres = &self.editor.pres;
         let (slide_w, slide_h) = (pres.slide_width.max(1) as f64, pres.slide_height.max(1) as f64);
         let out = Array::new();
-        let push = |slide: usize, kind: &str, key: &str, start: u32, volume: f64, repeat: bool, slides: usize, trim: (f64, f64), frame: (f64, f64, f64, f64)| {
+        let push = |slide: usize, shape: u32, kind: &str, key: &str, start: u32, volume: f64, repeat: bool, slides: usize, trim: (f64, f64), frame: (f64, f64, f64, f64)| {
             let o = Object::new();
             let set = |k: &str, v: JsValue| {
                 let _ = Reflect::set(&o, &k.into(), &v);
             };
             set("slide", (slide as u32).into());
+            // 0 for a narration, which has no object on the slide.
+            set("shape", shape.into());
             set("kind", kind.into());
             set("key", key.into());
             set("start", start.into());
@@ -3001,11 +3018,11 @@ impl App {
                 ClipStart::Click(n) => n as u32,
             };
             let kind = if c.kind == ClipKind::Video { "video" } else { "audio" };
-            push(c.slide, kind, &c.part, start, c.volume, c.repeat, c.slides, (c.trim_start_ms, c.trim_end_ms), frame);
+            push(c.slide, c.shape.0, kind, &c.part, start, c.volume, c.repeat, c.slides, (c.trim_start_ms, c.trim_end_ms), frame);
         }
         for (i, slide) in pres.slides.iter().enumerate() {
             if let Some(n) = &slide.narration {
-                push(i, "audio", &n.media, 0, 1.0, false, 1, (0.0, 0.0), (0.0, 0.0, 0.0, 0.0));
+                push(i, 0, "audio", &n.media, 0, 1.0, false, 1, (0.0, 0.0), (0.0, 0.0, 0.0, 0.0));
             }
         }
         out
@@ -3246,6 +3263,8 @@ impl App {
         set("frameMs", self.last_frame_ms.into());
         set("sceneMs", self.last_scene_ms.into());
         set("revision", (e.revision() as f64).into());
+        // The id of the single selected object (0: none or several), to match against `mediaClips`.
+        set("selectedShapeId", e.selected_shape().map_or(0, |s| s.id.0).into());
         set("selectionName", e.selected_shape().map(|s| s.name.clone()).unwrap_or_default().into());
         let fmt = e.text_format();
         set("hasText", fmt.is_some().into());

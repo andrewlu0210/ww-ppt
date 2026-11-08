@@ -48,13 +48,27 @@ export function domSlideBox(aspect: number): () => SlideBox | null {
   };
 }
 
+/**
+ * Finds the slide in the editing canvas: the engine knows where it is drawn (it follows the zoom,
+ * the scroll and the window), and the canvas sits at the top left of its host, so the engine's
+ * CSS px are the host's. Null while the canvas is not there or a show has taken the engine.
+ */
+export function canvasSlideBox(engine: Engine): () => SlideBox | null {
+  return () => {
+    const host = document.querySelector<HTMLElement>(".canvas-host");
+    const r = engine.slideRect();
+    if (!host || r.length !== 4) return null;
+    return { host, left: r[0], top: r[1], width: r[2], height: r[3] };
+  };
+}
+
 /** What a window plays: the main window plays everything; the audience window only shows videos, silently. */
 export interface MediaOptions {
   audio: boolean;
   muted: boolean;
 }
 
-const MIME: Record<string, string> = { m4a: "audio/mp4", mp3: "audio/mpeg", wav: "audio/wav", aac: "audio/aac", mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime" };
+export const MIME: Record<string, string> = { m4a: "audio/mp4", mp3: "audio/mpeg", wav: "audio/wav", aac: "audio/aac", mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime" };
 
 /** The show's media being played, for the dev automation's `mediastate`. */
 let active: ShowMedia | null = null;

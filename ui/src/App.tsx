@@ -61,6 +61,7 @@ import { VideoDialog } from "./components/VideoDialog";
 import { ZoomDialog } from "./components/ZoomDialog";
 import { CheckerPane, type A11yIssue } from "./components/CheckerPane";
 import { A11yMirror } from "./components/A11yMirror";
+import { MediaControls } from "./components/MediaControls";
 import { announce } from "./lib/announce";
 import { openAbout } from "./components/AboutWindow";
 import { openPreferences } from "./components/PreferencesWindow";
@@ -1695,6 +1696,7 @@ export function App() {
           <div className={viewPrefs.ruler && !showing ? "canvas-area with-ruler" : "canvas-area"} onContextMenu={onCanvasContextMenu}>
             <CanvasHost onReady={onReady} onError={setError} onChange={refresh} scroll={status.scroll} painter={painter} onPainterDone={() => setPainter(null)} />
             {viewPrefs.ruler && !showing && <Rulers engine={engineRef.current} slideSize={slideSize} />}
+            {!showing && viewMode === "normal" && engineRef.current && <MediaControls engine={engineRef.current} status={status} />}
             {!showing && viewMode === "normal" && <A11yMirror engine={engineRef.current} version={`${status.revision}|${status.slideIndex}|${status.selectionCount}|${status.selectionName}|${JSON.stringify(status.frame ?? null)}|${status.zoom}|${viewPrefs.ruler}|${viewPrefs.pane}|${notesPrefs.open}`} />}
             {!showing && <FindBar ref={findRef} engine={engineRef.current} onChange={findChanged} showNotesMatch={showNotesMatch} />}
             {ribbonTab === "動畫" && !showing && <AnimationBadges animations={status.animations ?? []} />}

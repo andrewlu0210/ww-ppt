@@ -3085,3 +3085,54 @@ select.para-input {
 .hidden-slide .sorter-thumb {
   opacity: 0.45;
 }
+
+/* Controls for playing the selected video in place in the editing canvas. */
+.media-controls {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(28, 28, 28, 0.92);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.media-controls button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+}
+
+.media-controls button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.media-controls .media-seek {
+  flex: 1 1 auto;
+  min-width: 40px;
+}
+
+.media-controls .media-volume {
+  flex: none;
+  width: 56px;
+}
+
+.media-controls input[type="range"] {
+  accent-color: #fff;
+}

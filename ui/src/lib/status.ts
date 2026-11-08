@@ -35,6 +35,8 @@ export interface Status {
   frameMs: number;
   revision: number;
   selectionName: string;
+  /** Id of the single selected object (0: none or several). */
+  selectedShapeId: number;
   hasText: boolean;
   fontFamily?: string;
   fontSize?: number;
@@ -160,6 +162,7 @@ export const EMPTY_STATUS: Status = {
   frameMs: 0,
   revision: 0,
   selectionName: "",
+  selectedShapeId: 0,
   hasText: false,
 };
 
@@ -186,7 +189,7 @@ export function shareStatus(prev: Status, next: Status): Status {
 }
 
 /** Status fields the ribbon never reads: changes to them alone do not redraw it. */
-const RIBBON_IGNORED = new Set(["scroll", "zoom", "zoomPercent", "zoomFit", "frameMs", "sceneMs", "revision", "selectionName", "hiddenSlides", "transitionSlides", "canPasteSlide", "diagramRequests", "diagramFocus", "diagramRange"]);
+const RIBBON_IGNORED = new Set(["scroll", "zoom", "zoomPercent", "zoomFit", "frameMs", "sceneMs", "revision", "selectionName", "selectedShapeId", "hiddenSlides", "transitionSlides", "canPasteSlide", "diagramRequests", "diagramFocus", "diagramRange"]);
 
 /** True when two statuses differ in a field the ribbon shows. */
 export function ribbonStatusEqual(a: Status, b: Status): boolean {
