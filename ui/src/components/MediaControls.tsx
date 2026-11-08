@@ -36,7 +36,13 @@ export function MediaControls({ engine, status }: { engine: Engine; status: Stat
 
   // Follows the selection, and the picture's frame and the slide's place on every change.
   const scroll = status.scroll.join(",");
+  const seen = useRef({ slide: -1, shape: 0, frame: status.frame });
   useEffect(() => {
+    // Moving, resizing or rotating the picture (a drag, the pane, an undo) pauses the video, which
+    // then follows the picture's new place.
+    const was = seen.current;
+    if (was.slide === status.slideIndex && was.shape === status.selectedShapeId && was.frame !== status.frame) media.current?.pause();
+    seen.current = { slide: status.slideIndex, shape: status.selectedShapeId, frame: status.frame };
     media.current?.select(status.slideIndex, status.selectedShapeId);
     redraw();
   }, [status.slideIndex, status.selectedShapeId, status.revision, status.zoom, scroll, status.frame]);
