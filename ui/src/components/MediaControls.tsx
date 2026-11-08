@@ -34,6 +34,21 @@ export function MediaControls({ engine, status }: { engine: Engine; status: Stat
     };
   }, [engine]);
 
+  // Space plays or pauses the selected video while the canvas has the keyboard (nothing else uses it then).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (e.key !== " " || e.metaKey || e.ctrlKey || e.altKey || !target?.classList.contains("ime-input")) return;
+      const m = media.current;
+      if (!m?.state().available || (engine.status() as Status).editingText) return;
+      e.preventDefault();
+      e.stopPropagation();
+      m.toggle();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [engine]);
+
   // Follows the selection, and the picture's frame and the slide's place on every change.
   const scroll = status.scroll.join(",");
   const seen = useRef({ slide: -1, shape: 0, frame: status.frame });

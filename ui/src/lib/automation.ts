@@ -350,10 +350,10 @@ async function step(cmd: string, h: Hooks) {
       break;
     }
     case "press": {
-      // A key on an element: `press .find-input Enter shift`.
+      // A key on an element: `press .find-input Enter shift` (`Space` for the space bar).
       const el = document.querySelector<HTMLElement>(args[0]);
       if (!el) throw new Error(`no ${args[0]}`);
-      el.dispatchEvent(new KeyboardEvent("keydown", { key: args[1], shiftKey: has("shift"), metaKey: has("meta"), bubbles: true, cancelable: true }));
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: args[1] === "Space" ? " " : args[1], shiftKey: has("shift"), metaKey: has("meta"), bubbles: true, cancelable: true }));
       break;
     }
     case "rclick": {
