@@ -82,7 +82,6 @@ export interface ControlMsg {
   t: number;
 }
 
-const BAR_AUTO_HIDE_MS = 2200;
 const ICON_PLAY = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3.5 2l8 5-8 5z"/></svg>';
 const ICON_PAUSE = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="3" y="2" width="3" height="10" rx="0.5"/><rect x="8" y="2" width="3" height="10" rx="0.5"/></svg>';
 const ICON_VOLUME = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M2 5h2.5L8 2v10L4.5 9H2z"/><path d="M10 4.5a3.5 3.5 0 010 5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
@@ -106,9 +105,6 @@ export class ShowMedia {
   private paused = false;
   /** Videos the viewer paused: they stay paused when the screen comes back or the view moves. */
   private manual = new Set<number>();
-  private bar: HTMLDivElement | null = null;
-  private barClip = -1;
-  private barTimer = 0;
   private at = { slide: 0, step: 0, steps: 0 };
 
   /** `slideBox`: where the slide is on screen now (null while the show has no screen to put a video on). */
@@ -127,33 +123,55 @@ export class ShowMedia {
     }
   }
 
-  /** The video under the pointer (client px), if any. */
+  /** Where video `i` is on the slide now, in its host's px; null when it is not on screen. */
+  private frameOf(i: number): { box: SlideBox; left: number; top: number; width: number; height: number } | null {
+    const c = this.clips[i];
+    const box = this.slideBox();
+    if (!box || c.kind !== "video" || c.w <= 0 || c.h <= 0) return null;
+    return { box, left: box.left + c.x * box.width, top: box.top + c.y * box.height, width: c.w * box.width, height: c.h * box.height };
+  }
+
+  /** A video the viewer can point at: one playing, or one of this slide still waiting for its start. */
+  private shown(i: number): boolean {
+    const c = this.clips[i];
+    if (c.kind !== "video" || this.at.slide < 0 || this.paused) return false;
+    return this.playing.has(i) || (c.slide === this.at.slide && !this.done.has(i));
+  }
+
+  /** The video under the pointer (client px), if any; the one drawn last wins. */
   private clipAt(x: number, y: number): number {
     let found = -1;
-    for (const [i, el] of this.playing) {
-      if (!(el instanceof HTMLVideoElement)) continue;
-      const r = el.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) found = i;
-    }
+    this.clips.forEach((_, i) => {
+      if (!this.shown(i)) return;
+      const f = this.frameOf(i);
+      if (!f) return;
+      const host = f.box.host.getBoundingClientRect();
+      const [px, py] = [x - host.left, y - host.top];
+      if (px >= f.left && px <= f.left + f.width && py >= f.top && py <= f.top + f.height) found = i;
+    });
     return found;
   }
 
+  /** The video the pointer is over, and the one the viewer clicked: both show their bar. */
+  private hover = -1;
+  private selected = -1;
+
   private onMove = (e: PointerEvent) => {
-    if (this.paused) return;
-    const i = this.clipAt(e.clientX, e.clientY);
-    if (i < 0) this.hideBar();
-    else this.showBar(i);
+    this.hover = this.clipAt(e.clientX, e.clientY);
+    this.renderBars();
   };
 
-  /** A click on a video pauses or plays it instead of moving the show on. */
+  /** A click on a video plays or pauses that video, and does not move the show on. */
   private onDown = (e: PointerEvent) => {
-    if (e.button !== 0 || this.paused || (this.bar && this.bar.contains(e.target as Node))) return;
+    if (e.button !== 0 || this.paused) return;
+    for (const bar of this.bars.values()) if (bar.contains(e.target as Node)) return;
     const i = this.clipAt(e.clientX, e.clientY);
     if (i < 0) return;
     e.preventDefault();
     e.stopPropagation();
+    this.selected = i;
     this.togglePause(i);
-    this.showBar(i);
+    this.renderBars();
   };
 
   private video(i: number): HTMLVideoElement | null {
@@ -174,9 +192,18 @@ export class ShowMedia {
     this.options.onControl?.({ slide: c.slide, shape: c.shape, key: c.key, action, t });
   }
 
+  /** Plays a video that has not started yet (the viewer pointed at it), as if its click had come. */
+  private startNow(i: number) {
+    this.startClip(i, this.clips[i]);
+    this.emitControl(i, "play", this.clips[i].trimStartMs / 1000);
+  }
+
   togglePause(i: number) {
     const el = this.video(i);
-    if (!el) return;
+    if (!el) {
+      if (this.shown(i)) this.startNow(i);
+      return;
+    }
     if (el.paused || el.ended) {
       const [start, end] = this.range(i, el);
       if (el.ended || (end > start && el.currentTime >= end - 0.05)) el.currentTime = start;
@@ -202,8 +229,13 @@ export class ShowMedia {
   /** Does what the other window's viewer did (the clips are found by slide, picture and file). */
   apply(m: ControlMsg) {
     const i = this.clips.findIndex((c) => c.slide === m.slide && c.shape === m.shape && c.key === m.key);
-    const el = i >= 0 ? this.video(i) : null;
-    if (!el) return;
+    if (i < 0) return;
+    const el = this.video(i);
+    if (!el) {
+      // Not started here yet: the other viewer started it.
+      if (m.action === "play" && this.at.slide === this.clips[i].slide) this.startClip(i, this.clips[i]);
+      return;
+    }
     if (m.action === "seek") el.currentTime = m.t;
     else if (m.action === "pause") {
       this.manual.add(i);
@@ -216,71 +248,79 @@ export class ShowMedia {
     }
   }
 
-  private makeBar(): HTMLDivElement {
+  /** The control bars, one per video that has shown one. */
+  private bars = new Map<number, HTMLDivElement>();
+
+  private makeBar(i: number): HTMLDivElement {
     const bar = document.createElement("div");
     bar.className = "media-controls show-media-controls";
     bar.setAttribute("role", "group");
     bar.setAttribute("aria-label", t("media.controls"));
     bar.innerHTML = `<button type="button" data-a="play"></button><span class="media-time" data-a="time">0:00</span><input type="range" class="media-seek" data-a="seek" min="0" max="1" step="0.1" value="0" aria-label="${t("media.position")}"><span class="media-time" data-a="len">0:00</span><button type="button" data-a="mute"></button><input type="range" class="media-volume" data-a="volume" min="0" max="1" step="0.05" aria-label="${t("media.volume")}">`;
     // Keeps these presses from moving the show on.
-    bar.addEventListener("pointerdown", (e) => e.stopPropagation());
+    bar.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      this.selected = i;
+    });
     bar.addEventListener("click", (e) => {
       const a = (e.target as HTMLElement).closest("button")?.dataset.a;
-      const el = this.video(this.barClip);
-      if (!el) return;
-      if (a === "play") this.togglePause(this.barClip);
-      else if (a === "mute") el.muted = !el.muted;
-      this.syncBar();
+      if (a === "play") this.togglePause(i);
+      else if (a === "mute") {
+        const el = this.video(i);
+        if (el) el.muted = !el.muted;
+      }
+      this.syncBar(i);
     });
     bar.addEventListener("input", (e) => {
       const input = e.target as HTMLInputElement;
-      const el = this.video(this.barClip);
+      const el = this.video(i);
       if (!el) return;
-      if (input.dataset.a === "seek") this.seekTo(this.barClip, Number(input.value));
+      if (input.dataset.a === "seek") this.seekTo(i, Number(input.value));
       else if (input.dataset.a === "volume") {
         el.volume = Number(input.value);
         el.muted = el.volume === 0;
       }
-      this.syncBar();
+      this.syncBar(i);
     });
     return bar;
   }
 
-  private showBar(i: number) {
+  /**
+   * Shows the bar of the video the pointer is over and of the one the viewer picked (it stays
+   * until the slide changes); the others are hidden.
+   */
+  private renderBars() {
+    if (this.selected >= 0 && !this.shown(this.selected)) this.selected = -1;
+    if (this.hover >= 0 && !this.shown(this.hover)) this.hover = -1;
+    const want = new Set([this.hover, this.selected].filter((i) => i >= 0));
+    for (const [i, bar] of this.bars) if (!want.has(i)) bar.style.display = "none";
+    for (const i of want) {
+      const f = this.frameOf(i);
+      if (!f || f.width < 160) continue;
+      let bar = this.bars.get(i);
+      if (!bar) {
+        bar = this.makeBar(i);
+        this.bars.set(i, bar);
+      }
+      if (bar.parentElement !== f.box.host) f.box.host.appendChild(bar);
+      bar.style.display = "";
+      Object.assign(bar.style, { left: `${f.left + 8}px`, top: `${f.top + f.height - 42}px`, width: `${f.width - 16}px` });
+      this.syncBar(i);
+    }
+  }
+
+  /** Shows the video's state in its bar. */
+  private syncBar(i: number) {
+    const bar = this.bars.get(i);
+    if (!bar) return;
     const el = this.video(i);
-    if (!el || el.offsetWidth < 160) return;
-    if (!this.bar) this.bar = this.makeBar();
-    if (this.bar.parentElement !== el.parentElement) el.parentElement?.appendChild(this.bar);
-    this.barClip = i;
-    this.bar.style.display = "";
-    this.positionBar();
-    this.syncBar();
-    window.clearTimeout(this.barTimer);
-    this.barTimer = window.setTimeout(() => this.hideBar(), BAR_AUTO_HIDE_MS);
-  }
-
-  private hideBar() {
-    window.clearTimeout(this.barTimer);
-    if (this.bar) this.bar.style.display = "none";
-    this.barClip = -1;
-  }
-
-  /** At the bottom of the video, inside it. */
-  private positionBar() {
-    const el = this.video(this.barClip);
-    if (!el || !this.bar) return;
-    Object.assign(this.bar.style, { left: `${el.offsetLeft + 8}px`, top: `${el.offsetTop + el.offsetHeight - 42}px`, width: `${el.offsetWidth - 16}px` });
-  }
-
-  /** Shows the video's state in the bar. */
-  private syncBar() {
-    const el = this.video(this.barClip);
-    const bar = this.bar;
-    if (!el || !bar) return;
-    const [start, end] = this.range(this.barClip, el);
+    const c = this.clips[i];
+    const [start, end] = el ? this.range(i, el) : [0, 0];
     const length = Math.max(0, end - start);
-    const time = Math.max(0, Math.min(length, el.currentTime - start));
-    const playing = !el.paused && !el.ended;
+    const time = el ? Math.max(0, Math.min(length, el.currentTime - start)) : 0;
+    const playing = !!el && !el.paused && !el.ended;
+    const muted = el ? el.muted : false;
+    const volume = el ? el.volume : c.volume;
     const set = (a: string) => bar.querySelector<HTMLElement>(`[data-a="${a}"]`)!;
     const play = set("play");
     play.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
@@ -291,12 +331,13 @@ export class ShowMedia {
     const seek = set("seek") as HTMLInputElement;
     seek.max = String(Math.max(length, 0.01));
     seek.value = String(time);
+    seek.disabled = !el;
     seek.setAttribute("aria-valuetext", `${clock(time)} / ${clock(length)}`);
     const mute = set("mute");
-    mute.innerHTML = el.muted || el.volume === 0 ? ICON_MUTED : ICON_VOLUME;
-    mute.setAttribute("aria-label", el.muted ? t("media.unmute") : t("media.mute"));
-    mute.title = el.muted ? t("media.unmute") : t("media.mute");
-    (set("volume") as HTMLInputElement).value = String(el.muted ? 0 : el.volume);
+    mute.innerHTML = muted || volume === 0 ? ICON_MUTED : ICON_VOLUME;
+    mute.setAttribute("aria-label", muted ? t("media.unmute") : t("media.mute"));
+    mute.title = muted ? t("media.unmute") : t("media.mute");
+    (set("volume") as HTMLInputElement).value = String(muted ? 0 : volume);
   }
 
   /** Puts the playing videos where the slide is now (it moves with the window and with the view). */
@@ -312,10 +353,7 @@ export class ShowMedia {
       }
       this.place(el, box, this.clips[i]);
     }
-    if (this.barClip >= 0) {
-      if (this.video(this.barClip)) this.positionBar();
-      else this.hideBar();
-    }
+    this.renderBars();
   };
 
   /** What is playing: kind, file, position (s) and whether it is paused. */
@@ -341,10 +379,10 @@ export class ShowMedia {
       // A clip waits for its click; one whose click never comes (the slide has fewer) starts at once.
       else if (!live && !this.done.has(i) && slide === c.slide && (c.start === 0 || c.start <= step || c.start > steps)) this.startClip(i, c);
     });
-    // The view may have changed (slides, presenter view) since the videos were put up.
-    this.relayout();
     // Leaving a slide lets its clips play again when the show comes back to it.
     for (const i of [...this.done]) if (slide < this.clips[i].slide || slide > this.clips[i].slide + this.clips[i].slides - 1) this.done.delete(i);
+    // The view may have changed (slides, presenter view) since the videos were put up.
+    this.relayout();
   }
 
   /** Black or white screen: everything pauses until the slides are back. */
@@ -354,8 +392,8 @@ export class ShowMedia {
     for (const el of this.playing.values()) {
       if (blank) el.pause();
     }
-    if (blank) this.hideBar();
-    else for (const [i, el] of this.playing) if (!this.manual.has(i)) void el.play().catch(() => {});
+    if (!blank) for (const [i, el] of this.playing) if (!this.manual.has(i)) void el.play().catch(() => {});
+    this.renderBars();
   }
 
   /** Stops everything and releases the media. */
@@ -367,9 +405,8 @@ export class ShowMedia {
     window.removeEventListener("resize", this.relayout);
     window.removeEventListener("pointermove", this.onMove);
     window.removeEventListener("pointerdown", this.onDown, true);
-    window.clearTimeout(this.barTimer);
-    this.bar?.remove();
-    this.bar = null;
+    for (const bar of this.bars.values()) bar.remove();
+    this.bars.clear();
     this.manual.clear();
     if (active === this) active = null;
   }
@@ -439,7 +476,7 @@ export class ShowMedia {
       }
     };
     el.addEventListener("ended", finish);
-    for (const ev of ["timeupdate", "play", "pause", "volumechange", "loadedmetadata"]) el.addEventListener(ev, () => this.barClip === i && this.syncBar());
+    for (const ev of ["timeupdate", "play", "pause", "volumechange", "loadedmetadata"]) el.addEventListener(ev, () => this.bars.has(i) && this.syncBar(i));
     if (c.trimEndMs > 0) {
       el.addEventListener("timeupdate", () => {
         if (el.duration && el.currentTime >= el.duration - c.trimEndMs / 1000) finish();
@@ -459,7 +496,6 @@ export class ShowMedia {
     this.playing.delete(i);
     this.done.delete(i);
     this.manual.delete(i);
-    if (this.barClip === i) this.hideBar();
     if (!el) return;
     el.pause();
     el.removeAttribute("src");
