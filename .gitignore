@@ -28,3 +28,6 @@
 .env
 .env.*
 !.env.example
+
+# Office lock files
+~$*
