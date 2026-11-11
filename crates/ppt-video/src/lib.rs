@@ -81,6 +81,10 @@ impl Drop for Sound {
     }
 }
 
+/// Decoded audio of a media part: samples and duration in ms, or `None` when it could not be decoded.
+#[cfg(target_os = "macos")]
+type DecodedAudio = Option<(std::sync::Arc<Vec<f32>>, f64)>;
+
 /// A clip with its media decoded.
 #[cfg(target_os = "macos")]
 struct Clip {
@@ -93,7 +97,7 @@ struct Clip {
 /// Decodes the clips of shown slides; those whose media cannot be read are left out.
 #[cfg(target_os = "macos")]
 fn load_clips(pres: &Presentation) -> Vec<Clip> {
-    let mut decoded: HashMap<String, Option<(std::sync::Arc<Vec<f32>>, f64)>> = HashMap::new();
+    let mut decoded: HashMap<String, DecodedAudio> = HashMap::new();
     let mut out = Vec::new();
     for info in ppt_ooxml::media_clips(pres).into_iter().filter(|c| !pres.slides[c.slide].hidden) {
         let entry = decoded.entry(info.part.clone()).or_insert_with(|| {
@@ -235,7 +239,7 @@ pub fn export(pres: &Presentation, opts: &VideoOptions, path: &Path, progress: &
                     let mut with_video = below.clone();
                     frames::draw(&mut with_video, width, height, &image, v.frame);
                     let out = shown.get_or_insert_with(|| pixels.clone());
-                    for (((o, full), b), w) in out.chunks_exact_mut(4).zip(pixels.chunks_exact(4)).zip(below.chunks_exact(4)).zip(with_video.chunks_exact(4)) {
+                    for (((o, full), b), w) in out.as_chunks_mut::<4>().0.iter_mut().zip(pixels.as_chunks::<4>().0).zip(below.as_chunks::<4>().0).zip(with_video.as_chunks::<4>().0) {
                         if full == b {
                             o.copy_from_slice(w);
                         }

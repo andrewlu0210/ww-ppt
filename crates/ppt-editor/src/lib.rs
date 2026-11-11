@@ -1965,10 +1965,10 @@ impl Editor {
         }
         let mut media: Vec<(String, std::sync::Arc<Vec<u8>>)> = Vec::new();
         for k in keys {
-            if !media.iter().any(|(m, _)| m == k) {
-                if let Some(bytes) = self.pres.media.get(k) {
-                    media.push((k.clone(), bytes));
-                }
+            if !media.iter().any(|(m, _)| m == k)
+                && let Some(bytes) = self.pres.media.get(k)
+            {
+                media.push((k.clone(), bytes));
             }
         }
         Some(SlideClip { slide, layout_name, media })
@@ -2004,9 +2004,8 @@ impl Editor {
             // Pictures: keep the key when the deck has no other picture under it.
             let mut keys: HashMap<String, String> = HashMap::new();
             for (key, bytes) in &clip.media {
-                let new = if self.pres.media.get(key).is_none() {
-                    key.clone()
-                } else if self.pres.media.get(key).is_some_and(|b| *b == **bytes) {
+                // Free key, or the same picture already under it: keep the key.
+                let new = if self.pres.media.get(key).is_none_or(|b| *b == **bytes) {
                     key.clone()
                 } else {
                     let mut n = 1;
@@ -2022,16 +2021,16 @@ impl Editor {
             }
             for s in &mut slide.shapes {
                 s.source = None;
-                if let ShapeKind::Picture { media: Some(k), .. } = &mut s.kind {
-                    if let Some(n) = keys.get(k) {
-                        *k = n.clone();
-                    }
+                if let ShapeKind::Picture { media: Some(k), .. } = &mut s.kind
+                    && let Some(n) = keys.get(k)
+                {
+                    *k = n.clone();
                 }
             }
-            if let Some(ppt_model::Background::Picture { media }) = &mut slide.background {
-                if let Some(n) = keys.get(media) {
-                    *media = n.clone();
-                }
+            if let Some(ppt_model::Background::Picture { media }) = &mut slide.background
+                && let Some(n) = keys.get(media)
+            {
+                *media = n.clone();
             }
         }
         let copy = self.fresh_copy(slide);

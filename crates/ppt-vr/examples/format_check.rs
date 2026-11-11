@@ -197,7 +197,7 @@ fn main() {
         e.set_text_effect_spec(eng, spec);
     };
     let outline = |rgb: (u8, u8, u8), width_pt: f64| TextOutlineSpec { visible: Some(true), rgb: Some(rgb), width: Some((width_pt * 12_700.0) as i64), ..Default::default() };
-    let shadow = |blur_pt: f64, dist_pt: f64, angle: f64, alpha: u8| ShadowSpec { visible: Some(true), rgb: Some((0, 0, 0)), alpha: Some(alpha), blur: Some((blur_pt * 12_700.0) as i64), dist: Some((dist_pt * 12_700.0) as i64), dir: Some(angle), ..Default::default() };
+    let shadow = |blur_pt: f64, dist_pt: f64, angle: f64, alpha: u8| ShadowSpec { visible: Some(true), rgb: Some((0, 0, 0)), alpha: Some(alpha), blur: Some((blur_pt * 12_700.0) as i64), dist: Some((dist_pt * 12_700.0) as i64), dir: Some(angle) };
     text_effect(&mut e, &mut eng, 0, "1 外框 紅 2pt", false, TextEffectSpec { outline: outline((0xC0, 0, 0), 2.0), ..Default::default() });
     text_effect(&mut e, &mut eng, 1, "2 空心字 藍外框", true, TextEffectSpec { outline: outline((0x1F, 0x4E, 0x9C), 1.5), ..Default::default() });
     text_effect(&mut e, &mut eng, 2, "3 陰影 硬 右下", false, TextEffectSpec { shadow: shadow(0.0, 4.0, 45.0, 160), ..Default::default() });

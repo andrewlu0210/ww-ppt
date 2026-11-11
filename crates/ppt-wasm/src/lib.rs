@@ -205,7 +205,7 @@ fn js_num(o: &JsValue, key: &str) -> Option<f64> {
 }
 
 fn js_array(o: &JsValue, key: &str) -> Vec<JsValue> {
-    Reflect::get(o, &key.into()).ok().filter(|v| Array::is_array(v)).map(|v| Array::from(&v).iter().collect()).unwrap_or_default()
+    Reflect::get(o, &key.into()).ok().filter(Array::is_array).map(|v| Array::from(&v).iter().collect()).unwrap_or_default()
 }
 
 /// `{ color: "#RRGGBB", alpha: 0..1 }` as a color.
@@ -340,10 +340,10 @@ impl App {
         if let (Some(_), Some(r)) = (&self.show, self.show_viewport) {
             return (r.width() / pres.slide_width as f64).min(r.height() / pres.slide_height as f64);
         }
-        if self.show.is_none() {
-            if let Some(css) = self.zoom_fixed {
-                return css * self.dpr;
-            }
+        if self.show.is_none()
+            && let Some(css) = self.zoom_fixed
+        {
+            return css * self.dpr;
         }
         self.fit_scale()
     }
@@ -1003,7 +1003,7 @@ impl App {
     /// checked): `[start, length, ...]` in UTF-16 units.
     #[wasm_bindgen(js_name = setSpelling)]
     pub fn set_spelling(&mut self, key: &str, text: &str, ranges: Vec<u32>) {
-        let bytes: Vec<std::ops::Range<usize>> = ranges.chunks_exact(2).map(|r| utf16_to_byte_offset(text, r[0] as usize)..utf16_to_byte_offset(text, (r[0] + r[1]) as usize)).collect();
+        let bytes: Vec<std::ops::Range<usize>> = ranges.as_chunks::<2>().0.iter().map(|r| utf16_to_byte_offset(text, r[0] as usize)..utf16_to_byte_offset(text, (r[0] + r[1]) as usize)).collect();
         let changed = match self.spelling.get(key) {
             Some((t, old)) => t != text || *old != bytes,
             None => !bytes.is_empty(),
