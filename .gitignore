@@ -31,3 +31,6 @@
 
 # Office lock files
 ~$*
+
+# Personal notes and analysis reports: never commit
+/my_docs/

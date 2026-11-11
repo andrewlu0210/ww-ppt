@@ -155,7 +155,7 @@ fn text_outline_and_shadow_round_trip() {
     assert!((sh.dir - 90.0).abs() < 0.01 && sh.color.a.abs_diff(100) <= 1);
 
     // Switching them off again is saved as well.
-    let mut cleared = again.clone();
+    let mut cleared = again;
     for slide in &mut cleared.slides {
         for s in slide.shapes.iter_mut().filter(|s| s.name == name) {
             for r in s.text.as_mut().unwrap().paragraphs.iter_mut().flat_map(|p| p.runs.iter_mut()) {

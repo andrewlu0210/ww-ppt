@@ -239,6 +239,9 @@ struct Drag {
     origs: Vec<(ShapeId, Xfrm)>,
     base_selection: Vec<ShapeId>,
     before: Option<Snapshot>,
+    /// Take `before` on the first real move rather than on pointer down, so a plain
+    /// click (select without moving) does not copy the whole presentation.
+    snapshot_on_move: bool,
     moved: bool,
 }
 
@@ -671,7 +674,7 @@ impl Editor {
             && (self.cell_range.is_some() || Some(to) != self.text.as_ref().and_then(|t| t.cell))
         {
             self.select_cells(engine, id, from, to);
-            self.drag = Some(Drag { kind: DragKind::CellSelect(id), start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: None, moved: false });
+            self.drag = Some(Drag { kind: DragKind::CellSelect(id), start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: None, snapshot_on_move: false, moved: false });
             return true;
         }
         self.cell_range = None;
@@ -690,6 +693,7 @@ impl Editor {
                     origs: Vec::new(),
                     base_selection: Vec::new(),
                     before: None,
+                    snapshot_on_move: false,
                     moved: false,
                 });
                 return true;
@@ -703,7 +707,7 @@ impl Editor {
         }
         if let Some(handle) = self.handle_at(ev.x, ev.y, tol) {
             let kind = if handle == Handle::Rotate { DragKind::Rotate } else { DragKind::Resize(handle) };
-            self.drag = Some(Drag { kind, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+            self.drag = Some(Drag { kind, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: None, snapshot_on_move: true, moved: false });
             return true;
         }
 
@@ -715,7 +719,7 @@ impl Editor {
         if self.hit_test(ev.x, ev.y, tol.handle).is_none()
             && let Some(i) = self.guide_at(ev.x, ev.y, tol.handle)
         {
-            self.drag = Some(Drag { kind: DragKind::Guide(i), start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+            self.drag = Some(Drag { kind: DragKind::Guide(i), start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: None, snapshot_on_move: true, moved: false });
             return true;
         }
         match self.hit_test(ev.x, ev.y, tol.handle) {
@@ -770,7 +774,7 @@ impl Editor {
                     return true;
                 }
                 if !self.selection_locked() {
-                    self.drag = Some(Drag { kind: DragKind::Move, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+                    self.drag = Some(Drag { kind: DragKind::Move, start: (ev.x, ev.y), origs: self.origs(), base_selection: Vec::new(), before: None, snapshot_on_move: true, moved: false });
                 }
             }
             None => {
@@ -785,6 +789,7 @@ impl Editor {
                     origs: Vec::new(),
                     base_selection: self.selection.clone(),
                     before: None,
+                    snapshot_on_move: false,
                     moved: false,
                 });
             }
@@ -798,10 +803,18 @@ impl Editor {
         if !drag.moved && dx.hypot(dy) < tol.handle / 3.0 {
             return false;
         }
+        let first_move = !drag.moved;
         drag.moved = true;
         let kind = drag.kind;
         let start = drag.start;
         let origs = drag.origs.clone();
+        if first_move && drag.snapshot_on_move {
+            // Nothing has changed since pointer down, so this is still the state before the drag.
+            let snap = self.snapshot();
+            if let Some(d) = &mut self.drag {
+                d.before = Some(snap);
+            }
+        }
         match kind {
             DragKind::TextSelect => {
                 // Dragging out of the edited cell into another one selects cells instead of text.
@@ -1780,9 +1793,9 @@ impl Editor {
         let selection = self.selection.clone();
         let entered = self.entered_group;
         let shapes = &mut self.pres.slides[self.slide].shapes;
-        let original = shapes.clone();
         *shapes = reordered(std::mem::take(shapes), &selection, entered, order);
-        if *shapes == original {
+        // The snapshot already holds the original order.
+        if *shapes == before.pres.slides[self.slide].shapes {
             return false;
         }
         self.push_undo(before);

@@ -518,7 +518,7 @@ mod tests {
         // Nothing said: the level above decides.
         let plain = rpr(r#"<rPr sz="1800"/>"#);
         assert!(plain.outline.is_none() && plain.shadow.is_none());
-        let inherited = plain.clone().or(&own);
+        let inherited = plain.or(&own);
         assert_eq!(inherited.outline, own.outline);
         assert_eq!(inherited.shadow, own.shadow);
 

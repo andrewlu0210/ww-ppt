@@ -92,7 +92,7 @@ fn retyped_text_round_trips() {
     edit(&mut pres, si, i, |d| assert!(d.set_text(2, "新的文字")));
     let back = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
     let ShapeKind::Diagram { shapes, data: Some(d), .. } = &back.slides[si].shapes[i].kind else { panic!() };
-    let mut want = before.clone();
+    let mut want = before;
     want[2] = "新的文字".into();
     assert_eq!(texts(d), want);
     // The drawing shows it too, in the same shape.

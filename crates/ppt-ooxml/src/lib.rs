@@ -106,7 +106,7 @@ struct Layout {
 struct Parser<'p> {
     pkg: Package<'p>,
     pres: Presentation,
-    pres_xml: String,
+    pres_xml: Rc<str>,
     masters: HashMap<String, Rc<Master>>,
     /// Masters in the order they were first seen.
     master_order: Vec<String>,
@@ -180,7 +180,7 @@ pub fn parse_pptx_owned(bytes: Vec<u8>) -> Result<Presentation, Error> {
     let package = Arc::new(bytes);
     let mut pkg = Package::open(package.as_slice())?;
     let pres_part = pkg.rel_of_type("", "officeDocument").unwrap_or_else(|| "ppt/presentation.xml".to_string());
-    let pres_xml = pkg.read_string(&pres_part)?;
+    let pres_xml: Rc<str> = pkg.read_string(&pres_part)?.into();
     let mut parser = Parser {
         pkg,
         pres: Presentation::default(),
@@ -251,7 +251,7 @@ pub fn parse_pptx_owned(bytes: Vec<u8>) -> Result<Presentation, Error> {
     if let Some(master) = masters.first() {
         parser.pres.minor_font = master.ctx.theme.minor.clone();
         let finalize = |s: &LevelStyle| run_style(s, &master.ctx.theme);
-        parser.pres.text_defaults = Some(Arc::new((0..9).map(|lvl| para_defaults(&master.default_text.level(lvl).clone(), &finalize)).collect()));
+        parser.pres.text_defaults = Some(Arc::new((0..9).map(|lvl| para_defaults(master.default_text.level(lvl), &finalize)).collect()));
         let def = table::default_style_id(parser.table_styles_xml());
         parser.pres.table_style = parser.table_style(master, &def);
         parser.pres.link_color = master.ctx.scheme("hlink");
@@ -274,7 +274,7 @@ impl Parser<'_> {
             .unwrap_or_default();
         let ctx = ColorCtx { theme, clr_map };
         let tx = child(root, "txStyles");
-        let pres_xml = self.pres_xml.clone();
+        let pres_xml = Rc::clone(&self.pres_xml);
         let pres_doc = parse_xml(&pres_xml)?;
         let rels = self.pkg.rels(part);
         let layout_parts = child(root, "sldLayoutIdLst")
@@ -356,7 +356,7 @@ impl Parser<'_> {
             placeholders: prototypes,
             footers,
             background_shapes,
-            background: bg.clone().or_else(|| master.bg.clone()).or(Some(Background::WHITE)),
+            background: bg.or_else(|| master.bg.clone()).or(Some(Background::WHITE)),
             part: part.to_string(),
         });
         let layout = Rc::new(Layout { index, show_master_shapes, master, phs, shapes });

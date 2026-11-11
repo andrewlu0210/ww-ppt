@@ -1060,7 +1060,7 @@ pub(crate) fn drawing_xml(d: &Diagram, shapes: &[Shape], sx: f64, sy: f64) -> St
         if shape.fill != tpl.fill
             && let Some(f) = sp.descendants().find(|n| n.is_element() && n.parent().is_some_and(|p| p.tag_name().name() == "spPr") && matches!(n.tag_name().name(), "noFill" | "solidFill" | "gradFill" | "blipFill" | "pattFill" | "grpFill"))
         {
-            edits.push((f.range(), crate::writer::fill_xml(&shape.fill)));
+            edits.push((f.range(), crate::writer::fill_xml(shape.fill.as_ref())));
         }
         // Connectors are redrawn between their boxes; a pyramid's levels change slant.
         if shape.geometry != tpl.geometry

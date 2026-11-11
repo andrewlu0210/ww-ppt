@@ -194,7 +194,7 @@ fn locked_group_locks_its_members_and_round_trips() {
     assert!(again.slides[0].shapes[2].access.locked);
 
     // Unlocking the members drops the group's lock.
-    let mut unlocked = pres.clone();
+    let mut unlocked = pres;
     unlocked.slides[0].shapes[2].access.locked = false;
     let again = parse_pptx(&save_pptx(&unlocked).unwrap()).unwrap();
     assert!(!again.slides[0].shapes[2].access.locked);

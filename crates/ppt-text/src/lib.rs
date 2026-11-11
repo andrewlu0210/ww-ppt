@@ -129,7 +129,7 @@ impl TextEngine {
         // Style properties are computed up front: the builder borrows the contexts mutably.
         // parley sizes every line at least by the default style (a CSS-like strut), so a
         // non-empty body gets a negligible one; an empty body keeps its paragraph's size.
-        let strut = if text.is_empty() { first_style.clone() } else { RunStyle { size_pt: STRUT_SIZE, ..first_style.clone() } };
+        let strut = if text.is_empty() { first_style } else { RunStyle { size_pt: STRUT_SIZE, ..first_style } };
         let default_props = self.run_properties(&strut, 1.0);
         let mut span_props: Vec<(Range<usize>, Vec<StyleProperty<'static, TextBrush>>)> = Vec::new();
         for (i, (p, range)) in body.paragraphs.iter().zip(&ranges).enumerate() {

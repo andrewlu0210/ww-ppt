@@ -516,7 +516,7 @@ impl Template {
         let centers: Vec<(f64, f64)> = self.units.iter().map(|u| u.rect.center()).collect();
         let spread = |f: fn(&(f64, f64)) -> f64| {
             let v: Vec<f64> = centers.iter().map(f).collect();
-            v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
+            v.iter().copied().fold(f64::MIN, f64::max) - v.iter().copied().fold(f64::MAX, f64::min)
         };
         let vertical = spread(|c| c.1) > spread(|c| c.0);
         let rects: Vec<_> = self.units.iter().map(|u| u.rect.axis(vertical)).collect();

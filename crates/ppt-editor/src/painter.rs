@@ -80,7 +80,7 @@ impl Editor {
                 style.link = None;
                 Some((style, para_format(p)))
             });
-            CopiedFormat { text, shape: Some(ShapeFormat { fill: shape.fill.clone(), line: shape.line, shadow: shape.shadow.clone() }) }
+            CopiedFormat { text, shape: Some(ShapeFormat { fill: shape.fill.clone(), line: shape.line, shadow: shape.shadow }) }
         } else {
             return false;
         };
@@ -125,7 +125,7 @@ impl Editor {
                     shape.fill = f.fill.clone();
                 }
                 shape.line = f.line;
-                shape.shadow = f.shadow.clone();
+                shape.shadow = f.shadow;
             }
             if let (Some(style), Some(para)) = (copied.style_fn(), copied.para_fn()) {
                 for body in shape.text_bodies_mut() {

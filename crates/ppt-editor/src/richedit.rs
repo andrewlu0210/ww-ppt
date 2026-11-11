@@ -323,8 +323,9 @@ impl RichEdit {
         let start = match &self.compose {
             Some(r) => {
                 let r = r.clone();
-                self.body.delete(r.clone());
-                r.start
+                let start = r.start;
+                self.body.delete(r);
+                start
             }
             None => {
                 self.record(Op::Typing);
@@ -334,7 +335,7 @@ impl RichEdit {
                 r.start
             }
         };
-        self.body.insert(start, text, &self.compose_style.clone());
+        self.body.insert(start, text, &self.compose_style);
         self.compose = Some(start..start + text.len());
         let caret = start + cursor.min(text.len());
         self.relayout(engine, caret, caret);

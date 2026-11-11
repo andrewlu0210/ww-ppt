@@ -187,14 +187,14 @@ impl Editor {
                 {
                     edit.rich.pointer_down(x, y, ev.clicks, false);
                 }
-                self.drag = Some(Drag { kind: DragKind::TextSelect, start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: None, moved: false });
+                self.drag = Some(Drag { kind: DragKind::TextSelect, start: (ev.x, ev.y), origs: Vec::new(), base_selection: Vec::new(), before: None, snapshot_on_move: false, moved: false });
                 true
             }
             Some(hit @ (TableHit::ColLine(i) | TableHit::RowLine(i))) => {
                 self.selection = vec![id];
                 let kind = if matches!(hit, TableHit::ColLine(_)) { DragKind::TableCol(i) } else { DragKind::TableRow(i) };
                 let xfrm = self.pres.shape(self.slide, id).map(|s| s.xfrm).unwrap_or_default();
-                self.drag = Some(Drag { kind, start: (ev.x, ev.y), origs: vec![(id, xfrm)], base_selection: Vec::new(), before: Some(self.snapshot()), moved: false });
+                self.drag = Some(Drag { kind, start: (ev.x, ev.y), origs: vec![(id, xfrm)], base_selection: Vec::new(), before: None, snapshot_on_move: true, moved: false });
                 true
             }
             _ => false,

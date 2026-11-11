@@ -154,7 +154,7 @@ fn src_rect_xml(crop: &Crop) -> String {
     format!(r#"<a:srcRect l="{}" t="{}" r="{}" b="{}"/>"#, v(crop.left), v(crop.top), v(crop.right), v(crop.bottom))
 }
 
-pub(crate) fn fill_xml(fill: &Option<Paint>) -> String {
+pub(crate) fn fill_xml(fill: Option<&Paint>) -> String {
     match fill {
         Some(Paint::Solid(c)) => format!("<a:solidFill>{}</a:solidFill>", color_xml(*c)),
         Some(Paint::Gradient(g)) => {
@@ -1052,7 +1052,7 @@ fn rebuild_sp_pr(src: &str, sp_pr: Option<Node>, shape: &Shape, changes: SpPrCha
         set(1, geometry_xml(&shape.geometry));
     }
     if changes.fill {
-        set(2, fill_xml(&shape.fill));
+        set(2, fill_xml(shape.fill.as_ref()));
     }
     if changes.line {
         set(3, line_xml(shape.line));
@@ -1080,7 +1080,7 @@ fn generate_shape(shape: &Shape, out: &mut SlideOut) -> Option<String> {
             let text_box = shape.placeholder.is_none() && shape.fill.is_none() && shape.line.is_none() && shape.text.is_some();
             let mut sp_pr = format!("<p:spPr>{}{}", xfrm_xml("a:xfrm", &shape.xfrm), geometry_xml(&shape.geometry));
             if shape.fill.is_some() || text_box {
-                sp_pr.push_str(&fill_xml(&shape.fill));
+                sp_pr.push_str(&fill_xml(shape.fill.as_ref()));
             }
             if shape.line.is_some() {
                 sp_pr.push_str(&line_xml(shape.line));
@@ -1438,13 +1438,13 @@ fn slide_xml_without_narration_timing(slide: &Slide, template: Option<&SlideSour
 /// `p:bg` with the slide's own fill.
 fn background_xml(bg: &Background, out: &mut SlideOut) -> String {
     let fill = match bg {
-        Background::Paint(p) => fill_xml(&Some(p.clone())),
+        Background::Paint(p) => fill_xml(Some(p)),
         Background::Picture { media } => match out.media.part_for(out.pres, media) {
             Some(part) => {
                 let rid = out.rel_for(&format!("{REL_BASE}image"), &part, false);
                 format!(r#"<a:blipFill dpi="0" rotWithShape="1"><a:blip r:embed="{rid}"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill>"#)
             }
-            None => fill_xml(&Some(Paint::Solid(Color::WHITE))),
+            None => fill_xml(Some(&Paint::Solid(Color::WHITE))),
         },
     };
     format!("<p:bg><p:bgPr>{fill}<a:effectLst/></p:bgPr></p:bg>")

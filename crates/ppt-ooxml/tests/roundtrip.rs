@@ -558,7 +558,7 @@ fn transitions_round_trip_and_edit() {
     // Unchanged slides keep their part; an edited transition replaces the old one; None removes it.
     let saved = save_pptx(&re).unwrap();
     let mut pres = parse_pptx(&saved).unwrap();
-    pres.slides[0].transition = Some(Transition { kind: TransitionKind::Circle, ..push.clone() });
+    pres.slides[0].transition = Some(Transition { kind: TransitionKind::Circle, ..push });
     pres.slides[1].transition = None;
     let saved2 = save_pptx(&pres).unwrap();
     let re = parse_pptx(&saved2).unwrap();

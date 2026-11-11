@@ -237,7 +237,7 @@ pub fn new_smartart(pres: &Presentation, kind: &str, slide: (i64, i64), labels: 
     let mut with_slide = overrides.to_vec();
     with_slide.push((sld_part.clone(), "application/vnd.openxmlformats-officedocument.presentationml.slide+xml".to_string()));
     let mut extra = parts.clone();
-    extra.push((sld_part.clone(), slide_xml.into_bytes()));
+    extra.push((sld_part, slide_xml.into_bytes()));
     extra.push((format!("ppt/slides/_rels/slide{sld}.xml.rels"), slide_rels.into_bytes()));
     let probe = rewrite_zip(
         package,

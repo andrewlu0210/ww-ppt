@@ -66,7 +66,7 @@ impl Editor {
         self.pres.slides[self.slide].shapes.push(shape);
         self.selection = vec![id];
         self.entered_group = None;
-        self.drag = Some(Drag { kind: DragKind::Draw(id), start: (ev.x, ev.y), origs: Vec::new(), base_selection: vec![], before: Some(before), moved: false });
+        self.drag = Some(Drag { kind: DragKind::Draw(id), start: (ev.x, ev.y), origs: Vec::new(), base_selection: vec![], before: Some(before), snapshot_on_move: false, moved: false });
         self.draw_shape_tool = Some(tool);
         true
     }
