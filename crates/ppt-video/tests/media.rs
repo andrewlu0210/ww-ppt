@@ -1,6 +1,7 @@
 //! Exports `samples/media-demo.pptx` (a video, looping music over two slides and a
 //! click-started video) and checks the file has both tracks (needs a GPU, AVFoundation
 //! and `ffprobe`; skipped without it).
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::process::Command;
 

@@ -19,3 +19,6 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 objc2-core-media = { version = "0.3", default-features = false, features = ["std", "CMTime", "CMSampleBuffer", "CMBlockBuffer"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFString", "CFNumber"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGImage", "CGContext", "CGColorSpace", "CGBitmapContext"] }
+
+[lints]
+workspace = true

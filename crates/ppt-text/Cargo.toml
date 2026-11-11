@@ -7,3 +7,6 @@ license.workspace = true
 [dependencies]
 ppt-model.workspace = true
 parley.workspace = true
+
+[lints]
+workspace = true

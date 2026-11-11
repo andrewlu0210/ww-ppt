@@ -1,6 +1,7 @@
 //! Inserts a new SmartArt of every layout into the sample deck and renders it,
 //! before and after a save and reopen.
 //! `cargo run -p ppt-vr --release --example smartart_new -- out-dir`
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_ooxml::{Labels, new_smartart, parse_pptx, save_pptx, smartart_kinds};
 use ppt_vr::{SlideRenderer, side_by_side};

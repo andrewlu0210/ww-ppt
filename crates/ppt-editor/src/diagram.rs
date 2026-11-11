@@ -178,7 +178,7 @@ impl Editor {
         shape.id = id;
         let data = data(&shape.kind).map(|d| d.as_ref().clone());
         self.pres.package = Some(package);
-        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
+        self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.push(shape);
         // The new texts may not fit their shapes as the starter's did.
         if let Some(d) = data {
             self.store_diagram(engine, self.slide, id, d);

@@ -1,5 +1,6 @@
 //! Draws text with outlines and shadows to a PNG, to look at.
 //! `cargo run -p ppt-vr --release --example text_effects -- out.png` (also writes out.pdf next to it).
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_editor::Editor;
 use ppt_model::{Color, Run, Shadow, TextBody, TextOutline, Xfrm};

@@ -12,3 +12,6 @@ krilla = { version = "0.8.2", default-features = false, features = ["raster-imag
 
 [dev-dependencies]
 ppt-ooxml.workspace = true
+
+[lints]
+workspace = true

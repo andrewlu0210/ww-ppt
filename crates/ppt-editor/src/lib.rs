@@ -415,7 +415,7 @@ impl Editor {
             self.push_undo(snap);
             self.notes_undo = Some(slide);
         }
-        self.pres.slide_mut(slide).unwrap().notes = text.to_string();
+        self.pres.slide_mut(slide).expect("checked above").notes = text.to_string();
         true
     }
 
@@ -1768,7 +1768,7 @@ impl Editor {
             shape.xfrm.x += offset;
             shape.xfrm.y += offset;
             ids.push(shape.id);
-            self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
+            self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.push(shape);
         }
         self.selection = ids;
         self.push_undo(before);
@@ -1792,7 +1792,7 @@ impl Editor {
         let before = self.snapshot();
         let selection = self.selection.clone();
         let entered = self.entered_group;
-        let shapes = &mut self.pres.slide_mut(self.slide).unwrap().shapes;
+        let shapes = &mut self.pres.slide_mut(self.slide).expect("the current slide exists").shapes;
         *shapes = reordered(std::mem::take(shapes), &selection, entered, order);
         // The snapshot already holds the original order.
         if *shapes == before.pres.slides[self.slide].shapes {
@@ -1845,7 +1845,7 @@ impl Editor {
         let mut body = TextBody { auto_grow: true, defaults: self.pres.text_defaults.clone(), ..Default::default() };
         body.paragraphs[0].end_style = self.pres.default_run_style();
         shape.text = Some(body);
-        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
+        self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.push(shape);
         self.push_undo(before);
         self.begin_text_edit(engine, id, true);
         self.fit_edited_shape(engine);
@@ -1866,7 +1866,7 @@ impl Editor {
         shape.geometry = Geometry::preset(preset);
         shape.fill = Some(Paint::Solid(Color::rgb(0x44, 0x72, 0xC4)));
         shape.line = Some(Line::new(Color::rgb(0x2F, 0x52, 0x8F), 12_700));
-        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
+        self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.push(shape);
         self.selection = vec![id];
         self.push_undo(before);
         true
@@ -1892,7 +1892,7 @@ impl Editor {
         shape.kind = ShapeKind::Picture { media: Some(key), crop: Default::default() };
         // A new picture keeps its proportions when resized, as in PowerPoint.
         shape.access.lock_aspect = true;
-        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
+        self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.push(shape);
         self.selection = vec![id];
         self.push_undo(before);
         true

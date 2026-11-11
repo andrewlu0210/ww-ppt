@@ -51,7 +51,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        let s = self.pres.slide_mut(slide).unwrap();
+        let s = self.pres.slide_mut(slide).expect("checked by has_narration");
         s.narration = None;
         s.shapes.retain(|sh| !(sh.name == NARRATION_NAME && matches!(sh.kind, ShapeKind::Picture { .. })));
         self.push_undo(before);

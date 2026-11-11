@@ -1,5 +1,6 @@
 //! The template follows the interface language. Kept in its own test binary
 //! because the language is process-wide.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_model::{Lang, set_lang};
 use ppt_ooxml::{parse_pptx, template_package};

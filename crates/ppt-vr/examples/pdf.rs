@@ -2,6 +2,7 @@
 //! `pdftoppm`) with the reference PDF and with the screen renderer.
 //! `cargo run -p ppt-vr --release --example pdf -- samples/vr/test.pptx [...]`
 //! Writes `target/vr-pdf/<name>.pdf` and `page-NN.png` (reference | PDF | screen).
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::path::Path;
 use std::process::Command;

@@ -87,7 +87,7 @@ impl Editor {
         let before = self.snapshot();
         let id = self.pres.alloc_id();
         let selection = self.selection.clone();
-        let shapes = &mut self.pres.slide_mut(self.slide).unwrap().shapes;
+        let shapes = &mut self.pres.slide_mut(self.slide).expect("the current slide exists").shapes;
         let top = shapes.iter().rposition(|s| selection.contains(&s.id)).unwrap_or(0);
         let below = shapes[..top].iter().filter(|s| !selection.contains(&s.id)).count();
         let (mut members, rest): (Vec<Shape>, Vec<Shape>) = shapes.drain(..).partition(|s| selection.contains(&s.id));
@@ -107,7 +107,7 @@ impl Editor {
     pub fn ungroup_selected(&mut self) -> bool {
         let Some(g) = self.selection_group().or_else(|| self.selected_shape().and_then(|s| s.group)) else { return false };
         let before = self.snapshot();
-        for s in self.pres.slide_mut(self.slide).unwrap().shapes.iter_mut().filter(|s| s.group == Some(g)) {
+        for s in self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.iter_mut().filter(|s| s.group == Some(g)) {
             s.group = None;
         }
         self.selection = self.current_shapes().iter().filter(|s| before.pres.shape(self.slide, s.id).is_some_and(|b| b.group == Some(g))).map(|s| s.id).collect();

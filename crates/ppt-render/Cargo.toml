@@ -11,3 +11,6 @@ ppt-text.workspace = true
 vello.workspace = true
 parley.workspace = true
 image.workspace = true
+
+[lints]
+workspace = true

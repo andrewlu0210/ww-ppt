@@ -3,6 +3,7 @@
 //! picture of each slide as this program draws it.
 //! `cargo run -p ppt-vr --release --example format_check -- out-dir`
 //! (the checklist is in `powerpoint-check.md`).
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_editor::{Editor, FillSpec, LineSpec, ShadowSpec, TextBoxSpec, TextEffectSpec, TextOutlineSpec};
 use ppt_model::{Anchor, Background, Color, Dash, EndKind, Gradient, GradientKind, LineEnd, Paint, Run, Xfrm};

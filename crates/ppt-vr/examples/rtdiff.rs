@@ -1,4 +1,5 @@
 //! Renders one slide of two decks side by side: `rtdiff a.pptx b.pptx <slide> out.png`.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 use ppt_vr::{SlideRenderer, compare, side_by_side};
 
 fn main() {

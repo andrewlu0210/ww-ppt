@@ -1,5 +1,6 @@
 //! A shape's edited fill and outline (gradient with a clear stop, line opacity, dash, arrowheads)
 //! survive saving and loading, both when the shape is patched in its slide and when it is new.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::sync::Arc;
 

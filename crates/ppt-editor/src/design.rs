@@ -23,7 +23,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        self.pres.slide_mut(self.slide).unwrap().background = bg;
+        self.pres.slide_mut(self.slide).expect("the current slide exists").background = bg;
         self.push_undo(before);
         true
     }
@@ -44,7 +44,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        self.pres.slide_mut(self.slide).unwrap().hide_background_graphics = hide;
+        self.pres.slide_mut(self.slide).expect("the current slide exists").hide_background_graphics = hide;
         self.push_undo(before);
         true
     }
@@ -57,7 +57,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        self.pres.slide_mut(index).unwrap().hidden = hidden;
+        self.pres.slide_mut(index).expect("checked above").hidden = hidden;
         self.push_undo(before);
         true
     }

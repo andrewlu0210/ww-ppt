@@ -1,4 +1,5 @@
 //! Prints how a font family resolves and which faces get registered.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 use ppt_fonts::FontService;
 use ppt_text::TextEngine;
 

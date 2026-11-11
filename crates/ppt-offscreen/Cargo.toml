@@ -13,3 +13,6 @@ ppt-pdf.workspace = true
 ppt-fonts.workspace = true
 image.workspace = true
 pollster = "0.4"
+
+[lints]
+workspace = true

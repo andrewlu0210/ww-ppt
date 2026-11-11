@@ -1,6 +1,7 @@
 //! Dev tool: `cargo run -p ppt-ooxml --example resave -- in.pptx out.pptx [--edit]`.
 //! Re-saves a deck; with `--edit` it also changes text, moves a shape and adds a slide;
 //! with `--anim` it edits the first animated slide's effects and adds a slide with new ones.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::sync::Arc;
 

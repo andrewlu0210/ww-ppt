@@ -247,7 +247,7 @@ impl Editor {
         if m.place == FindPlace::Notes {
             self.end_text_edit(engine);
             let before = self.snapshot();
-            let notes = &mut self.pres.slide_mut(m.slide).unwrap().notes;
+            let notes = &mut self.pres.slide_mut(m.slide).expect("a match is on an existing slide").notes;
             notes.replace_range(m.range.clone(), with);
             self.push_undo(before);
             return true;
@@ -324,7 +324,7 @@ impl Editor {
                 }
                 continue;
             }
-            let s = self.pres.slide_mut(slide).unwrap();
+            let s = self.pres.slide_mut(slide).expect("a match is on an existing slide");
             match place {
                 FindPlace::Notes => {
                     for r in ranges.iter().rev() {

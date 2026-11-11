@@ -902,7 +902,7 @@ fn patch_shape(shape: &Shape, src: &ShapeSource, force_xfrm: bool, out: &mut Sli
 
     // Pass 2: structural changes.
     let Ok(doc) = Document::parse(&wrapped) else { return wrapped[offset..wrapped.len() - 4].to_string() };
-    let el = doc.root_element().first_element_child().expect("element survives pass 1");
+    let Some(el) = doc.root_element().first_element_child() else { return wrapped[offset..wrapped.len() - 4].to_string() };
     let p = &src.parsed;
     let xfrm_changed = force_xfrm || shape.xfrm != p.xfrm;
     let fill_changed = shape.fill != p.fill;

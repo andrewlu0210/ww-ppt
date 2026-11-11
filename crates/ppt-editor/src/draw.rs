@@ -63,7 +63,7 @@ impl Editor {
             shape.fill = Some(Paint::Solid(Color::rgb(0x44, 0x72, 0xC4)));
             shape.line = Some(Line::new(Color::rgb(0x2F, 0x52, 0x8F), 12_700));
         }
-        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
+        self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.push(shape);
         self.selection = vec![id];
         self.entered_group = None;
         self.drag = Some(Drag { kind: DragKind::Draw(id), start: (ev.x, ev.y), origs: Vec::new(), base_selection: vec![], before: Some(before), snapshot_on_move: false, moved: false });

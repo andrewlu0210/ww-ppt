@@ -1,4 +1,5 @@
 //! Audio and video clips of `samples/media-demo.pptx` (made by `scripts/make_media_pptx.py`).
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_model::media::{ClipKind, ClipStart};
 

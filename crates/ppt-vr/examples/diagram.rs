@@ -3,6 +3,7 @@
 //! after a save and reopen. Also writes the deck with every SmartArt extended
 //! by one node, to open in PowerPoint.
 //! `cargo run -p ppt-vr --release --example diagram -- deck.pptx out-dir`
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::sync::Arc;
 

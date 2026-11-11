@@ -7,6 +7,11 @@ version = "1.0.1"
 edition = "2024"
 license = "MIT"
 
+# Production code states why a value must be there (`expect("…")`) or handles its absence.
+# Tests may unwrap (see clippy.toml).
+[workspace.lints.clippy]
+unwrap_used = "warn"
+
 [workspace.dependencies]
 ppt-model = { path = "crates/ppt-model" }
 ppt-ooxml = { path = "crates/ppt-ooxml" }

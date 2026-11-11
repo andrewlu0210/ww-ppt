@@ -3,6 +3,7 @@
 //! PowerPoint, and a picture of each slide as this program draws it.
 //! `cargo run -p ppt-vr --release --example smartart_check -- out-dir`
 //! (the checklist is in `powerpoint-check.md`).
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_editor::Editor;
 use ppt_model::diagram::Insert;

@@ -1,5 +1,6 @@
 //! Contact sheet of transition frames (25 / 50 / 75 %) between the first two
 //! slides of a deck: `cargo run -p ppt-vr --release --example transitions -- deck.pptx out.png`.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_model::transition::{Dir, TransitionKind};
 use ppt_vr::{SlideRenderer, side_by_side};

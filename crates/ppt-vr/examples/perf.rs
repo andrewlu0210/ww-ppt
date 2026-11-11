@@ -2,6 +2,7 @@
 //! the process's memory at each step. Native code: the app runs the same code
 //! as WebAssembly, which is slower (single-threaded, no SIMD by default).
 //! `cargo run -p ppt-vr --release --example perf -- samples/vr/test7.pptx`
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::time::{Duration, Instant};
 

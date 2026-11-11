@@ -102,7 +102,8 @@ fn is_pptx(path: &str) -> bool {
 /// plus any open requests that arrived before the frontend was ready.
 #[tauri::command]
 fn startup_files(requests: State<'_, Mutex<OpenRequests>>) -> Vec<String> {
-    let mut requests = requests.lock().unwrap();
+    // A poisoned lock still holds a usable list: keep going rather than panic again.
+    let mut requests = requests.lock().unwrap_or_else(|e| e.into_inner());
     requests.ready = true;
     std::env::args().skip(1).filter(|a| is_pptx(a)).chain(requests.pending.drain(..)).collect()
 }
@@ -118,7 +119,7 @@ fn on_open_urls(app: &tauri::AppHandle, urls: &[tauri::Url]) {
         return;
     }
     let state = app.state::<Mutex<OpenRequests>>();
-    let mut requests = state.lock().unwrap();
+    let mut requests = state.lock().unwrap_or_else(|e| e.into_inner());
     if requests.ready {
         let _ = app.emit("open-files", paths);
         if let Some(window) = app.get_webview_window("main") {
@@ -166,7 +167,9 @@ fn set_language_pref(value: String) -> Result<(), String> {
     if !matches!(value.as_str(), "zh-Hant" | "zh-Hans" | "en") {
         return Err("unsupported language".into());
     }
-    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
     std::fs::write(&path, value).map_err(|e| e.to_string())
 }
 

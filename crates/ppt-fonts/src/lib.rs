@@ -135,7 +135,8 @@ impl FontService {
 
     /// Installed font families for the font picker, sorted, without hidden system faces.
     pub fn families(&self) -> Vec<String> {
-        let mut collection = self.collection.lock().expect("font collection lock");
+        // A poisoned lock still holds a usable cache: keep going rather than panic again.
+        let mut collection = self.collection.lock().unwrap_or_else(|e| e.into_inner());
         let mut names: Vec<String> = collection.family_names().filter(|n| !n.starts_with('.')).map(str::to_string).collect();
         names.sort_by_key(|n| n.to_lowercase());
         names.dedup();
@@ -145,7 +146,7 @@ impl FontService {
     /// Resolves `requested` to installed font files, applying substitutions and
     /// falling back to a default sans-serif (CJK-aware) family.
     pub fn resolve(&self, requested: &str) -> Option<ResolvedFont> {
-        let mut collection = self.collection.lock().expect("font collection lock");
+        let mut collection = self.collection.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((family, paths)) = Self::files_of(&mut collection, requested) {
             return Some(ResolvedFont { family, paths });
         }

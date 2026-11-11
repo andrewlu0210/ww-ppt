@@ -1,4 +1,5 @@
 //! Parses samples/m0-demo.pptx, generated from python-pptx's default Office template.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_model::{Align, Anchor, ShapeKind};
 

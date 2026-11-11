@@ -61,7 +61,7 @@ impl Editor {
         }
         let background: Vec<Shape> = new.background_shapes.iter().map(|s| Shape { id: self.pres.alloc_id(), ..s.clone() }).collect();
 
-        let slide = self.pres.slide_mut(self.slide).unwrap();
+        let slide = self.pres.slide_mut(self.slide).expect("the current slide exists");
         let slide_phs: Vec<(usize, Placeholder)> = slide.shapes.iter().enumerate().filter_map(|(i, s)| s.placeholder.clone().map(|p| (i, p))).collect();
         let layout_refs: Vec<&Placeholder> = new.placeholders.iter().filter_map(|s| s.placeholder.as_ref()).collect();
         let slide_refs: Vec<&Placeholder> = slide_phs.iter().map(|(_, p)| p).collect();

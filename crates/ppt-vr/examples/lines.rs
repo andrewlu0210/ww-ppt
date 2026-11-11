@@ -1,4 +1,5 @@
 //! Prints paragraph settings and line positions of a named shape: `lines deck.pptx <slide> <shape name>`.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 use ppt_vr::SlideRenderer;
 
 fn main() {

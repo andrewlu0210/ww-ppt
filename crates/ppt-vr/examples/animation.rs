@@ -1,6 +1,7 @@
 //! Contact sheet of a slide's animation: one row per click, frames at 0 / 25 /
 //! 50 / 75 / 100 % of what that click starts.
 //! `cargo run -p ppt-vr --release --example animation -- deck.pptx <slide> out.png`
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_model::anim::{Player, SlideStage};
 use ppt_vr::{SlideRenderer, side_by_side};

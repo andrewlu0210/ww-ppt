@@ -1,4 +1,5 @@
 //! Exports the sample deck to a real `.mp4` (needs a GPU and AVFoundation).
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use ppt_video::{VideoOptions, export, frames};
 

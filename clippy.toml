@@ -1,0 +1,2 @@
+# Tests may unwrap freely; `unwrap_used` (Cargo.toml) applies to production code.
+allow-unwrap-in-tests = true

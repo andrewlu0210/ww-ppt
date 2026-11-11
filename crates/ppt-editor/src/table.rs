@@ -121,8 +121,10 @@ impl Editor {
         }
         let cols = table.col_offsets();
         let mut rows = vec![0];
+        let mut y = 0;
         for rh in &heights {
-            rows.push(rows.last().unwrap() + rh);
+            y += rh;
+            rows.push(y);
         }
         let col = cols.iter().rposition(|&cx| cx as f64 <= lx).unwrap_or(0).min(table.cols.len() - 1);
         let row = rows.iter().rposition(|&ry| ry as f64 <= ly).unwrap_or(0).min(heights.len().saturating_sub(1));
@@ -447,7 +449,7 @@ impl Editor {
         let id = self.pres.alloc_id();
         let mut shape = Shape::new(id, format!("{} {}", ppt_model::lang().pick("表格", "表格", "Table"), id.0), xfrm);
         shape.kind = ShapeKind::Table(Box::new(table));
-        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
+        self.pres.slide_mut(self.slide).expect("the current slide exists").shapes.push(shape);
         self.layout_table(engine, id);
         self.push_undo(before);
         self.begin_cell_edit(engine, id, 0, 0);

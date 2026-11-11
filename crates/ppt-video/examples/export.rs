@@ -1,5 +1,6 @@
 //! Exports a deck as a video from the command line.
 //! `cargo run -p ppt-video --release --example export -- deck.pptx out.mp4 [width] [seconds-per-slide]`
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::time::Instant;
 

@@ -1,5 +1,6 @@
 //! SmartArt editing against the visual-regression samples: read the node tree,
 //! edit it, save, and reopen.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::io::{Cursor, Read};
 

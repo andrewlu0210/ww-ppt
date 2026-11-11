@@ -1,4 +1,5 @@
 //! Save → reopen round trips against the sample deck and the built-in template.
+#![allow(clippy::unwrap_used)] // test and tool code: a failure should stop with a backtrace
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
