@@ -476,10 +476,6 @@ button {
   flex: 1;
 }
 
-.status-bar .muted {
-  color: var(--muted);
-}
-
 .status-bar button {
   border: 0;
   background: transparent;

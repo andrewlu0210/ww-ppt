@@ -50,7 +50,6 @@ export function StatusBar({ status, fontsLoading, notesOpen, viewMode, hasNarrat
         {a11yIssues === 0 ? t("status.a11yGood") : t("status.a11yIssues", { count: a11yIssues })}
       </button>
       <span className="spacer" />
-      <span className="muted">WebGPU · vello · {status.frameMs.toFixed(1)} ms</span>
       <button className={notesOpen ? "toggle on" : "toggle"} onClick={() => run({ kind: "toggleNotes" })} onMouseDown={(e) => e.preventDefault()} aria-pressed={notesOpen} title={t("status.toggleNotes")}>
         {t("status.notes")}
       </button>
