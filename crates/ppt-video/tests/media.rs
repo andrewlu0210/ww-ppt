@@ -36,7 +36,7 @@ fn a_narration_stretches_its_slide_and_is_heard() {
     // The deck's 2 s music file as slide 3's narration, through a save and load like a real recording.
     let music = ppt_ooxml::media_clips(&pres).into_iter().find(|c| c.kind == ClipKind::Audio).unwrap();
     pres.media.insert("new/narration1.m4a".into(), pres.media.get(&music.part).unwrap());
-    pres.slides[2].narration = Some(Narration { media: "new/narration1.m4a".into() });
+    pres.slide_mut(2).unwrap().narration = Some(Narration { media: "new/narration1.m4a".into() });
     let pres = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/video-test");

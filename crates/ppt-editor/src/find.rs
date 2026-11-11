@@ -247,7 +247,7 @@ impl Editor {
         if m.place == FindPlace::Notes {
             self.end_text_edit(engine);
             let before = self.snapshot();
-            let notes = &mut self.pres.slides[m.slide].notes;
+            let notes = &mut self.pres.slide_mut(m.slide).unwrap().notes;
             notes.replace_range(m.range.clone(), with);
             self.push_undo(before);
             return true;
@@ -324,7 +324,7 @@ impl Editor {
                 }
                 continue;
             }
-            let s = &mut self.pres.slides[slide];
+            let s = self.pres.slide_mut(slide).unwrap();
             match place {
                 FindPlace::Notes => {
                     for r in ranges.iter().rev() {

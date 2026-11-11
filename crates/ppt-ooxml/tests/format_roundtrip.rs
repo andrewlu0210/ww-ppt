@@ -30,7 +30,7 @@ fn edited_fill_and_outline_round_trip() {
     let mut pres = deck();
     // An existing plain shape (patched in place) and a new shape and a new line.
     let existing = pres.slides.iter().flat_map(|s| &s.shapes).find(|s| matches!(s.kind, ShapeKind::Shape) && !s.geometry.is_line()).map(|s| s.name.clone()).expect("a plain shape in the sample");
-    for slide in &mut pres.slides {
+    for slide in pres.slides_mut() {
         for s in slide.shapes.iter_mut().filter(|s| s.name == existing) {
             s.fill = Some(Paint::Gradient(Arc::new(gradient())));
             s.line = Some(Line { head: LineEnd::NONE, tail: LineEnd::NONE, ..styled_line() });
@@ -42,12 +42,12 @@ fn edited_fill_and_outline_round_trip() {
     fresh.fill = Some(Paint::Gradient(Arc::new(Gradient { kind: GradientKind::Path { circle: true, focus: [0.5; 4] }, ..gradient() })));
     fresh.line = Some(Line { head: LineEnd::NONE, tail: LineEnd::NONE, ..styled_line() });
     fresh.shadow = Some(shadow());
-    pres.slides[0].shapes.push(fresh);
+    pres.slide_mut(0).unwrap().shapes.push(fresh);
     let line_id = pres.alloc_id();
     let mut arrow = Shape::new(line_id, "arrow", Xfrm::new(500_000, 500_000, 3_000_000, 0));
     arrow.geometry = Geometry::preset("line");
     arrow.line = Some(styled_line());
-    pres.slides[0].shapes.push(arrow);
+    pres.slide_mut(0).unwrap().shapes.push(arrow);
 
     let again = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
     let same_fill = |a: &Option<Paint>, b: &Option<Paint>| match (a, b) {
@@ -77,7 +77,7 @@ fn lock_aspect_and_text_box_settings_round_trip() {
     let mut pres = deck();
     // A shape that exists (patched in place), with text: lock the aspect ratio and change the text box.
     let existing = pres.slides.iter().flat_map(|s| &s.shapes).find(|s| matches!(s.kind, ShapeKind::Shape) && !s.geometry.is_line() && s.text.is_some()).map(|s| s.name.clone()).expect("a shape with text");
-    for slide in &mut pres.slides {
+    for slide in pres.slides_mut() {
         for s in slide.shapes.iter_mut().filter(|s| s.name == existing) {
             s.access.lock_aspect = true;
             let body = s.text.as_mut().unwrap();
@@ -92,8 +92,8 @@ fn lock_aspect_and_text_box_settings_round_trip() {
     let mut locked = Shape::new(a, "locked-aspect", Xfrm::new(1_000_000, 1_000_000, 1_000_000, 1_000_000));
     locked.access.lock_aspect = true;
     let free = Shape::new(b, "free-aspect", Xfrm::new(3_000_000, 1_000_000, 1_000_000, 1_000_000));
-    pres.slides[0].shapes.push(locked);
-    pres.slides[0].shapes.push(free);
+    pres.slide_mut(0).unwrap().shapes.push(locked);
+    pres.slide_mut(0).unwrap().shapes.push(free);
 
     let again = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
     assert!(find(&again, &existing).access.lock_aspect);
@@ -103,7 +103,7 @@ fn lock_aspect_and_text_box_settings_round_trip() {
     assert!(!find(&again, "free-aspect").access.lock_aspect);
     // Turning it off again on a loaded shape removes the attribute.
     let mut pres2 = again;
-    for slide in &mut pres2.slides {
+    for slide in pres2.slides_mut() {
         for s in slide.shapes.iter_mut().filter(|s| s.name == "locked-aspect" || s.name == existing) {
             s.access.lock_aspect = false;
         }
@@ -115,7 +115,7 @@ fn lock_aspect_and_text_box_settings_round_trip() {
 #[test]
 fn a_gradient_background_with_several_stops_round_trips() {
     let mut pres = deck();
-    pres.slides[0].background = Some(ppt_model::Background::Paint(Paint::Gradient(Arc::new(Gradient {
+    pres.slide_mut(0).unwrap().background = Some(ppt_model::Background::Paint(Paint::Gradient(Arc::new(Gradient {
         stops: vec![(0.0, Color::rgb(0x1F, 0x38, 0x64)), (0.5, Color::rgb(0x2E, 0x75, 0xB6)), (1.0, Color::rgb(0xBD, 0xD7, 0xEE))],
         kind: GradientKind::Linear { angle: 90.0, scaled: false },
         rotate_with_shape: true,
@@ -137,7 +137,7 @@ fn text_outline_and_shadow_round_trip() {
     let name = first_text(&pres);
     let outline = TextOutline { color: Color { r: 200, g: 30, b: 60, a: 180 }, width: 19_050 };
     let shadow = Shadow { color: Color { r: 0, g: 0, b: 0, a: 100 }, blur: 63_500, dist: 38_100, dir: 90.0 };
-    for slide in &mut pres.slides {
+    for slide in pres.slides_mut() {
         for s in slide.shapes.iter_mut().filter(|s| s.name == name) {
             let run = s.text.as_mut().unwrap().paragraphs.iter_mut().flat_map(|p| p.runs.iter_mut()).find(|r| !r.text.is_empty()).unwrap();
             run.style.outline = Some(outline);
@@ -156,7 +156,7 @@ fn text_outline_and_shadow_round_trip() {
 
     // Switching them off again is saved as well.
     let mut cleared = again;
-    for slide in &mut cleared.slides {
+    for slide in cleared.slides_mut() {
         for s in slide.shapes.iter_mut().filter(|s| s.name == name) {
             for r in s.text.as_mut().unwrap().paragraphs.iter_mut().flat_map(|p| p.runs.iter_mut()) {
                 r.style.outline = None;

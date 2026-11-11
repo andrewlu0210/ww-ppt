@@ -86,15 +86,15 @@ impl Editor {
                         _ => hf.slide_number.then(|| (number.clone(), Some(Field::SLIDE_NUMBER))),
                     }
                 };
-                let slide = &mut self.pres.slides[i];
-                let existing = slide.shapes.iter().position(|s| kind_of(s) == Some(kind));
+                // Look first: taking the slide for writing copies it when an undo snapshot shares it.
+                let existing = self.pres.slides[i].shapes.iter().position(|s| kind_of(s) == Some(kind));
                 match (content, existing) {
                     (None, Some(at)) => {
-                        slide.shapes.remove(at);
+                        self.pres.slide_mut(i).unwrap().shapes.remove(at);
                         changed = true;
                     }
                     (Some((text, field)), Some(at)) => {
-                        if let Some(body) = &mut slide.shapes[at].text {
+                        if let Some(body) = &mut self.pres.slide_mut(i).unwrap().shapes[at].text {
                             let old = body.clone();
                             set_text(body, &text, field);
                             // Same text and kind of field: leave the slide as it was.
@@ -111,7 +111,7 @@ impl Editor {
                         let mut shape = Shape { id: self.pres.alloc_id(), source: None, ..proto.clone() };
                         let body = shape.text.get_or_insert_with(TextBody::default);
                         set_text(body, &text, field);
-                        self.pres.slides[i].shapes.push(shape);
+                        self.pres.slide_mut(i).unwrap().shapes.push(shape);
                         changed = true;
                     }
                     (None, None) => {}

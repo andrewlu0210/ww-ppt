@@ -38,7 +38,7 @@ fn part(bytes: &[u8], name: &str) -> String {
 
 /// Applies `edit` to the diagram at (slide, shape) and rebuilds its drawing.
 fn edit(pres: &mut Presentation, slide: usize, shape: usize, edit: impl FnOnce(&mut Diagram)) {
-    let s = &mut pres.slides[slide].shapes[shape];
+    let s = &mut pres.slide_mut(slide).unwrap().shapes[shape];
     let ShapeKind::Diagram { shapes, data: Some(data), .. } = &mut s.kind else { panic!("not a diagram") };
     let mut d = (**data).clone();
     edit(&mut d);
@@ -410,7 +410,7 @@ fn with_new_smartart(kind: &str) -> Presentation {
     let (mut shape, package) = ppt_ooxml::new_smartart(&pres, kind, (pres.slide_width, pres.slide_height), &labels).unwrap();
     shape.id = pres.alloc_id();
     pres.package = Some(package);
-    pres.slides[0].shapes.push(shape);
+    pres.slide_mut(0).unwrap().shapes.push(shape);
     pres
 }
 
@@ -488,7 +488,7 @@ fn two_new_smartarts_get_parts_of_their_own() {
     let (mut shape, package) = ppt_ooxml::new_smartart(&pres, "vList2", (pres.slide_width, pres.slide_height), &labels).unwrap();
     shape.id = pres.alloc_id();
     pres.package = Some(package);
-    pres.slides[0].shapes.push(shape);
+    pres.slide_mut(0).unwrap().shapes.push(shape);
     let saved = save_pptx(&pres).unwrap();
     let zip = zip::ZipArchive::new(Cursor::new(saved.as_slice())).unwrap();
     let data: Vec<String> = zip.file_names().filter_map(Result::ok).map(|n| n.into_owned()).filter(|n| n.starts_with("ppt/diagrams/data")).collect();

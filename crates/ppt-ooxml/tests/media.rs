@@ -33,7 +33,7 @@ fn with_narration() -> ppt_model::Presentation {
     let music = ppt_ooxml::media_clips(&pres).into_iter().find(|c| c.kind == ClipKind::Audio).unwrap();
     let bytes = pres.media.get(&music.part).unwrap();
     pres.media.insert("new/narration1.m4a".into(), bytes);
-    pres.slides[2].narration = Some(ppt_model::media::Narration { media: "new/narration1.m4a".into() });
+    pres.slide_mut(2).unwrap().narration = Some(ppt_model::media::Narration { media: "new/narration1.m4a".into() });
     pres
 }
 
@@ -59,7 +59,7 @@ fn a_narration_is_saved_as_an_audio_object_that_plays_by_itself() {
 fn a_narration_joins_existing_animations() {
     // Slide 2 has its own timing (music and a click-started video): the narration is added to it.
     let mut pres = with_narration();
-    pres.slides[1].narration = pres.slides[2].narration.take();
+    pres.slide_mut(1).unwrap().narration = pres.slide_mut(2).unwrap().narration.take();
     let again = ppt_ooxml::parse_pptx(&ppt_ooxml::save_pptx(&pres).unwrap()).unwrap();
     let clips = ppt_ooxml::media_clips(&again);
     let on_two: Vec<_> = clips.iter().filter(|c| c.slide == 1).collect();

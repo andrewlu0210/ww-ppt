@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn grid_lines_run_through_the_center() {
         let mut pres = Presentation::default();
-        pres.slides.push(Slide::default());
+        pres.slides.push(std::sync::Arc::new(Slide::default()));
         pres.view.grid_spacing = 360_000;
         let e = Editor::new(pres);
         let w = e.pres.slide_width;
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn showing_guides_adds_two_when_there_are_none() {
         let mut pres = Presentation::default();
-        pres.slides.push(Slide::default());
+        pres.slides.push(std::sync::Arc::new(Slide::default()));
         let mut e = Editor::new(pres);
         let mut engine = ppt_text::TextEngine::new(false);
         assert!(e.set_show_guides(&mut engine, true));

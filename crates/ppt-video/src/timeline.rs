@@ -150,7 +150,7 @@ mod tests {
 
     fn deck(slides: Vec<Slide>) -> Presentation {
         let mut pres = Presentation::default();
-        pres.slides = slides;
+        pres.slides = slides.into_iter().map(std::sync::Arc::new).collect();
         pres
     }
 

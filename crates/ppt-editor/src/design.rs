@@ -23,7 +23,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        self.pres.slides[self.slide].background = bg;
+        self.pres.slide_mut(self.slide).unwrap().background = bg;
         self.push_undo(before);
         true
     }
@@ -44,7 +44,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        self.pres.slides[self.slide].hide_background_graphics = hide;
+        self.pres.slide_mut(self.slide).unwrap().hide_background_graphics = hide;
         self.push_undo(before);
         true
     }
@@ -57,7 +57,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        self.pres.slides[index].hidden = hidden;
+        self.pres.slide_mut(index).unwrap().hidden = hidden;
         self.push_undo(before);
         true
     }
@@ -71,7 +71,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        for s in &mut self.pres.slides {
+        for s in self.pres.slides_mut() {
             s.background = bg.clone();
             s.hide_background_graphics = hide;
         }

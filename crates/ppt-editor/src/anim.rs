@@ -29,7 +29,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        let Some(slide) = self.pres.slides.get_mut(self.slide) else { return false };
+        let Some(slide) = self.pres.slide_mut(self.slide) else { return false };
         let mut timing = slide.timing.as_deref().cloned().unwrap_or_else(Timing::new);
         timing.set_effects(effects);
         slide.timing = (!timing.is_empty()).then(|| Arc::new(timing));
@@ -164,7 +164,7 @@ impl Editor {
     /// After shapes were deleted, grouped or ungrouped: drops effects on shapes
     /// that are gone or now inside a group, and follows group membership.
     pub(crate) fn prune_animations(&mut self) {
-        let Some(slide) = self.pres.slides.get_mut(self.slide) else { return };
+        let Some(slide) = self.pres.slide_mut(self.slide) else { return };
         let Some(timing) = slide.timing.as_deref() else { return };
         let shapes = &slide.shapes;
         let keep = |e: ShapeId| shapes.iter().any(|s| (s.id == e && s.group.is_none()) || s.group == Some(e));

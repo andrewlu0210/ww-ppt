@@ -415,7 +415,7 @@ impl Editor {
             self.push_undo(snap);
             self.notes_undo = Some(slide);
         }
-        self.pres.slides[slide].notes = text.to_string();
+        self.pres.slide_mut(slide).unwrap().notes = text.to_string();
         true
     }
 
@@ -429,7 +429,7 @@ impl Editor {
         let snap = self.snapshot();
         self.push_undo(snap);
         for i in targets {
-            if let Some(s) = self.pres.slides.get_mut(i) {
+            if let Some(s) = self.pres.slide_mut(i) {
                 s.transition = t.clone();
             }
         }
@@ -533,7 +533,7 @@ impl Editor {
         }
         let before = self.snapshot();
         let selection = self.selection.clone();
-        let Some(slide) = self.pres.slides.get_mut(self.slide) else { return false };
+        let Some(slide) = self.pres.slide_mut(self.slide) else { return false };
         for shape in slide.shapes.iter_mut().filter(|s| selection.contains(&s.id)) {
             f(shape);
         }
@@ -1132,7 +1132,7 @@ impl Editor {
             return;
         }
         if edit.remove_if_empty && body.is_empty() {
-            if let Some(slide) = self.pres.slides.get_mut(self.slide) {
+            if let Some(slide) = self.pres.slide_mut(self.slide) {
                 slide.shapes.retain(|s| s.id != edit.shape);
             }
             self.selection.clear();
@@ -1244,7 +1244,7 @@ impl Editor {
             return;
         }
         let id = edit.shape;
-        let Some(shape) = self.pres.slides.get_mut(self.slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) else { return };
+        let Some(shape) = self.pres.slide_mut(self.slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) else { return };
         edit.frame = TextFrame::of(shape.xfrm, &shape.geometry);
         edit.rich.set_width(engine, text_width_pt(&edit.frame, &edit.rich.body));
         let body = &edit.rich.body;
@@ -1694,7 +1694,7 @@ impl Editor {
         }
         let before = self.snapshot();
         let selection = std::mem::take(&mut self.selection);
-        let Some(slide) = self.pres.slides.get_mut(self.slide) else { return false };
+        let Some(slide) = self.pres.slide_mut(self.slide) else { return false };
         slide.shapes.retain(|s| !selection.contains(&s.id));
         self.prune_animations();
         self.push_undo(before);
@@ -1768,7 +1768,7 @@ impl Editor {
             shape.xfrm.x += offset;
             shape.xfrm.y += offset;
             ids.push(shape.id);
-            self.pres.slides[self.slide].shapes.push(shape);
+            self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
         }
         self.selection = ids;
         self.push_undo(before);
@@ -1792,7 +1792,7 @@ impl Editor {
         let before = self.snapshot();
         let selection = self.selection.clone();
         let entered = self.entered_group;
-        let shapes = &mut self.pres.slides[self.slide].shapes;
+        let shapes = &mut self.pres.slide_mut(self.slide).unwrap().shapes;
         *shapes = reordered(std::mem::take(shapes), &selection, entered, order);
         // The snapshot already holds the original order.
         if *shapes == before.pres.slides[self.slide].shapes {
@@ -1845,7 +1845,7 @@ impl Editor {
         let mut body = TextBody { auto_grow: true, defaults: self.pres.text_defaults.clone(), ..Default::default() };
         body.paragraphs[0].end_style = self.pres.default_run_style();
         shape.text = Some(body);
-        self.pres.slides[self.slide].shapes.push(shape);
+        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
         self.push_undo(before);
         self.begin_text_edit(engine, id, true);
         self.fit_edited_shape(engine);
@@ -1866,7 +1866,7 @@ impl Editor {
         shape.geometry = Geometry::preset(preset);
         shape.fill = Some(Paint::Solid(Color::rgb(0x44, 0x72, 0xC4)));
         shape.line = Some(Line::new(Color::rgb(0x2F, 0x52, 0x8F), 12_700));
-        self.pres.slides[self.slide].shapes.push(shape);
+        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
         self.selection = vec![id];
         self.push_undo(before);
         true
@@ -1892,7 +1892,7 @@ impl Editor {
         shape.kind = ShapeKind::Picture { media: Some(key), crop: Default::default() };
         // A new picture keeps its proportions when resized, as in PowerPoint.
         shape.access.lock_aspect = true;
-        self.pres.slides[self.slide].shapes.push(shape);
+        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
         self.selection = vec![id];
         self.push_undo(before);
         true
@@ -1909,7 +1909,7 @@ impl Editor {
             .unwrap_or(if self.pres.layouts.len() > 1 { 1 } else { 0 });
         let slide = self.pres.slide_from_layout(layout);
         let at = if self.pres.slides.is_empty() { 0 } else { self.slide + 1 };
-        self.pres.slides.insert(at, slide);
+        self.pres.slides.insert(at, std::sync::Arc::new(slide));
         self.slide = at;
         self.selection.clear();
         self.push_undo(before);
@@ -1918,10 +1918,10 @@ impl Editor {
 
     pub fn duplicate_slide(&mut self, engine: &mut TextEngine, index: usize) -> bool {
         self.end_text_edit(engine);
-        let Some(src) = self.pres.slides.get(index).cloned() else { return false };
+        let Some(src) = self.pres.slides.get(index).map(|s| Slide::clone(s)) else { return false };
         let before = self.snapshot();
         let copy = self.fresh_copy(src);
-        self.pres.slides.insert(index + 1, copy);
+        self.pres.slides.insert(index + 1, std::sync::Arc::new(copy));
         self.slide = index + 1;
         self.selection.clear();
         self.push_undo(before);
@@ -1950,7 +1950,7 @@ impl Editor {
 
     /// Takes slide `index` for the slide clipboard.
     pub fn copy_slide(&self, index: usize) -> Option<SlideClip> {
-        let slide = self.pres.slides.get(index)?.clone();
+        let slide = Slide::clone(self.pres.slides.get(index)?);
         let layout_name = slide.layout.and_then(|l| self.pres.layouts.get(l)).map(|l| l.name.clone());
         let mut keys: Vec<&String> = slide
             .shapes
@@ -2036,7 +2036,7 @@ impl Editor {
         }
         let copy = self.fresh_copy(slide);
         let at = after.map_or(self.pres.slides.len(), |i| (i + 1).min(self.pres.slides.len()));
-        self.pres.slides.insert(at, copy);
+        self.pres.slides.insert(at, std::sync::Arc::new(copy));
         self.slide = at;
         self.selection.clear();
         self.push_undo(before);

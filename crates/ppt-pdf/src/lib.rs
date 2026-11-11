@@ -132,7 +132,7 @@ pub fn export_pdf(pres: &Presentation, cx: &mut RenderCtx, opts: PdfOptions) -> 
         // A PDF needs a page: an empty one when every slide is hidden.
         doc.start_page_with(settings()?).finish();
     }
-    let title = pres.slides.iter().find_map(title_of).unwrap_or_else(|| ppt_model::lang().pick("簡報", "演示文稿", "Presentation").to_string());
+    let title = pres.slides.iter().find_map(|s| title_of(s)).unwrap_or_else(|| ppt_model::lang().pick("簡報", "演示文稿", "Presentation").to_string());
     doc.set_metadata(Metadata::new().language(LANG.to_string()).title(title));
     doc.set_tag_tree(tree);
     doc.finish().map_err(|e| format!("{e:?}"))
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn one_page_per_shown_slide_with_embedded_text() {
         let mut pres = ppt_ooxml::parse_pptx(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap()).unwrap();
-        pres.slides[1].hidden = true;
+        pres.slide_mut(1).unwrap().hidden = true;
         let mut engine = TextEngine::new(false);
         engine.register_font(std::fs::read("/System/Library/Fonts/Helvetica.ttc").unwrap());
         engine.set_fallbacks(vec!["Helvetica".into()]);
@@ -476,7 +476,7 @@ mod tests {
         let plain = export(&load());
         let mut styled = load();
         let mut changed = false;
-        for shape in styled.slides.iter_mut().flat_map(|s| s.shapes.iter_mut()) {
+        for shape in styled.slides_mut().flat_map(|s| s.shapes.iter_mut()) {
             for run in shape.text.iter_mut().flat_map(|t| t.paragraphs.iter_mut()).flat_map(|p| p.runs.iter_mut()) {
                 run.style.outline = Some(ppt_model::TextOutline { color: ppt_model::Color::rgb(255, 0, 0), width: 19_050 });
                 run.style.shadow = Some(ppt_model::Shadow { color: ppt_model::Color { r: 0, g: 0, b: 0, a: 128 }, blur: 50_800, dist: 38_100, dir: 45.0 });
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn tags_give_headings_paragraphs_and_described_figures() {
         let mut pres = ppt_ooxml::parse_pptx(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap()).unwrap();
-        let pic = pres.slides[3].shapes.iter_mut().find(|s| matches!(s.kind, ShapeKind::Picture { .. })).unwrap();
+        let pic = pres.slide_mut(3).unwrap().shapes.iter_mut().find(|s| matches!(s.kind, ShapeKind::Picture { .. })).unwrap();
         pic.access.alt_text = "彩色漸層圖片".into();
         let mut engine = TextEngine::new(false);
         engine.register_font(std::fs::read("/System/Library/Fonts/Helvetica.ttc").unwrap());

@@ -12,7 +12,7 @@ use ppt_vr::{SlideRenderer, side_by_side};
 
 fn edited(pres: &Presentation, slide: usize, shape: usize, f: &dyn Fn(&mut Diagram)) -> Presentation {
     let mut pres = pres.clone();
-    if let ShapeKind::Diagram { shapes, data: Some(data), .. } = &mut pres.slides[slide].shapes[shape].kind {
+    if let ShapeKind::Diagram { shapes, data: Some(data), .. } = &mut pres.slide_mut(slide).unwrap().shapes[shape].kind {
         let mut d = (**data).clone();
         f(&mut d);
         *shapes = Arc::new(d.layout());

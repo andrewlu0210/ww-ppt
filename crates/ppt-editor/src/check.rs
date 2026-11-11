@@ -106,7 +106,7 @@ impl Editor {
     /// Every accessibility problem in the deck, by slide, errors first within a slide.
     pub fn check_accessibility(&self) -> Vec<Issue> {
         let mut out = Vec::new();
-        let titles: Vec<String> = self.pres.slides.iter().map(slide_title).collect();
+        let titles: Vec<String> = self.pres.slides.iter().map(|s| slide_title(s)).collect();
         for (i, slide) in self.pres.slides.iter().enumerate() {
             let push = |out: &mut Vec<Issue>, shape: Option<ShapeId>, severity, kind, message: String| out.push(Issue { slide: i, shape, severity, kind, message });
             if titles[i].is_empty() {
@@ -212,9 +212,9 @@ mod tests {
         // Read before the text above it.
         let lower = text(pres.alloc_id(), "Lower", "下方", 0, 2000);
         let upper = text(pres.alloc_id(), "Upper", "上方", 0, 500);
-        pres.slides.push(Slide { shapes: vec![t.clone(), pic, pale, lower, upper], background: Some(Background::WHITE), ..Default::default() });
-        pres.slides.push(Slide { shapes: vec![t], background: Some(Background::WHITE), ..Default::default() });
-        pres.slides.push(Slide { background: Some(Background::WHITE), ..Default::default() });
+        pres.slides.push(std::sync::Arc::new(Slide { shapes: vec![t.clone(), pic, pale, lower, upper], background: Some(Background::WHITE), ..Default::default() }));
+        pres.slides.push(std::sync::Arc::new(Slide { shapes: vec![t], background: Some(Background::WHITE), ..Default::default() }));
+        pres.slides.push(std::sync::Arc::new(Slide { background: Some(Background::WHITE), ..Default::default() }));
         let e = Editor::new(pres);
         let kinds: Vec<(usize, IssueKind)> = e.check_accessibility().iter().map(|i| (i.slide, i.kind)).collect();
         assert_eq!(

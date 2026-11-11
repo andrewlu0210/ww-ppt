@@ -220,7 +220,7 @@ pub fn parse_pptx_owned(bytes: Vec<u8>) -> Result<Presentation, Error> {
     parser.pres.package = Some(package.clone());
     for part in slide_parts {
         let slide = parser.slide(&part)?;
-        parser.pres.slides.push(slide);
+        parser.pres.slides.push(Arc::new(slide));
     }
     // Register every layout (not only the used ones), then order them like the masters list them.
     let masters: Vec<Rc<Master>> = parser.master_order.iter().map(|m| parser.masters[m].clone()).collect();
@@ -242,7 +242,7 @@ pub fn parse_pptx_owned(bytes: Vec<u8>) -> Result<Presentation, Error> {
         });
     let old = std::mem::take(&mut parser.pres.layouts);
     parser.pres.layouts = Arc::new(order.iter().map(|&i| old[i].clone()).collect());
-    for slide in parser.pres.slides.iter_mut() {
+    for slide in parser.pres.slides_mut() {
         slide.layout = slide.layout.and_then(|old_i| order.iter().position(|&i| i == old_i));
         if let Some(src) = &mut slide.source {
             Arc::make_mut(src).layout = slide.layout;

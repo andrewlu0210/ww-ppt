@@ -920,7 +920,9 @@ impl Default for ViewSettings {
 pub struct Presentation {
     pub slide_width: Emu,
     pub slide_height: Emu,
-    pub slides: Vec<Slide>,
+    /// Shared per slide: undo snapshots copy only the pointers, and a write
+    /// (through [`Presentation::slide_mut`] or `Arc::make_mut`) copies just that slide.
+    pub slides: Vec<Arc<Slide>>,
     /// Shared: layouts are only written while loading, so undo snapshots never copy them.
     pub layouts: Arc<Vec<Layout>>,
     /// Encoded image bytes keyed by package part name.
@@ -975,7 +977,7 @@ impl Presentation {
         body.set_plain_text("旺-Point：按兩下即可編輯文字");
         title.text = Some(body);
         slide.shapes.push(title);
-        pres.slides.push(slide);
+        pres.slides.push(Arc::new(slide));
         pres
     }
 
@@ -1036,8 +1038,18 @@ impl Presentation {
         self.slides.get(slide)?.shapes.iter().find(|s| s.id == id)
     }
 
+    /// Slide `index` for writing; copies it first if an undo snapshot still shares it.
+    pub fn slide_mut(&mut self, index: usize) -> Option<&mut Slide> {
+        self.slides.get_mut(index).map(Arc::make_mut)
+    }
+
+    /// Every slide for writing (copies the ones still shared).
+    pub fn slides_mut(&mut self) -> impl Iterator<Item = &mut Slide> {
+        self.slides.iter_mut().map(Arc::make_mut)
+    }
+
     pub fn shape_mut(&mut self, slide: usize, id: ShapeId) -> Option<&mut Shape> {
-        self.slides.get_mut(slide)?.shapes.iter_mut().find(|s| s.id == id)
+        self.slide_mut(slide)?.shapes.iter_mut().find(|s| s.id == id)
     }
 
     /// Every font family referenced by text on slides and layouts, plus

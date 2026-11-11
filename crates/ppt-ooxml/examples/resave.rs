@@ -15,13 +15,13 @@ fn main() {
         path => ppt_ooxml::parse_pptx(&std::fs::read(path).unwrap()).unwrap(),
     };
     if args.iter().any(|a| a == "--edit") {
-        if let Some(body) = pres.slides[0].shapes.iter_mut().find_map(|s| s.text.as_mut()) {
+        if let Some(body) = pres.slide_mut(0).unwrap().shapes.iter_mut().find_map(|s| s.text.as_mut()) {
             let len = body.len();
             let style = body.style_at(0);
             body.delete(0..len);
             body.insert(0, "已由 ww-ppt 修改", &style);
         }
-        if let Some(s) = pres.slides[0].shapes.last_mut() {
+        if let Some(s) = pres.slide_mut(0).unwrap().shapes.last_mut() {
             s.xfrm.y += 300_000;
         }
         let layout = pres.layouts.len().min(2).saturating_sub(1);
@@ -35,7 +35,7 @@ fn main() {
             let style = body.style_at(0);
             body.insert(0, "新投影片標題", &style);
         }
-        pres.slides.push(slide);
+        pres.slides.push(std::sync::Arc::new(slide));
     }
     if args.iter().any(|a| a == "--anim") {
         edit_animations(&mut pres);
@@ -46,7 +46,7 @@ fn main() {
 
 fn edit_animations(pres: &mut ppt_model::Presentation) {
     let target = |id| Target { element: id, shapes: vec![id], paragraphs: None };
-    if let Some(slide) = pres.slides.iter_mut().find(|s| s.timing.is_some()) {
+    if let Some(slide) = pres.slides_mut().find(|s| s.timing.is_some()) {
         let mut t = slide.timing.as_deref().unwrap().clone();
         let mut effects: Vec<_> = t.effects().into_iter().cloned().collect();
         // Kept XML with a new trigger, and with stretched times.
@@ -89,5 +89,5 @@ fn edit_animations(pres: &mut ppt_model::Presentation) {
     let mut t = Timing::new();
     t.set_effects(effects);
     slide.timing = Some(Arc::new(t));
-    pres.slides.push(slide);
+    pres.slides.push(std::sync::Arc::new(slide));
 }

@@ -16,7 +16,7 @@ fn main() {
         let (mut shape, package) = new_smartart(&pres, kind, (pres.slide_width, pres.slide_height), &labels).unwrap();
         shape.id = pres.alloc_id();
         pres.package = Some(package);
-        pres.slides[0].shapes.push(shape);
+        pres.slide_mut(0).unwrap().shapes.push(shape);
         let back = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
         r.ensure_fonts(pres.font_families());
         let images: Vec<_> = [&pres, &back].iter().map(|p| r.render(p, &p.slides[0], 640).unwrap()).collect();

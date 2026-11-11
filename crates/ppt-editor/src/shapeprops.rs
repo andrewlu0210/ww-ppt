@@ -82,7 +82,7 @@ impl Editor {
         let before = self.snapshot();
         let slide = self.slide;
         for id in ids {
-            if let Some(shape) = self.pres.slides.get_mut(slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) {
+            if let Some(shape) = self.pres.slide_mut(slide).and_then(|s| s.shapes.iter_mut().find(|s| s.id == id)) {
                 apply(shape, Some(engine));
             }
         }

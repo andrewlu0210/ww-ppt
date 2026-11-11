@@ -188,7 +188,7 @@ mod tests {
 
     fn deck(hidden: &[bool]) -> Presentation {
         let mut pres = Presentation::default();
-        pres.slides = hidden.iter().map(|&h| Slide { hidden: h, ..Default::default() }).collect();
+        pres.slides = hidden.iter().map(|&h| std::sync::Arc::new(Slide { hidden: h, ..Default::default() })).collect();
         pres
     }
 
@@ -274,7 +274,7 @@ mod tests {
         let click = |id| TimeNode { click: true, children: vec![TimeNode { children: vec![appear(id)], ..Default::default() }], ..Default::default() };
         let main = TimeNode { kind: NodeKind::Seq, node_type: "mainSeq".into(), children: vec![click(1), click(2)], ..Default::default() };
         let mut pres = deck(&[false, false]);
-        pres.slides[0].timing = Some(std::sync::Arc::new(Timing { root: TimeNode { children: vec![main], ..Default::default() }, ..Default::default() }));
+        pres.slide_mut(0).unwrap().timing = Some(std::sync::Arc::new(Timing { root: TimeNode { children: vec![main], ..Default::default() }, ..Default::default() }));
         let mut s = SlideShow::new(&pres, 0).unwrap();
         assert_eq!((s.step(), s.steps()), (0, 2));
         s.advance();

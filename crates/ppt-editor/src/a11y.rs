@@ -195,7 +195,7 @@ mod tests {
         logo.access.alt_text = "公司標誌".into();
         let mut frame = Shape::new(pres.alloc_id(), "Frame", Xfrm::new(0, 0, 10, 10));
         frame.access.decorative = true;
-        pres.slides.push(Slide { shapes: vec![title, logo, frame], ..Default::default() });
+        pres.slides.push(std::sync::Arc::new(Slide { shapes: vec![title, logo, frame], ..Default::default() }));
         let mut e = Editor::new(pres);
         let items = e.a11y_items();
         assert_eq!(items.iter().map(|i| i.role).collect::<Vec<_>>(), vec![A11yRole::Heading, A11yRole::Image]);

@@ -76,7 +76,7 @@ fn main() {
     let (saved, _) = step("save (unchanged)", || ppt_ooxml::save_pptx(&pres).unwrap());
     println!("  {:.1} MB", saved.len() as f64 / 1e6);
     let mut edited = pres.clone();
-    if let Some(s) = edited.slides[0].shapes.first_mut() {
+    if let Some(s) = edited.slide_mut(0).unwrap().shapes.first_mut() {
         s.xfrm.x += 12_700;
     }
     let (_, _) = step("save (one shape moved)", || ppt_ooxml::save_pptx(&edited).unwrap());

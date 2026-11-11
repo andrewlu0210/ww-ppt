@@ -36,7 +36,7 @@ fn shape(e: &mut Editor, eng: &mut TextEngine, preset: &str, (x, y, w, h): (f64,
     if !text.is_empty() {
         let style = e.pres.default_run_style();
         let slide = e.slide;
-        let s = e.pres.slides[slide].shapes.last_mut().unwrap();
+        let s = e.pres.slide_mut(slide).unwrap().shapes.last_mut().unwrap();
         let mut body = ppt_model::TextBody { defaults: None, ..Default::default() };
         body.paragraphs[0].runs.push(Run { text: text.into(), style: ppt_model::RunStyle { color: Color::WHITE, size_pt: 14.0, ..style } });
         s.text = Some(body);

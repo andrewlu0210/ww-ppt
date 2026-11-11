@@ -33,7 +33,7 @@ fn main() {
         body.paragraphs[0].runs.push(Run { text: text.to_string(), style: style.clone() });
         body.paragraphs[0].end_style = style;
         let slide = e.slide;
-        let s = e.pres.slides[slide].shapes.last_mut().unwrap();
+        let s = e.pres.slide_mut(slide).unwrap().shapes.last_mut().unwrap();
         s.fill = None;
         s.line = None;
         s.text = Some(body);

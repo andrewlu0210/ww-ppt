@@ -323,7 +323,7 @@ fn px_per_emu(opts: &DrawOptions) -> f64 {
 
 /// The 1-based position of `slide` in the deck, when it is one of its slides.
 pub fn slide_number(pres: &Presentation, slide: &Slide) -> Option<usize> {
-    pres.slides.iter().position(|s| std::ptr::eq(s, slide)).map(|i| i + 1)
+    pres.slides.iter().position(|s| std::ptr::eq(&**s, slide)).map(|i| i + 1)
 }
 
 /// Draws the whole slide.

@@ -43,11 +43,11 @@ fn render_with(r: &mut SlideRenderer, pres: &Presentation, shot: &Shot, keep: Op
             let mut cut;
             let s = match keep {
                 Some(n) => {
-                    cut = pres.slides[slide].clone();
+                    cut = ppt_model::Slide::clone(&pres.slides[slide]);
                     cut.shapes.truncate(n);
                     &cut
                 }
-                None => &pres.slides[slide],
+                None => &*pres.slides[slide],
             };
             match state(pres, slide, clicks, ms) {
                 Some(frame) => r.render_animated(pres, s, &frame, width)?,
@@ -56,7 +56,7 @@ fn render_with(r: &mut SlideRenderer, pres: &Presentation, shot: &Shot, keep: Op
         }
         Shot::Transition { from, to, t } => {
             let kind = pres.slides[to].transition.as_ref().map_or(ppt_model::TransitionKind::Fade { through_black: false }, |t| t.kind.clone());
-            let before = from.map(|i| (&pres.slides[i], state(pres, i, usize::MAX, SETTLED)));
+            let before = from.map(|i| (&*pres.slides[i], state(pres, i, usize::MAX, SETTLED)));
             let after = state(pres, to, 0, 0.0);
             r.render_transition_animated(pres, before.as_ref().map(|(s, f)| (*s, f.as_ref())), (&pres.slides[to], after.as_ref()), &kind, t, width)?
         }

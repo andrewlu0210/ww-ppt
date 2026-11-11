@@ -3099,13 +3099,16 @@ impl App {
     pub fn render_thumbnail(&mut self, index: usize, width: u32, layout: bool) -> Result<js_sys::Promise, JsValue> {
         let pres = &self.editor.pres;
         let slide = if layout {
-            pres.layouts.get(index).map(|l| ppt_model::Slide {
-                background_shapes: l.background_shapes.clone(),
-                shapes: l.placeholders.clone(),
-                background: l.background.clone(),
-                ..Default::default()
+            pres.layouts.get(index).map(|l| {
+                std::sync::Arc::new(ppt_model::Slide {
+                    background_shapes: l.background_shapes.clone(),
+                    shapes: l.placeholders.clone(),
+                    background: l.background.clone(),
+                    ..Default::default()
+                })
             })
         } else {
+            // Shares the slide (no copy).
             pres.slides.get(index).cloned()
         };
         let slide = slide.ok_or_else(|| JsValue::from_str("no such slide"))?;

@@ -18,7 +18,7 @@ impl Editor {
     /// Gives slide `slide` the narration `bytes` (an audio file of type `ext`).
     /// `stay_ms` becomes the slide's advance time when given. Replaces an earlier narration.
     pub fn add_recording(&mut self, slide: usize, key: String, bytes: Arc<Vec<u8>>, stay_ms: Option<u32>) -> bool {
-        let Some(s) = self.pres.slides.get_mut(slide) else { return false };
+        let Some(s) = self.pres.slide_mut(slide) else { return false };
         s.shapes.retain(|sh| !(sh.name == NARRATION_NAME && matches!(sh.kind, ShapeKind::Picture { .. })));
         s.narration = Some(Narration { media: key.clone() });
         if let Some(ms) = stay_ms {
@@ -51,7 +51,7 @@ impl Editor {
             return false;
         }
         let before = self.snapshot();
-        let s = &mut self.pres.slides[slide];
+        let s = self.pres.slide_mut(slide).unwrap();
         s.narration = None;
         s.shapes.retain(|sh| !(sh.name == NARRATION_NAME && matches!(sh.kind, ShapeKind::Picture { .. })));
         self.push_undo(before);

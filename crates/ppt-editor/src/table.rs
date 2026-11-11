@@ -317,7 +317,7 @@ impl Editor {
         let Some(next) = f(table, r, c) else { return false };
         if table.rows.is_empty() || table.cols.is_empty() {
             // Nothing left: the table goes away.
-            if let Some(slide) = self.pres.slides.get_mut(self.slide) {
+            if let Some(slide) = self.pres.slide_mut(self.slide) {
                 slide.shapes.retain(|s| s.id != id);
             }
             self.selection.clear();
@@ -447,7 +447,7 @@ impl Editor {
         let id = self.pres.alloc_id();
         let mut shape = Shape::new(id, format!("{} {}", ppt_model::lang().pick("表格", "表格", "Table"), id.0), xfrm);
         shape.kind = ShapeKind::Table(Box::new(table));
-        self.pres.slides[self.slide].shapes.push(shape);
+        self.pres.slide_mut(self.slide).unwrap().shapes.push(shape);
         self.layout_table(engine, id);
         self.push_undo(before);
         self.begin_cell_edit(engine, id, 0, 0);

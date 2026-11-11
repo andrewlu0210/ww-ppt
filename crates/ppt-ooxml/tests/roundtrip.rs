@@ -52,7 +52,7 @@ fn edited_text_keeps_other_formatting_and_slides() {
     let original = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../samples/m0-demo.pptx")).unwrap();
     let mut pres = parse_pptx(&original).unwrap();
     // Slide 2, content placeholder: change the first paragraph's text.
-    let body = pres.slides[1].shapes[1].text.as_mut().unwrap();
+    let body = pres.slide_mut(1).unwrap().shapes[1].text.as_mut().unwrap();
     let end = body.paragraph_ranges()[0].end;
     body.delete(0..end);
     let style = body.style_at(0);
@@ -81,14 +81,14 @@ fn edited_text_keeps_other_formatting_and_slides() {
 #[test]
 fn moved_and_recolored_shapes() {
     let mut pres = sample();
-    let shape = &mut pres.slides[2].shapes[2];
+    let shape = &mut pres.slide_mut(2).unwrap().shapes[2];
     shape.xfrm.x += 100_000;
     shape.xfrm.rot = 45.0;
     shape.fill = Some(Paint::Solid(Color::rgb(0x12, 0x34, 0x56)));
     shape.line = Some(Line::new(Color::rgb(1, 2, 3), 25_400));
     let expect = shape.xfrm;
     // Placeholder that inherits its position: moving it must add an xfrm.
-    pres.slides[0].shapes[0].xfrm.y += 50_000;
+    pres.slide_mut(0).unwrap().shapes[0].xfrm.y += 50_000;
     let title_xfrm = pres.slides[0].shapes[0].xfrm;
     let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
     let s = &re.slides[2].shapes[2];
@@ -105,7 +105,7 @@ fn edited_group_child_keeps_its_group() {
     let n = pres.slides[2].shapes.len();
     let group = pres.slides[2].shapes[n - 1].group;
     assert!(group.is_some(), "the sample's last shape is in a group");
-    pres.slides[2].shapes[n - 1].xfrm.x += 200_000;
+    pres.slide_mut(2).unwrap().shapes[n - 1].xfrm.x += 200_000;
     let expect: Vec<Xfrm> = pres.slides[2].shapes.iter().map(|s| s.xfrm).collect();
     let members = pres.slides[2].shapes.iter().filter(|s| s.group == group).count();
     let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
@@ -120,7 +120,7 @@ fn ungrouping_and_grouping_round_trip() {
     let mut pres = sample();
     let n = pres.slides[2].shapes.len();
     let group = pres.slides[2].shapes[n - 1].group;
-    for s in pres.slides[2].shapes.iter_mut().filter(|s| s.group == group) {
+    for s in pres.slide_mut(2).unwrap().shapes.iter_mut().filter(|s| s.group == group) {
         s.group = None;
     }
     let expect: Vec<Xfrm> = pres.slides[2].shapes.iter().map(|s| s.xfrm).collect();
@@ -131,8 +131,8 @@ fn ungrouping_and_grouping_round_trip() {
     // Group the first two shapes of slide 3 into a new group.
     let mut pres = re;
     let gid = pres.alloc_id();
-    pres.slides[2].shapes[0].group = Some(gid);
-    pres.slides[2].shapes[1].group = Some(gid);
+    pres.slide_mut(2).unwrap().shapes[0].group = Some(gid);
+    pres.slide_mut(2).unwrap().shapes[1].group = Some(gid);
     let expect: Vec<Xfrm> = pres.slides[2].shapes.iter().map(|s| s.xfrm).collect();
     let saved = save_pptx(&pres).unwrap();
     assert!(slide_xml(&saved, 3).contains("<p:grpSp>"));
@@ -157,7 +157,7 @@ fn add_delete_reorder_duplicate_slides() {
     rect.geometry = Geometry::preset("roundRect");
     rect.fill = Some(Paint::Solid(Color::rgb(0x44, 0x72, 0xC4)));
     slide.shapes.push(rect);
-    pres.slides.insert(1, slide);
+    pres.slides.insert(1, std::sync::Arc::new(slide));
     // Duplicate the picture slide, delete the shapes slide, move the title slide last.
     let dup = pres.slides[4].clone();
     pres.slides.push(dup);
@@ -188,7 +188,7 @@ fn shape_pasted_onto_another_slide_carries_its_image() {
     let mut pres = sample();
     let mut pic = pres.slides[3].shapes[1].clone();
     pic.id = pres.alloc_id();
-    pres.slides[0].shapes.push(pic);
+    pres.slide_mut(0).unwrap().shapes.push(pic);
     let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
     let ShapeKind::Picture { media: Some(m), .. } = &re.slides[0].shapes.last().unwrap().kind else { panic!("picture lost") };
     assert!(re.media.contains_key(m));
@@ -217,7 +217,7 @@ fn template_is_a_complete_deck() {
 #[test]
 fn new_deck_from_template_round_trips() {
     let mut pres = parse_pptx(&template_package()).unwrap();
-    let body = pres.slides[0].shapes[0].text.as_mut().unwrap();
+    let body = pres.slide_mut(0).unwrap().shapes[0].text.as_mut().unwrap();
     let style = body.style_at(0);
     body.insert(0, "我的簡報", &style);
     body.apply_style(0.."我的".len(), |s| s.bold = true);
@@ -228,9 +228,9 @@ fn new_deck_from_template_round_trips() {
     let style = text.style_at(0);
     text.insert(0, "Hello\n世界", &style);
     tb.text = Some(text);
-    pres.slides[0].shapes.push(tb);
+    pres.slide_mut(0).unwrap().shapes.push(tb);
     let layout = pres.slide_from_layout(5);
-    pres.slides.push(layout);
+    pres.slides.push(std::sync::Arc::new(layout));
 
     let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
     assert_eq!(re.slides.len(), 2);
@@ -290,7 +290,7 @@ fn new_table_round_trips_with_default_style() {
     let mut pres = parse_pptx(&template_package()).unwrap();
     assert!(pres.table_style.is_some(), "template should get the built-in default table style");
     let shape = table_shape(&mut pres, 3, 2);
-    pres.slides[0].shapes.push(shape);
+    pres.slide_mut(0).unwrap().shapes.push(shape);
     let saved = save_pptx(&pres).unwrap();
     let re = parse_pptx(&saved).unwrap();
     let t = table_of(re.slides[0].shapes.last().unwrap());
@@ -307,10 +307,10 @@ fn new_table_round_trips_with_default_style() {
 fn editing_one_cell_rewrites_only_that_cell() {
     let mut pres = parse_pptx(&template_package()).unwrap();
     let shape = table_shape(&mut pres, 2, 2);
-    pres.slides[0].shapes.push(shape);
+    pres.slide_mut(0).unwrap().shapes.push(shape);
     let first = save_pptx(&pres).unwrap();
     let mut pres = parse_pptx(&first).unwrap();
-    let ShapeKind::Table(t) = &mut pres.slides[0].shapes.last_mut().unwrap().kind else { panic!() };
+    let ShapeKind::Table(t) = &mut pres.slide_mut(0).unwrap().shapes.last_mut().unwrap().kind else { panic!() };
     t.rows[1].cells[1].text.set_plain_text("改過 & <新>");
     t.cols[0] = 2_500_000;
     let second = save_pptx(&pres).unwrap();
@@ -337,9 +337,9 @@ fn editing_one_cell_rewrites_only_that_cell() {
 fn table_rows_and_merges_survive_structural_edits() {
     let mut pres = parse_pptx(&template_package()).unwrap();
     let shape = table_shape(&mut pres, 2, 3);
-    pres.slides[0].shapes.push(shape);
+    pres.slide_mut(0).unwrap().shapes.push(shape);
     let mut pres = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
-    let ShapeKind::Table(t) = &mut pres.slides[0].shapes.last_mut().unwrap().kind else { panic!() };
+    let ShapeKind::Table(t) = &mut pres.slide_mut(0).unwrap().shapes.last_mut().unwrap().kind else { panic!() };
     let mut row = t.rows[1].clone();
     row.cells[0].text.set_plain_text("新列");
     row.cells[0].grid_span = 2;
@@ -360,7 +360,7 @@ fn moving_a_whole_group_only_changes_its_outer_frame() {
     let mut pres = parse_pptx(&original).unwrap();
     let n = pres.slides[2].shapes.len();
     let group = pres.slides[2].shapes[n - 1].group;
-    for s in pres.slides[2].shapes.iter_mut().filter(|s| s.group == group) {
+    for s in pres.slide_mut(2).unwrap().shapes.iter_mut().filter(|s| s.group == group) {
         s.xfrm.x += 300_000;
         s.xfrm.y += 100_000;
     }
@@ -388,7 +388,7 @@ fn hyperlinks_survive_saving_and_text_edits() {
     body.insert(0, "前往 ", &plain);
     body.insert(3, "範例網站", &linked);
     shape.text = Some(body);
-    pres.slides[0].shapes.push(shape);
+    pres.slide_mut(0).unwrap().shapes.push(shape);
     let saved = save_pptx(&pres).unwrap();
     let rels = String::from_utf8(parts(&saved)["ppt/slides/_rels/slide1.xml.rels"].clone()).unwrap();
     assert!(rels.contains(r#"Target="https://example.com/a?b=1&amp;c=2" TargetMode="External""#), "{rels}");
@@ -400,7 +400,7 @@ fn hyperlinks_survive_saving_and_text_edits() {
     let mut re = parse_pptx(&saved).unwrap();
     assert_eq!(link_of(&re), Some(("範例網站".to_string(), "https://example.com/a?b=1&c=2".to_string(), true)));
     // Editing other text in the paragraph regenerates it; the link stays.
-    let body = re.slides[0].shapes.last_mut().unwrap().text.as_mut().unwrap();
+    let body = re.slide_mut(0).unwrap().shapes.last_mut().unwrap().text.as_mut().unwrap();
     let style = body.style_at(0);
     body.insert(0, "請", &style);
     let re = parse_pptx(&save_pptx(&re).unwrap()).unwrap();
@@ -415,7 +415,7 @@ fn gallery_styles_are_written_to_table_styles() {
     let mut shape = table_shape(&mut pres, 2, 2);
     let ShapeKind::Table(t) = &mut shape.kind else { panic!() };
     t.style = Some(accent3.clone());
-    pres.slides[0].shapes.push(shape);
+    pres.slide_mut(0).unwrap().shapes.push(shape);
     let saved = save_pptx(&pres).unwrap();
     let p = parts(&saved);
     let styles = String::from_utf8(p.get("ppt/tableStyles.xml").expect("tableStyles part created").clone()).unwrap();
@@ -438,12 +438,12 @@ fn gallery_styles_are_written_to_table_styles() {
 fn notes_are_added_edited_and_duplicated() {
     // The template has no notes master: the first notes create one.
     let mut pres = parse_pptx(&template_package()).unwrap();
-    pres.slides[0].notes = "第一頁的備忘稿\n\n第三行 <&>".into();
+    pres.slide_mut(0).unwrap().notes = "第一頁的備忘稿\n\n第三行 <&>".into();
     let mut second = pres.slide_from_layout(1);
     second.notes = "second".into();
-    pres.slides.push(second);
+    pres.slides.push(std::sync::Arc::new(second));
     let blank = pres.slide_from_layout(5);
-    pres.slides.push(blank);
+    pres.slides.push(std::sync::Arc::new(blank));
 
     let saved = save_pptx(&pres).unwrap();
     let files = parts(&saved);
@@ -458,8 +458,8 @@ fn notes_are_added_edited_and_duplicated() {
 
     // Editing existing notes, adding notes to a slide without them, duplicating a slide with notes.
     let mut pres = re;
-    pres.slides[0].notes = "改過了".into();
-    pres.slides[2].notes = "後來加的".into();
+    pres.slide_mut(0).unwrap().notes = "改過了".into();
+    pres.slide_mut(2).unwrap().notes = "後來加的".into();
     let dup = pres.slides[1].clone();
     pres.slides.push(dup);
     let saved2 = save_pptx(&pres).unwrap();
@@ -520,7 +520,7 @@ fn duplicated_chart_slides_get_their_own_chart_part() {
     pres.slides.insert(0, dup);
     let mut again = pres.slides[1].shapes.iter().find(|s| s.name == "Chart 1").unwrap().clone();
     again.id = pres.alloc_id();
-    pres.slides[1].shapes.push(again);
+    pres.slide_mut(1).unwrap().shapes.push(again);
 
     let files = parts(&save_pptx(&pres).unwrap());
     let text = |n: &str| String::from_utf8(files[n].clone()).unwrap();
@@ -547,10 +547,10 @@ fn transitions_round_trip_and_edit() {
     let mut pres = parse_pptx(&template_package()).unwrap();
     let push = Transition { kind: TransitionKind::Push(Dir::Up), duration_ms: 1000, on_click: true, after_ms: None };
     let wipe = Transition { kind: TransitionKind::Wipe(Dir::Down), duration_ms: 1300, on_click: false, after_ms: Some(4000) };
-    pres.slides[0].transition = Some(push.clone());
+    pres.slide_mut(0).unwrap().transition = Some(push.clone());
     let mut second = pres.slide_from_layout(1);
     second.transition = Some(wipe.clone());
-    pres.slides.push(second);
+    pres.slides.push(std::sync::Arc::new(second));
     let re = parse_pptx(&save_pptx(&pres).unwrap()).unwrap();
     assert_eq!(re.slides[0].transition.as_ref(), Some(&push));
     assert_eq!(re.slides[1].transition.as_ref(), Some(&wipe));
@@ -558,8 +558,8 @@ fn transitions_round_trip_and_edit() {
     // Unchanged slides keep their part; an edited transition replaces the old one; None removes it.
     let saved = save_pptx(&re).unwrap();
     let mut pres = parse_pptx(&saved).unwrap();
-    pres.slides[0].transition = Some(Transition { kind: TransitionKind::Circle, ..push });
-    pres.slides[1].transition = None;
+    pres.slide_mut(0).unwrap().transition = Some(Transition { kind: TransitionKind::Circle, ..push });
+    pres.slide_mut(1).unwrap().transition = None;
     let saved2 = save_pptx(&pres).unwrap();
     let re = parse_pptx(&saved2).unwrap();
     assert_eq!(re.slides[0].transition.as_ref().map(|t| &t.kind), Some(&TransitionKind::Circle));
@@ -584,7 +584,7 @@ fn animations_are_written_kept_and_edited() {
     out.grp_id = Some(1);
     let mut t = Timing::new();
     t.set_effects(vec![fly, spin, out]);
-    pres.slides[0].timing = Some(std::sync::Arc::new(t));
+    pres.slide_mut(0).unwrap().timing = Some(std::sync::Arc::new(t));
 
     let saved = save_pptx(&pres).unwrap();
     let xml = slide_xml(&saved, 1);
@@ -614,7 +614,7 @@ fn animations_are_written_kept_and_edited() {
     effects[2].node_type = Trigger::With.node_type().into();
     effects.remove(1);
     t.set_effects(effects);
-    pres.slides[0].timing = Some(std::sync::Arc::new(t));
+    pres.slide_mut(0).unwrap().timing = Some(std::sync::Arc::new(t));
     let saved = save_pptx(&pres).unwrap();
     let xml2 = slide_xml(&saved, 1);
     assert_eq!(xml2.matches("<p:timing>").count(), 1);
@@ -628,7 +628,7 @@ fn animations_are_written_kept_and_edited() {
     let mut pres = re;
     let mut t = pres.slides[0].timing.as_deref().unwrap().clone();
     t.set_effects(Vec::new());
-    pres.slides[0].timing = (!t.is_empty()).then(|| std::sync::Arc::new(t));
+    pres.slide_mut(0).unwrap().timing = (!t.is_empty()).then(|| std::sync::Arc::new(t));
     let xml3 = slide_xml(&save_pptx(&pres).unwrap(), 1);
     assert!(!xml3.contains("<p:timing"), "{xml3}");
 }
@@ -638,7 +638,7 @@ fn strike_scripts_spacing_and_anchor_round_trip() {
     let mut pres = sample();
     let i = pres.slides[0].shapes.iter().position(|s| s.text.as_ref().is_some_and(|t| t.len() > 4)).unwrap();
     {
-        let body = pres.slides[0].shapes[i].text.as_mut().unwrap();
+        let body = pres.slide_mut(0).unwrap().shapes[i].text.as_mut().unwrap();
         body.apply_style(0..1, |s| s.strike = true);
         body.apply_style(1..2, |s| s.baseline = 0.3);
         body.apply_style(2..3, |s| s.baseline = -0.25);
@@ -665,13 +665,13 @@ fn geometry_shadow_flip_and_crop_edits_round_trip() {
     let pic = pres.slides[pi].shapes.iter().position(|s| matches!(s.kind, ShapeKind::Picture { .. })).unwrap();
     let shadow = Shadow { color: Color { r: 0, g: 0, b: 0, a: 102 }, blur: 50_800, dist: 38_100, dir: 45.0 };
     {
-        let s = &mut pres.slides[si].shapes[shape];
+        let s = &mut pres.slide_mut(si).unwrap().shapes[shape];
         s.geometry = Geometry::preset("ellipse");
         s.shadow = Some(shadow);
         s.xfrm.flip_h = true;
         s.xfrm.rot = 15.0;
     }
-    if let ShapeKind::Picture { crop, .. } = &mut pres.slides[pi].shapes[pic].kind {
+    if let ShapeKind::Picture { crop, .. } = &mut pres.slide_mut(pi).unwrap().shapes[pic].kind {
         *crop = Crop { left: 0.1, top: 0.2, right: 0.0, bottom: 0.05 };
     }
     let saved = save_pptx(&pres).unwrap();
@@ -684,8 +684,8 @@ fn geometry_shadow_flip_and_crop_edits_round_trip() {
     assert_eq!(*crop, Crop { left: 0.1, top: 0.2, right: 0.0, bottom: 0.05 });
     // Removing the shadow writes an explicit empty effect list; removing the crop drops srcRect.
     let mut pres = re;
-    pres.slides[si].shapes[shape].shadow = None;
-    if let ShapeKind::Picture { crop, .. } = &mut pres.slides[pi].shapes[pic].kind {
+    pres.slide_mut(si).unwrap().shapes[shape].shadow = None;
+    if let ShapeKind::Picture { crop, .. } = &mut pres.slide_mut(pi).unwrap().shapes[pic].kind {
         *crop = Crop::default();
     }
     let saved = save_pptx(&pres).unwrap();

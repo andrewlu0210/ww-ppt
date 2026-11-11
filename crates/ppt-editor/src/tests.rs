@@ -19,13 +19,13 @@ fn editor() -> (Editor, ShapeId) {
     let id = pres.alloc_id();
     let mut shape = Shape::new(id, "rect", Xfrm::new(IN, IN, IN, IN));
     shape.fill = Some(Paint::Solid(Color::BLACK));
-    pres.slides.push(Slide { shapes: vec![shape], ..Default::default() });
+    pres.slides.push(std::sync::Arc::new(Slide { shapes: vec![shape], ..Default::default() }));
     (Editor::new(pres), id)
 }
 
 fn add_rect(e: &mut Editor, x: i64, y: i64) -> ShapeId {
     let id = e.pres.alloc_id();
-    e.pres.slides[0].shapes.push(Shape::new(id, "r", Xfrm::new(x, y, IN, IN)));
+    e.pres.slide_mut(0).unwrap().shapes.push(Shape::new(id, "r", Xfrm::new(x, y, IN, IN)));
     id
 }
 
@@ -374,7 +374,7 @@ fn line_hit_test_uses_distance_to_segment() {
     let id = e.pres.alloc_id();
     let mut line = Shape::new(id, "line", Xfrm::new(3_000_000, 3_000_000, 1_000_000, 1_000_000));
     line.geometry = Geometry::preset("line");
-    e.pres.slides[0].shapes.push(line);
+    e.pres.slide_mut(0).unwrap().shapes.push(line);
     assert_eq!(e.hit_test(3_500_000.0, 3_500_000.0, 10_000.0), Some(id));
     assert_eq!(e.hit_test(3_900_000.0, 3_100_000.0, 10_000.0), None);
 }
@@ -388,7 +388,7 @@ fn utf16_offsets() {
 
 fn table_editor(eng: &mut TextEngine, rows: usize, cols: usize) -> (Editor, ShapeId) {
     let mut pres = Presentation::default();
-    pres.slides.push(Slide::default());
+    pres.slides.push(std::sync::Arc::new(Slide::default()));
     let mut e = Editor::new(pres);
     assert!(e.insert_table(eng, rows, cols));
     e.end_text_edit(eng);
@@ -420,7 +420,7 @@ fn cell_center(e: &Editor, id: ShapeId, r: usize, c: usize) -> (f64, f64) {
 fn insert_table_edits_first_cell_and_tab_moves_on() {
     let mut eng = engine();
     let mut pres = Presentation::default();
-    pres.slides.push(Slide::default());
+    pres.slides.push(std::sync::Arc::new(Slide::default()));
     let mut e = Editor::new(pres);
     e.insert_table(&mut eng, 2, 2);
     let id = e.pres.slides[0].shapes[0].id;
@@ -514,7 +514,7 @@ fn merged_cells_follow_row_and_column_edits() {
     let mut eng = engine();
     let (mut e, id) = table_editor(&mut eng, 3, 3);
     // Merge (0,0)-(1,0) vertically and (2,0)-(2,1) horizontally.
-    if let ShapeKind::Table(t) = &mut e.pres.slides[0].shapes[0].kind {
+    if let ShapeKind::Table(t) = &mut e.pres.slide_mut(0).unwrap().shapes[0].kind {
         t.rows[0].cells[0].row_span = 2;
         t.rows[1].cells[0].v_merge = true;
         t.rows[2].cells[0].grid_span = 2;
@@ -562,7 +562,7 @@ fn group_editor() -> (Editor, [ShapeId; 3], ShapeId) {
     let g = pres.alloc_id();
     shapes[0].group = Some(g);
     shapes[1].group = Some(g);
-    pres.slides.push(Slide { shapes, ..Default::default() });
+    pres.slides.push(std::sync::Arc::new(Slide { shapes, ..Default::default() }));
     (Editor::new(pres), ids, g)
 }
 
@@ -693,7 +693,7 @@ fn numbering_toggles_and_switches_scheme() {
 fn styled_table_editor(eng: &mut TextEngine, rows: usize, cols: usize) -> (Editor, ShapeId) {
     use ppt_model::table::{CellFill, StylePart, TableStyle};
     let mut pres = Presentation::default();
-    pres.slides.push(Slide::default());
+    pres.slides.push(std::sync::Arc::new(Slide::default()));
     let style = |id: &str, header: Color| {
         std::sync::Arc::new(TableStyle {
             id: id.into(),
@@ -742,7 +742,7 @@ fn dragging_across_cells_selects_a_block_and_merges_it() {
 fn shift_click_extends_over_merged_cells() {
     let mut eng = engine();
     let (mut e, id) = table_editor(&mut eng, 3, 3);
-    if let ShapeKind::Table(t) = &mut e.pres.slides[0].shapes[0].kind {
+    if let ShapeKind::Table(t) = &mut e.pres.slide_mut(0).unwrap().shapes[0].kind {
         t.rows[1].cells[1].grid_span = 2;
         t.rows[1].cells[2].h_merge = true;
     }
@@ -868,7 +868,7 @@ fn transitions_apply_to_one_or_all_slides_with_undo() {
     let mut eng = engine();
     let (mut e, _) = editor();
     let blank = e.pres.slide_from_layout(0);
-    e.pres.slides.push(blank);
+    e.pres.slides.push(std::sync::Arc::new(blank));
     let push = Transition { kind: TransitionKind::Push(Dir::Up), ..Default::default() };
     assert!(e.set_transition(&mut eng, Some(push.clone()), false));
     assert!(!e.set_transition(&mut eng, Some(push.clone()), false));
@@ -937,7 +937,7 @@ fn find_and_replace_across_slides_and_notes() {
     let mut eng = engine();
     let (mut e, a) = editor();
     let set_text = |e: &mut Editor, slide: usize, id: ShapeId, text: &str| {
-        let shape = e.pres.slides[slide].shapes.iter_mut().find(|s| s.id == id).unwrap();
+        let shape = e.pres.slide_mut(slide).unwrap().shapes.iter_mut().find(|s| s.id == id).unwrap();
         let mut body = TextBody::default();
         body.set_plain_text(text);
         shape.text = Some(body);
@@ -947,7 +947,7 @@ fn find_and_replace_across_slides_and_notes() {
     let b = e.pres.alloc_id();
     second.shapes.push(Shape::new(b, "b", Xfrm::new(0, 0, IN, IN)));
     second.notes = "talk about REVENUE".into();
-    e.pres.slides.push(second);
+    e.pres.slides.push(std::sync::Arc::new(second));
     set_text(&mut e, 1, b, "no match");
     let o = FindOptions::default();
 
@@ -995,7 +995,7 @@ fn layouts_apply_and_reset_and_save() {
     let title = e.pres.slides[0].shapes.iter().position(|s| s.placeholder.as_ref().is_some_and(|p| p.kind.contains("itle") && p.kind != "subTitle")).unwrap();
     let id = e.pres.slides[0].shapes[title].id;
     {
-        let body = e.pres.slides[0].shapes[title].text.as_mut().unwrap();
+        let body = e.pres.slide_mut(0).unwrap().shapes[title].text.as_mut().unwrap();
         body.set_plain_text("標題");
     }
     let before_xfrm = e.pres.shape(0, id).unwrap().xfrm;
@@ -1013,8 +1013,8 @@ fn layouts_apply_and_reset_and_save() {
     assert!(e.pres.slides[0].shapes.iter().all(|s| s.placeholder.as_ref().is_none_or(|p| p.kind != "subTitle")));
 
     // Overridden formatting survives a layout change but not a reset.
-    e.pres.slides[0].shapes.iter_mut().find(|s| s.id == id).unwrap().text.as_mut().unwrap().apply_style(0..3, |s| s.bold = true);
-    e.pres.slides[0].shapes.iter_mut().find(|s| s.id == id).unwrap().xfrm.x += 100_000;
+    e.pres.slide_mut(0).unwrap().shapes.iter_mut().find(|s| s.id == id).unwrap().text.as_mut().unwrap().apply_style(0..3, |s| s.bold = true);
+    e.pres.slide_mut(0).unwrap().shapes.iter_mut().find(|s| s.id == id).unwrap().xfrm.x += 100_000;
     assert!(e.reset_slide(&mut eng));
     let shape = e.pres.shape(0, id).unwrap();
     assert!(!shape.text.as_ref().unwrap().styles_in(0..3)[0].bold);
@@ -1172,7 +1172,7 @@ fn slides_are_copied_cut_and_pasted_within_and_across_decks() {
     assert!(a.add_slide(&mut eng, None));
     assert!(a.add_picture(&mut eng, "from-a/pic.png".into(), png.clone(), 32, 32));
     assert!(a.set_slide_hidden(&mut eng, 1, true));
-    a.pres.slides[1].notes = "notes".into();
+    a.pres.slide_mut(1).unwrap().notes = "notes".into();
     let clip = a.copy_slide(1).unwrap();
     assert!(a.copy_slide(9).is_none());
 
@@ -1693,7 +1693,7 @@ fn format_painter_copies_shape_and_text_format_in_one_undo_step() {
     // Source: a filled shape with an outline, bold red text, centered.
     e.selection = vec![src];
     e.set_line_color(Some(Color::rgb(0, 0, 255)));
-    e.pres.slides[0].shapes[0].text = Some({
+    e.pres.slide_mut(0).unwrap().shapes[0].text = Some({
         let mut b = TextBody::default();
         b.set_plain_text("abc");
         b
@@ -1706,7 +1706,7 @@ fn format_painter_copies_shape_and_text_format_in_one_undo_step() {
     assert!(e.copy_format());
 
     // Target: another shape with text; painting needs a target first.
-    e.pres.slides[0].shapes[1].text = Some({
+    e.pres.slide_mut(0).unwrap().shapes[1].text = Some({
         let mut b = TextBody::default();
         b.set_plain_text("xyz");
         b
@@ -1838,7 +1838,7 @@ fn a_line_takes_arrowheads_and_the_pane_reads_back_mixed_values() {
     let mut line = Shape::new(line_id, "line", Xfrm::new(0, 0, IN, IN));
     line.geometry = Geometry::preset("line");
     line.line = Some(Line::new(Color::BLACK, 12_700));
-    e.pres.slides[0].shapes.push(line);
+    e.pres.slide_mut(0).unwrap().shapes.push(line);
     e.selection = vec![line_id];
     let arrow = LineEnd { kind: EndKind::Triangle, width: 1, length: 1 };
     assert!(e.set_line_spec(LineSpec { tail: Some(arrow), ..Default::default() }));
@@ -1907,7 +1907,7 @@ fn the_text_box_settings_are_set_and_an_auto_fit_shape_follows_its_text() {
     let (mut e, id) = editor();
     use ppt_model::{Paragraph, Run};
     let para = |t: &str| Paragraph { runs: vec![Run { text: t.into(), ..Default::default() }], ..Default::default() };
-    e.pres.slides[0].shapes[0].text = Some(TextBody { paragraphs: vec![para("line one"), para("line two"), para("line three")], defaults: e.pres.text_defaults.clone(), ..Default::default() });
+    e.pres.slide_mut(0).unwrap().shapes[0].text = Some(TextBody { paragraphs: vec![para("line one"), para("line two"), para("line three")], defaults: e.pres.text_defaults.clone(), ..Default::default() });
     e.selection = vec![id];
     let spec = TextBoxSpec { anchor: Some(Anchor::Middle), insets: [Some(91_440), None, Some(0), None], wrap: Some(false), ..Default::default() };
     assert!(e.set_text_box_spec(&mut eng, spec.clone()));
@@ -1930,7 +1930,7 @@ fn the_text_box_settings_are_set_and_an_auto_fit_shape_follows_its_text() {
 fn text_outline_and_shadow_apply_to_the_selected_text() {
     let (mut e, id) = editor();
     let mut eng = engine();
-    e.pres.slides[0].shapes[0].text = Some({
+    e.pres.slide_mut(0).unwrap().shapes[0].text = Some({
         let mut b = TextBody::default();
         b.set_plain_text("abcdef");
         b
@@ -1967,7 +1967,7 @@ fn text_outline_and_shadow_apply_to_the_selected_text() {
 fn text_effects_of_a_text_selection_leave_the_rest_and_report_mixed_values() {
     let (mut e, id) = editor();
     let mut eng = engine();
-    e.pres.slides[0].shapes[0].text = Some({
+    e.pres.slide_mut(0).unwrap().shapes[0].text = Some({
         let mut b = TextBody::default();
         b.set_plain_text("abcdef");
         b
@@ -1990,7 +1990,7 @@ fn format_painter_carries_text_outline_and_shadow() {
     let dst = add_rect(&mut e, 3 * IN, IN);
     let mut eng = engine();
     for (i, text) in ["abc", "xyz"].into_iter().enumerate() {
-        e.pres.slides[0].shapes[i].text = Some({
+        e.pres.slide_mut(0).unwrap().shapes[i].text = Some({
             let mut b = TextBody::default();
             b.set_plain_text(text);
             b
@@ -2015,4 +2015,23 @@ fn format_painter_carries_text_outline_and_shadow() {
     assert!(e.paste_format(&mut eng));
     let style = e.pres.shape(0, dst).unwrap().text.as_ref().unwrap().style_at(1);
     assert!(style.outline.is_none() && style.shadow.is_none());
+}
+
+#[test]
+fn undo_snapshots_share_untouched_slides() {
+    let (mut e, id) = editor();
+    e.pres.slides.push(std::sync::Arc::new(Slide::default()));
+    e.selection = vec![id];
+    assert!(e.nudge(IN, 0));
+    let snap = &e.undo.last().unwrap().pres;
+    // The edited slide was copied; the other one is still shared with the snapshot.
+    assert!(!std::sync::Arc::ptr_eq(&snap.slides[0], &e.pres.slides[0]));
+    assert!(std::sync::Arc::ptr_eq(&snap.slides[1], &e.pres.slides[1]));
+    assert!(std::sync::Arc::ptr_eq(&snap.layouts, &e.pres.layouts));
+    assert_eq!(snap.slides[0].shapes[0].xfrm.x, IN);
+    assert_eq!(xfrm(&e, id).x, 2 * IN);
+
+    let mut engine = engine();
+    assert!(e.undo(&mut engine));
+    assert_eq!(xfrm(&e, id).x, IN);
 }
