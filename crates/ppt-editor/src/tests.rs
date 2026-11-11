@@ -329,7 +329,7 @@ fn slide_add_duplicate_move_delete() {
     let mut title = Shape::new(ShapeId(0), "Title", Xfrm::new(0, 0, IN, IN));
     title.placeholder = Some(Placeholder { kind: "title".into(), idx: 0 });
     title.text = Some(TextBody::default());
-    e.pres.layouts.push(Layout { name: "Title".into(), placeholders: vec![title], ..Default::default() });
+    std::sync::Arc::make_mut(&mut e.pres.layouts).push(Layout { name: "Title".into(), placeholders: vec![title], ..Default::default() });
 
     e.add_slide(&mut eng, Some(0));
     assert_eq!(e.pres.slides.len(), 2);

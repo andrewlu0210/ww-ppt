@@ -241,7 +241,7 @@ pub fn parse_pptx_owned(bytes: Vec<u8>) -> Result<Presentation, Error> {
             acc
         });
     let old = std::mem::take(&mut parser.pres.layouts);
-    parser.pres.layouts = order.iter().map(|&i| old[i].clone()).collect();
+    parser.pres.layouts = Arc::new(order.iter().map(|&i| old[i].clone()).collect());
     for slide in parser.pres.slides.iter_mut() {
         slide.layout = slide.layout.and_then(|old_i| order.iter().position(|&i| i == old_i));
         if let Some(src) = &mut slide.source {
@@ -351,7 +351,7 @@ impl Parser<'_> {
         let mut background_shapes = if show_master_shapes { master.shapes.clone() } else { Vec::new() };
         background_shapes.extend(shapes.iter().cloned());
         let index = self.pres.layouts.len();
-        self.pres.layouts.push(ModelLayout {
+        Arc::make_mut(&mut self.pres.layouts).push(ModelLayout {
             name: path(root, &["cSld"]).and_then(|c| c.attribute("name")).unwrap_or_default().to_string(),
             placeholders: prototypes,
             footers,

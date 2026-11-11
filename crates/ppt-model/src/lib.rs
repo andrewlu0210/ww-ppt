@@ -921,7 +921,8 @@ pub struct Presentation {
     pub slide_width: Emu,
     pub slide_height: Emu,
     pub slides: Vec<Slide>,
-    pub layouts: Vec<Layout>,
+    /// Shared: layouts are only written while loading, so undo snapshots never copy them.
+    pub layouts: Arc<Vec<Layout>>,
     /// Encoded image bytes keyed by package part name.
     pub media: media::MediaStore,
     /// Theme fonts used as defaults for new text (latin, east asian).
@@ -946,7 +947,7 @@ impl Default for Presentation {
             slide_width: DEFAULT_SLIDE_WIDTH,
             slide_height: DEFAULT_SLIDE_HEIGHT,
             slides: Vec::new(),
-            layouts: Vec::new(),
+            layouts: Arc::default(),
             media: media::MediaStore::default(),
             minor_font: ("Calibri".to_string(), String::new()),
             text_defaults: None,
