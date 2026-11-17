@@ -215,10 +215,26 @@ pub fn format_number(v: f64, format: &str) -> String {
     if format.is_empty() || format.eq_ignore_ascii_case("general") {
         return general(v);
     }
-    let percent = format.contains('%');
+    // Only the format's own symbols count: quoted text ("%"), escaped (\%) and `_x`/`*x`
+    // characters are literal, so `0.00"%"` shows 1.66 as 1.66%, not 166.00%.
+    let mut code = String::new();
+    {
+        let (mut chars, mut in_quote) = (format.chars(), false);
+        while let Some(ch) = chars.next() {
+            match ch {
+                '"' => in_quote = !in_quote,
+                _ if in_quote => {}
+                '\\' | '_' | '*' => {
+                    chars.next();
+                }
+                c => code.push(c),
+            }
+        }
+    }
+    let percent = code.contains('%');
     let v = if percent { v * 100.0 } else { v };
     // Digits after the decimal point in the numeric part.
-    let numeric: String = format.chars().filter(|c| matches!(c, '0' | '#' | '.' | ',')).collect();
+    let numeric: String = code.chars().filter(|c| matches!(c, '0' | '#' | '.' | ',')).collect();
     let decimals = numeric.split_once('.').map_or(0, |(_, d)| d.chars().filter(|c| *c == '0' || *c == '#').count());
     let grouped = numeric.contains(',') && numeric.split_once('.').map_or(numeric.as_str(), |(i, _)| i).contains(',');
     let mut s = format!("{:.*}", decimals, v.abs());
@@ -286,6 +302,11 @@ mod tests {
         assert_eq!(format_number(1234.5, "General"), "1234.5");
         assert_eq!(format_number(0.1 + 0.2, "General"), "0.3");
         assert_eq!(format_number(1234.567, "#,##0"), "1,235");
+        // 引號裡的 % 和數字是字面文字：不乘 100，也不影響小數位數
+        assert_eq!(format_number(1.66, "0.00\"%\""), "1.66%");
+        assert_eq!(format_number(1.66, "0.00\\%"), "1.66%");
+        assert_eq!(format_number(3.0, "0\" 件 0\""), "3 件 0");
+        assert_eq!(format_number(0.25, "0%"), "25%");
         assert_eq!(format_number(1234567.0, "#,##0.00"), "1,234,567.00");
         assert_eq!(format_number(0.177, "0.0%"), "17.7%");
         assert_eq!(format_number(0.5, "0%"), "50%");
