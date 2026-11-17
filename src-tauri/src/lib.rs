@@ -2,9 +2,12 @@
 //! The editor itself runs in the webview (see `crates/ppt-wasm`).
 
 mod automation;
+mod cli;
 mod recovery;
 mod spell;
 mod video;
+
+pub use cli::run_cli;
 
 use ppt_fonts::{FontService, ResolvedFont};
 use ppt_model::{Lang, lang, set_lang, tr};

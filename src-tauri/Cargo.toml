@@ -21,6 +21,7 @@ libc = "0.2"
 ppt-fonts.workspace = true
 ppt-model.workspace = true
 ppt-ooxml.workspace = true
+ppt-offscreen.workspace = true
 ppt-video.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -5572,6 +5572,7 @@ dependencies = [
  "objc2-foundation",
  "ppt-fonts",
  "ppt-model",
+ "ppt-offscreen",
  "ppt-ooxml",
  "ppt-video",
  "serde",
