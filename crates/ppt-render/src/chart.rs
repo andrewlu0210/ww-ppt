@@ -6,7 +6,7 @@
 
 use std::f64::consts::PI;
 
-use ppt_model::chart::{Axis, AxisPos, Chart, DataLabels, Grouping, LabelPosition, LegendPos, MarkerSymbol, Plot, PlotKind, Series, format_number};
+use ppt_model::chart::{Axis, AxisPos, Chart, DataLabels, Grouping, LabelPosition, LegendPos, MarkerSymbol, Plot, PlotKind, Series, format_decimals, format_number, pie_percent_adjustments};
 use ppt_model::{Color, EMU_PER_PT, Line as ModelLine, Paint, RunStyle, TextBody, Xfrm};
 use ppt_text::{BodyLayout, TextEngine};
 use vello::kurbo::{Affine, BezPath, Circle, Line, Point, Rect, Shape as _, Stroke, Vec2};
@@ -151,8 +151,9 @@ fn series_line(chart: &Chart, s: &Series) -> Option<ModelLine> {
     Some(s.line.unwrap_or(ModelLine::new(chart.auto_color(s.index), 28_575)))
 }
 
-/// Text of a data label for value `v` of series `s` (point `i`).
-fn label_text(l: &DataLabels, s: &Series, i: usize, v: f64, total: f64) -> Option<String> {
+/// Text of a data label for value `v` of series `s` (point `i`). `adjust` is the whole-percent
+/// correction a pie applies so its percentages add up to 100 (see [`pie_percent_adjustments`]).
+fn label_text(l: &DataLabels, s: &Series, i: usize, v: f64, total: f64, adjust: f64) -> Option<String> {
     if l.deleted.contains(&i) {
         return None;
     }
@@ -172,7 +173,10 @@ fn label_text(l: &DataLabels, s: &Series, i: usize, v: f64, total: f64) -> Optio
         parts.push(format_number(v, l.format.as_deref().unwrap_or(&s.format)));
     }
     if l.show_percent && total != 0.0 {
-        parts.push(format_number(v / total, l.format.as_deref().filter(|f| f.contains('%')).unwrap_or("0%")));
+        let format = l.format.as_deref().filter(|f| f.contains('%')).unwrap_or("0%");
+        // PowerPoint only evens out whole percentages; with decimals the labels stay as they are.
+        let adjust = if format_decimals(format) == 0 { adjust / 100.0 } else { 0.0 };
+        parts.push(format_number(v / total + adjust, format));
     }
     (!parts.is_empty()).then(|| parts.join(", "))
 }
@@ -518,7 +522,7 @@ pub fn draw_chart(scene: &mut dyn Canvas, engine: &mut TextEngine, chart: &Chart
                             stroke_line(scene, tf, &line, &rect.to_path(0.1));
                         }
                         if let Some(l) = labels_of(p, s)
-                            && let Some(text) = label_text(l, s, i, v, total)
+                            && let Some(text) = label_text(l, s, i, v, total, 0.0)
                         {
                             let label = measure(engine, &text, &l.style);
                             let pos = l.position.unwrap_or(if stacked(grouping) { LabelPosition::Center } else { LabelPosition::OutsideEnd });
@@ -603,7 +607,7 @@ pub fn draw_chart(scene: &mut dyn Canvas, engine: &mut TextEngine, chart: &Chart
                     if let Some(l) = labels_of(p, s) {
                         for (i, p) in points.iter().enumerate() {
                             let Some((pt, _, v)) = p else { continue };
-                            let Some(text) = label_text(l, s, i, *v, totals[i]) else { continue };
+                            let Some(text) = label_text(l, s, i, *v, totals[i], 0.0) else { continue };
                             let label = measure(engine, &text, &l.style);
                             let (anchor, ax, ay) = match l.position.unwrap_or(LabelPosition::Right) {
                                 LabelPosition::Above => (*pt - Vec2::new(0.0, 3.0 * PT), 0.5, 1.0),
@@ -676,6 +680,7 @@ fn draw_pie(
 ) {
     let Some(s) = p.series.first() else { return };
     let total: f64 = s.values.iter().flatten().filter(|v| **v > 0.0).sum();
+    let adjust = pie_percent_adjustments(&s.values);
     if total <= 0.0 {
         return;
     }
@@ -706,14 +711,15 @@ fn draw_pie(
     let mut angle = (first_angle - 90.0).to_radians();
     let mut slices = Vec::new();
     for (i, v) in s.values.iter().enumerate() {
-        let Some(v) = v.filter(|v| *v > 0.0) else { continue };
+        // A zero still gets its (zero-width) slice: PowerPoint labels it "0%".
+        let Some(v) = v.filter(|v| *v >= 0.0) else { continue };
         let sweep = v / total * 2.0 * PI;
         slices.push((i, v, angle, angle + sweep));
         angle += sweep;
     }
     if three_d {
         // The visible side: the lower half of the rim, darker.
-        for &(i, _, a0, a1) in &slices {
+        for &(i, _, a0, a1) in slices.iter().filter(|s| s.3 > s.2) {
             let col = point_color(chart, s, i);
             let dark = Color { r: (col.r as f64 * 0.7) as u8, g: (col.g as f64 * 0.7) as u8, b: (col.b as f64 * 0.7) as u8, a: col.a };
             let side = slice(a0, a1, 0.0);
@@ -722,15 +728,17 @@ fn draw_pie(
     }
     let border = s.line.filter(|_| !s.no_line);
     for &(i, v, a0, a1) in &slices {
-        let path = slice(a0, a1, r * hole);
-        let fill = s.point_fills.iter().find(|f| f.0 == i).map(|f| f.1.clone()).unwrap_or(Paint::Solid(chart.auto_color(i)));
-        let bbox = path.bounding_box();
-        fill_paint(scene, tf * squash, &fill, bbox.width().max(1.0), bbox.height().max(1.0), &path);
-        if let Some(line) = border {
-            scene.stroke(&Stroke::new(line.width.max(1) as f64), tf * squash, color(line.color), None, &path);
+        if a1 > a0 {
+            let path = slice(a0, a1, r * hole);
+            let fill = s.point_fills.iter().find(|f| f.0 == i).map(|f| f.1.clone()).unwrap_or(Paint::Solid(chart.auto_color(i)));
+            let bbox = path.bounding_box();
+            fill_paint(scene, tf * squash, &fill, bbox.width().max(1.0), bbox.height().max(1.0), &path);
+            if let Some(line) = border {
+                scene.stroke(&Stroke::new(line.width.max(1) as f64), tf * squash, color(line.color), None, &path);
+            }
         }
         if let Some(l) = labels_of(p, s)
-            && let Some(text) = label_text(l, s, i, v, total)
+            && let Some(text) = label_text(l, s, i, v, total, adjust.get(i).copied().unwrap_or(0.0))
         {
             let label = measure(engine, &text, &l.style);
             let mid = (a0 + a1) / 2.0;

@@ -215,29 +215,13 @@ pub fn format_number(v: f64, format: &str) -> String {
     if format.is_empty() || format.eq_ignore_ascii_case("general") {
         return general(v);
     }
-    // Only the format's own symbols count: quoted text ("%"), escaped (\%) and `_x`/`*x`
-    // characters are literal, so `0.00"%"` shows 1.66 as 1.66%, not 166.00%.
-    let mut code = String::new();
-    {
-        let (mut chars, mut in_quote) = (format.chars(), false);
-        while let Some(ch) = chars.next() {
-            match ch {
-                '"' => in_quote = !in_quote,
-                _ if in_quote => {}
-                '\\' | '_' | '*' => {
-                    chars.next();
-                }
-                c => code.push(c),
-            }
-        }
-    }
+    let code = format_code(format);
     let percent = code.contains('%');
     let v = if percent { v * 100.0 } else { v };
-    // Digits after the decimal point in the numeric part.
     let numeric: String = code.chars().filter(|c| matches!(c, '0' | '#' | '.' | ',')).collect();
-    let decimals = numeric.split_once('.').map_or(0, |(_, d)| d.chars().filter(|c| *c == '0' || *c == '#').count());
+    let decimals = format_decimals(format);
     let grouped = numeric.contains(',') && numeric.split_once('.').map_or(numeric.as_str(), |(i, _)| i).contains(',');
-    let mut s = format!("{:.*}", decimals, v.abs());
+    let mut s = format!("{:.*}", decimals, round_half_away(v.abs(), decimals));
     if grouped {
         let (int, frac) = s.split_once('.').map_or((s.clone(), None), |(i, f)| (i.to_string(), Some(f.to_string())));
         let mut out = String::new();
@@ -283,6 +267,73 @@ pub fn format_number(v: f64, format: &str) -> String {
     format!("{prefix}{s}{suffix}")
 }
 
+/// The format's own symbols: quoted text ("%"), escaped (\%) and `_x`/`*x` characters are
+/// literal, so `0.00"%"` shows 1.66 as 1.66%, not 166.00%.
+fn format_code(format: &str) -> String {
+    let format = format.split(';').next().unwrap_or("General").trim();
+    let mut code = String::new();
+    let (mut chars, mut in_quote) = (format.chars(), false);
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => in_quote = !in_quote,
+            _ if in_quote => {}
+            '\\' | '_' | '*' => {
+                chars.next();
+            }
+            c => code.push(c),
+        }
+    }
+    code
+}
+
+/// Digits a format shows after the decimal point.
+pub fn format_decimals(format: &str) -> usize {
+    let numeric: String = format_code(format).chars().filter(|c| matches!(c, '0' | '#' | '.' | ',')).collect();
+    numeric.split_once('.').map_or(0, |(_, d)| d.chars().filter(|c| *c == '0' || *c == '#').count())
+}
+
+/// Rounds like Excel: halves away from zero, after dropping binary noise past 15 significant
+/// digits (so 1.005 rounds to 1.01 and 12.5 to 13, where `format!` would give 1.00 and 12).
+fn round_half_away(v: f64, decimals: usize) -> f64 {
+    let scale = 10f64.powi(decimals as i32);
+    let scaled = v * scale;
+    let clean: f64 = format!("{scaled:.14e}").parse().unwrap_or(scaled);
+    clean.round() / scale
+}
+
+/// Whole-percent adjustments that make a pie's percentage labels add up to 100, the way
+/// PowerPoint does (measured against its PDF output). Each share rounds half away from zero;
+/// if the total misses 100, the shares rounded down with the largest fractions gain a point
+/// each, or the shares rounded up with the smallest fractions lose one (ties: first). The label
+/// then shows `share + adjustment`, rounded again, so a 0.5% share that loses a point reads -1%
+/// in PowerPoint too. Values that are missing or not positive take no part.
+pub fn pie_percent_adjustments(values: &[Option<f64>]) -> Vec<f64> {
+    let total: f64 = values.iter().flatten().filter(|v| **v > 0.0).sum();
+    let mut adjust = vec![0.0; values.len()];
+    if total <= 0.0 {
+        return adjust;
+    }
+    let shares: Vec<(usize, f64)> =
+        values.iter().enumerate().filter_map(|(i, v)| v.filter(|v| *v > 0.0).map(|v| (i, v / total * 100.0))).collect();
+    let rounded: i64 = shares.iter().map(|(_, p)| round_half_away(*p, 0) as i64).sum();
+    let missing = 100 - rounded;
+    let frac = |p: f64| p - p.floor();
+    if missing > 0 {
+        let mut down: Vec<&(usize, f64)> = shares.iter().filter(|(_, p)| round_half_away(*p, 0) < *p).collect();
+        down.sort_by(|a, b| frac(b.1).total_cmp(&frac(a.1)));
+        for (i, _) in down.into_iter().take(missing as usize) {
+            adjust[*i] = 1.0;
+        }
+    } else if missing < 0 {
+        let mut up: Vec<&(usize, f64)> = shares.iter().filter(|(_, p)| round_half_away(*p, 0) > *p).collect();
+        up.sort_by(|a, b| frac(a.1).total_cmp(&frac(b.1)));
+        for (i, _) in up.into_iter().take((-missing) as usize) {
+            adjust[*i] = -1.0;
+        }
+    }
+    adjust
+}
+
 /// Excel's "General": up to ~10 significant digits, no trailing zeros.
 fn general(v: f64) -> String {
     if v == v.trunc() && v.abs() < 1e15 {
@@ -307,6 +358,11 @@ mod tests {
         assert_eq!(format_number(1.66, "0.00\\%"), "1.66%");
         assert_eq!(format_number(3.0, "0\" 件 0\""), "3 件 0");
         assert_eq!(format_number(0.25, "0%"), "25%");
+        // Excel 的四捨五入：0.5 遠離 0 進位，並先清掉浮點誤差
+        assert_eq!(format_number(0.125, "0%"), "13%");
+        assert_eq!(format_number(1.005, "0.00"), "1.01");
+        assert_eq!(format_number(-0.005, "0%"), "-1%");
+        assert_eq!(format_number(-0.004, "0%"), "0%");
         assert_eq!(format_number(1234567.0, "#,##0.00"), "1,234,567.00");
         assert_eq!(format_number(0.177, "0.0%"), "17.7%");
         assert_eq!(format_number(0.5, "0%"), "50%");
@@ -314,5 +370,36 @@ mod tests {
         assert_eq!(format_number(3.0, "0\"万\""), "3万");
         assert_eq!(format_number(0.0, "0.0"), "0.0");
         assert_eq!(format_number(40415.0, "#,##0_);(#,##0)"), "40,415");
+    }
+
+    /// PowerPoint 實際顯示的百分比（從它匯出的 PDF 讀出）
+    #[test]
+    fn pie_percentages_add_up_like_powerpoint() {
+        let shown = |values: &[f64]| -> Vec<String> {
+            let v: Vec<Option<f64>> = values.iter().map(|x| Some(*x)).collect();
+            let total: f64 = values.iter().filter(|x| **x > 0.0).sum();
+            let adj = pie_percent_adjustments(&v);
+            values.iter().zip(adj).map(|(x, a)| format_number(x / total + a / 100.0, "0%")).collect()
+        };
+        let pct = |s: &[&str]| s.iter().map(|x| format!("{x}%")).collect::<Vec<_>>();
+        assert_eq!(shown(&[37364.0, 14423.0, 715.0]), pct(&["71", "28", "1"]));
+        assert_eq!(shown(&[33.5, 33.5, 33.0]), pct(&["33", "34", "33"]));
+        assert_eq!(shown(&[1.0, 1.0, 1.0]), pct(&["34", "33", "33"]));
+        assert_eq!(shown(&[1.0; 7]), pct(&["15", "15", "14", "14", "14", "14", "14"]));
+        assert_eq!(shown(&[12.5; 8]), pct(&["12", "12", "12", "12", "13", "13", "13", "13"]));
+        assert_eq!(shown(&[10.4, 20.4, 30.4, 38.8]), pct(&["11", "20", "30", "39"]));
+        assert_eq!(shown(&[38.8, 30.4, 20.4, 10.4]), pct(&["39", "30", "20", "11"]));
+        assert_eq!(shown(&[33.6, 33.6, 32.8]), pct(&["33", "34", "33"]));
+        assert_eq!(shown(&[32.8, 33.6, 33.6]), pct(&["33", "33", "34"]));
+        assert_eq!(shown(&[0.4, 0.4, 0.4, 98.8]), pct(&["1", "0", "0", "99"]));
+        assert_eq!(shown(&[0.5, 0.5, 99.0]), pct(&["-1", "1", "99"]));
+        assert_eq!(shown(&[0.5, 99.5]), pct(&["-1", "100"]));
+        assert_eq!(shown(&[99.0, 0.5, 0.5]), pct(&["99", "-1", "1"]));
+        assert_eq!(shown(&[1.5, 1.5, 97.0]), pct(&["1", "2", "97"]));
+        assert_eq!(shown(&[0.5, 0.5, 0.5, 0.5, 98.0]), pct(&["-1", "-1", "1", "1", "98"]));
+        assert_eq!(shown(&[2.5, 2.5, 95.0]), pct(&["2", "3", "95"]));
+        assert_eq!(shown(&[0.6, 0.6, 98.8]), pct(&["0", "1", "99"]));
+        assert_eq!(shown(&[14.6, 24.3, 61.1]), pct(&["15", "24", "61"]));
+        assert_eq!(shown(&[0.0, 1.0, 2.0]), pct(&["0", "33", "67"]));
     }
 }
