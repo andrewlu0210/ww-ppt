@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ppt_model::{Align, Anchor, Bullet, BulletKind, Color, Emu, Shadow, TextOutline};
+use ppt_model::{Align, Anchor, Bullet, BulletKind, Color, Emu, Shadow, TabAlign, TabStop, TextOutline};
 
 use crate::{FillSpecColor, fill_spec};
 use roxmltree::Node;
@@ -297,6 +297,10 @@ pub struct LevelStyle {
     pub indent: Option<Emu>,
     pub space_before: Option<Spacing>,
     pub space_after: Option<Spacing>,
+    pub tab_size: Option<Emu>,
+    pub tabs: Option<Vec<TabStop>>,
+    pub hanging_punct: Option<bool>,
+    pub lang: Option<String>,
 }
 
 /// `a:spcBef` / `a:spcAft`: absolute points or a percentage of the line.
@@ -329,7 +333,7 @@ impl LevelStyle {
         macro_rules! take {
             ($($f:ident),*) => { $( if self.$f.is_none() { self.$f = fallback.$f.clone(); } )* };
         }
-        take!(size, bold, italic, underline, strike, baseline, spacing, color, outline, shadow, latin, ea, align, line_spacing, bu_kind, bu_font, bu_color, bu_size, mar_l, indent, space_before, space_after);
+        take!(size, bold, italic, underline, strike, baseline, spacing, color, outline, shadow, latin, ea, align, line_spacing, bu_kind, bu_font, bu_color, bu_size, mar_l, indent, space_before, space_after, tab_size, tabs, hanging_punct, lang);
         self
     }
 
@@ -359,6 +363,7 @@ impl LevelStyle {
             shadow: child(n, "effectLst").map(|e| child(e, "outerShdw").and_then(|s| outer_shadow(s, ctx))),
             latin: child(n, "latin").and_then(|f| f.attribute("typeface")).map(str::to_string),
             ea: child(n, "ea").and_then(|f| f.attribute("typeface")).map(str::to_string),
+            lang: n.attribute("lang").filter(|l| !l.is_empty()).map(str::to_string),
             ..Default::default()
         }
     }
@@ -377,6 +382,23 @@ impl LevelStyle {
         style.indent = attr_i64(n, "indent");
         style.space_before = child(n, "spcBef").and_then(Spacing::parse);
         style.space_after = child(n, "spcAft").and_then(Spacing::parse);
+        style.tab_size = attr_i64(n, "defTabSz").filter(|v| *v > 0);
+        style.hanging_punct = n.attribute("hangingPunct").map(|v| v == "1" || v == "true");
+        style.tabs = child(n, "tabLst").map(|l| {
+            let mut tabs: Vec<TabStop> = children(l, "tab")
+                .filter_map(|t| {
+                    let align = match t.attribute("algn") {
+                        Some("ctr") => TabAlign::Center,
+                        Some("r") => TabAlign::Right,
+                        Some("dec") => TabAlign::Decimal,
+                        _ => TabAlign::Left,
+                    };
+                    Some(TabStop { pos: attr_i64(t, "pos")?, align })
+                })
+                .collect();
+            tabs.sort_by_key(|t| t.pos);
+            tabs
+        });
         for c in n.children().filter(|c| c.is_element()) {
             match c.tag_name().name() {
                 "buNone" => style.bu_kind = Some(None),

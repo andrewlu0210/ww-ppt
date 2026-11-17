@@ -10,10 +10,12 @@ use std::sync::Arc;
 
 use parley::fontique::{Blob, Collection, CollectionOptions, SourceCache};
 use parley::{
-    Alignment, AlignmentOptions, BreakReason, FontContext, FontFamily, FontFamilyName, FontStyle, FontWeight, Layout,
-    LayoutContext, LineHeight, StyleProperty, VerticalAlign, YieldData,
+    Alignment, AlignmentOptions, BreakReason, FontContext, FontFamily, FontFamilyName, FontStyle, FontWeight, InlineBox,
+    InlineBoxKind, Layout, LayoutContext, LineHeight, PositionedLayoutItem, StyleProperty, VerticalAlign, YieldData,
 };
-use ppt_model::{Align, Bullet as BulletDef, BulletKind, Color, EMU_PER_PT, Emu, Paragraph, RunStyle, Shadow, Table, TextBody, TextOutline};
+use ppt_model::{
+    Align, Bullet as BulletDef, BulletKind, Color, EMU_PER_PT, Emu, Paragraph, RunStyle, Shadow, TabAlign, Table, TextBody, TextOutline,
+};
 
 /// What a run of glyphs is painted with: its fill color and its text effects.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -149,20 +151,15 @@ impl TextEngine {
             }
         }
 
-        let mut builder = self.layout_cx.ranged_builder(&mut self.font_cx, &text, 1.0, true);
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(SINGLE_LINE_HEIGHT)));
-        for prop in default_props {
-            builder.push_default(prop);
+        // Tabs: shaped as a vanishingly small space (so byte offsets, carets and saving are
+        // unchanged and no missing-glyph box shows), with an inline box before it that is as
+        // wide as the gap to the next tab stop. The gap depends on where the tab lands on its
+        // line, so the layout is measured and redone until the widths settle.
+        let tab_at: Vec<usize> = text.match_indices('\t').map(|(i, _)| i).collect();
+        let shaped_text = if tab_at.is_empty() { Cow::Borrowed(text.as_str()) } else { Cow::Owned(text.replace('\t', " ")) };
+        for &i in &tab_at {
+            span_props.push((i..i + 1, vec![StyleProperty::FontSize(TAB_FONT_SIZE), StyleProperty::LetterSpacing(0.0), StyleProperty::Underline(false)]));
         }
-        for (range, props) in span_props {
-            if range.is_empty() {
-                continue;
-            }
-            for prop in props {
-                builder.push(prop, range.clone());
-            }
-        }
-        let mut layout: Layout<TextBrush> = builder.build(&text);
 
         // Bullets are shaped separately and drawn in the hanging indent.
         let numbers = list_numbers(&body.paragraphs, &ranges);
@@ -176,7 +173,112 @@ impl TextEngine {
                 _ => None,
             })
             .collect();
+        let bullet_widths: Vec<Option<f32>> = bullets_shaped.iter().map(|b| b.as_ref().map(|(l, _)| l.width())).collect();
 
+        // Tab gaps and hanging punctuation both depend on where lines break, so the layout is
+        // redone until neither changes. `extra[i]` lets line i run that far past the right edge
+        // so its last character (a closing punctuation mark) can hang there, as PowerPoint does.
+        let hang = Hanging::new(body, &ranges, &text);
+        let mut tab_widths = vec![0.0f32; tab_at.len()];
+        let mut extra: Vec<f32> = Vec::new();
+        let (mut layout, mut lines) = self.build_lines(body, &shaped_text, &default_props, &span_props, &tab_at, &tab_widths, &extra, &bullet_widths, width_pt);
+        for _ in 0..16 {
+            let mut changed = false;
+            if let Some(i) = hang.invalid_extra(&layout, &extra, width_pt) {
+                extra.truncate(i);
+                changed = true;
+            } else {
+                if !tab_at.is_empty() {
+                    let (next, shrunk) = tab_stop_widths(&layout, &lines, body, &tab_at, &tab_widths, &hang, width_pt);
+                    if next.iter().zip(&tab_widths).any(|(a, b)| (a - b).abs() >= 0.05) {
+                        tab_widths = next;
+                        changed = true;
+                    }
+                    // A narrowed tab makes room for the punctuation, so that line needs no overhang.
+                    for i in shrunk {
+                        if extra.get(i).is_some_and(|e| *e > 0.0) {
+                            extra[i] = 0.0;
+                            changed = true;
+                        }
+                    }
+                }
+                if !changed
+                    && body.wrap
+                    && let Some((i, e)) = hang.next_overhang(&layout, &lines, &extra, width_pt)
+                {
+                    extra.resize(i, 0.0);
+                    extra.push(e);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+            (layout, lines) = self.build_lines(body, &shaped_text, &default_props, &span_props, &tab_at, &tab_widths, &extra, &bullet_widths, width_pt);
+        }
+
+        let to_pt = |emu: i64| (emu as f64 / EMU_PER_PT) as f32;
+        let mut bullets = Vec::new();
+        for (line, info) in layout.lines().zip(&lines) {
+            if !info.first {
+                continue;
+            }
+            let p = &body.paragraphs[info.paragraph];
+            if let Some(Some((b, label))) = bullets_shaped.get(info.paragraph) {
+                let baseline = b.lines().next().map(|l| l.metrics().baseline).unwrap_or(0.0);
+                // Left-aligned bullets sit at the hanging indent; otherwise just before the text.
+                let text_start = line.metrics().inline_min_coord + line.metrics().offset;
+                let x = match p.align {
+                    Align::Left | Align::Justify => to_pt(p.mar_l + p.indent).max(0.0),
+                    _ => text_start - b.width() - BULLET_GAP,
+                };
+                bullets.push(Bullet { layout: b.clone(), text: label.clone(), x, y: line.metrics().baseline - baseline });
+            }
+        }
+        let height = layout.lines().last().map(|l| l.metrics().block_max_coord).unwrap_or(0.0);
+        BodyLayout { layout, text, lines, bullets, height }
+    }
+
+    /// Builds the parley layout of `text` and breaks it into lines with the paragraphs'
+    /// indents, bullets and alignment. `tab_widths[k]` is the gap before the tab at `tab_at[k]`.
+    #[allow(clippy::too_many_arguments)]
+    fn build_lines(
+        &mut self,
+        body: &TextBody,
+        text: &str,
+        default_props: &[StyleProperty<'static, TextBrush>],
+        span_props: &[(Range<usize>, Vec<StyleProperty<'static, TextBrush>>)],
+        tab_at: &[usize],
+        tab_widths: &[f32],
+        extra: &[f32],
+        bullet_widths: &[Option<f32>],
+        width_pt: f32,
+    ) -> (Layout<TextBrush>, Vec<LineInfo>) {
+        let mut builder = self.layout_cx.ranged_builder(&mut self.font_cx, text, 1.0, true);
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(SINGLE_LINE_HEIGHT)));
+        for prop in default_props {
+            builder.push_default(prop.clone());
+        }
+        for (range, props) in span_props {
+            if range.is_empty() {
+                continue;
+            }
+            for prop in props {
+                builder.push(prop.clone(), range.clone());
+            }
+        }
+        for (k, (&index, &width)) in tab_at.iter().zip(tab_widths).enumerate() {
+            builder.push_inline_box(InlineBox {
+                id: k as u64,
+                kind: InlineBoxKind::InFlow,
+                index,
+                width,
+                height: 0.0,
+                baseline: None,
+                vertical_align: VerticalAlign::BASELINE,
+            });
+        }
+        let mut layout: Layout<TextBrush> = builder.build(text);
         // Mandatory breaks in text order: `\n` ends a paragraph, U+2028 is a soft line break.
         let mut breaks = text.chars().filter(|c| *c == '\n' || *c == '\u{2028}');
         let max = if body.wrap { width_pt.max(1.0) } else { f32::MAX };
@@ -184,7 +286,10 @@ impl TextEngine {
         let mut lines = Vec::new();
         {
             let mut breaker = layout.break_lines();
-            breaker.state_mut().set_layout_max_advance(max);
+            // parley requires every line's limit to stay within the layout's; overhangs count too.
+            // (Alignment works from each line's reported width, so this doesn't move anything.)
+            let widest_overhang = extra.iter().copied().fold(0.0f32, f32::max);
+            breaker.state_mut().set_layout_max_advance(if body.wrap { max + widest_overhang } else { max });
             let (mut para, mut first) = (0usize, true);
             loop {
                 let p = &body.paragraphs[para.min(body.paragraphs.len() - 1)];
@@ -196,13 +301,14 @@ impl TextEngine {
                         breaker.state_mut().set_line_y(y + (prev.space_after + p.space_before) as f64);
                     }
                     x += to_pt(p.indent);
-                    if let Some(Some((b, _))) = bullets_shaped.get(para) {
-                        x = (x + b.width() + BULLET_GAP).max(to_pt(p.mar_l));
+                    if let Some(Some(bw)) = bullet_widths.get(para) {
+                        x = (x + bw + BULLET_GAP).max(to_pt(p.mar_l));
                     }
                 }
                 let x = x.clamp(0.0, (width_pt - 1.0).max(0.0));
                 breaker.state_mut().set_line_x(x);
-                breaker.state_mut().set_line_max_advance(if body.wrap { (max - x).max(1.0) } else { f32::MAX });
+                let overhang = extra.get(lines.len()).copied().unwrap_or(0.0);
+                breaker.state_mut().set_line_max_advance(if body.wrap { (max - x).max(1.0) + overhang } else { f32::MAX });
                 let Some(data) = breaker.break_next() else { break };
                 let YieldData::LineBreak(data) = data else { continue };
                 // Alignment is applied by `align(Right)` below; the line width we report
@@ -231,26 +337,7 @@ impl TextEngine {
             breaker.finish();
         }
         layout.align(Alignment::Right, AlignmentOptions::default());
-
-        let mut bullets = Vec::new();
-        for (line, info) in layout.lines().zip(&lines) {
-            if !info.first {
-                continue;
-            }
-            let p = &body.paragraphs[info.paragraph];
-            if let Some(Some((b, label))) = bullets_shaped.get(info.paragraph) {
-                let baseline = b.lines().next().map(|l| l.metrics().baseline).unwrap_or(0.0);
-                // Left-aligned bullets sit at the hanging indent; otherwise just before the text.
-                let text_start = line.metrics().inline_min_coord + line.metrics().offset;
-                let x = match p.align {
-                    Align::Left | Align::Justify => to_pt(p.mar_l + p.indent).max(0.0),
-                    _ => text_start - b.width() - BULLET_GAP,
-                };
-                bullets.push(Bullet { layout: b.clone(), text: label.clone(), x, y: line.metrics().baseline - baseline });
-            }
-        }
-        let height = layout.lines().last().map(|l| l.metrics().block_max_coord).unwrap_or(0.0);
-        BodyLayout { layout, text, lines, bullets, height }
+        (layout, lines)
     }
 
     /// Shapes item `n`'s bullet: its own font, color and relative size, else the text's.
@@ -350,6 +437,184 @@ fn list_numbers(paragraphs: &[Paragraph], ranges: &[Range<usize>]) -> Vec<u32> {
 
 /// Gap between a bullet and the text after it, in points.
 const BULLET_GAP: f32 = 4.0;
+
+/// Font size the space standing in for a tab is shaped at: wide enough to exist, too small to show.
+const TAB_FONT_SIZE: f32 = 0.01;
+
+/// The gap each tab needs to reach its stop, given a layout made with `current` gaps.
+///
+/// Stops are measured from the left of the text area. A tab goes to the first explicit stop
+/// past where it starts, else to the next multiple of the paragraph's default tab size.
+/// Right, center and decimal stops line up the text that follows (up to the next tab or the
+/// end of the line); a decimal stop is treated as a right stop.
+///
+/// When a line only fits because its last character hangs past the edge, PowerPoint narrows
+/// the line's last tab instead, by the overhang. Returns the gaps and the lines narrowed so.
+fn tab_stop_widths(
+    layout: &Layout<TextBrush>,
+    lines: &[LineInfo],
+    body: &TextBody,
+    tab_at: &[usize],
+    current: &[f32],
+    hang: &Hanging,
+    width_pt: f32,
+) -> (Vec<f32>, Vec<usize>) {
+    let to_pt = |emu: i64| (emu as f64 / EMU_PER_PT) as f32;
+    let mut out = current.to_vec();
+    let mut shrunk = Vec::new();
+    for (index, (line, info)) in layout.lines().zip(lines).enumerate() {
+        let p = &body.paragraphs[info.paragraph];
+        let m = line.metrics();
+        // Positions without the alignment shift; boxes in visual (= logical, for LTR) order.
+        let boxes: Vec<(usize, f32)> = line
+            .items()
+            .filter_map(|item| match item {
+                PositionedLayoutItem::InlineBox(b) => Some((b.id as usize, b.x - m.offset)),
+                PositionedLayoutItem::GlyphRun(_) => None,
+            })
+            .filter(|(k, _)| *k < tab_at.len())
+            .collect();
+        let line_end = m.inline_min_coord + m.advance - m.hanging_advance;
+        for (n, &(k, x)) in boxes.iter().enumerate() {
+            let next = boxes.get(n + 1).map_or(line_end, |b| b.1);
+            let following = (next - (x + current[k])).max(0.0);
+            let stop = p.tabs.iter().find(|t| to_pt(t.pos) > x + 0.5).map(|t| (to_pt(t.pos), t.align)).unwrap_or_else(|| {
+                let size = to_pt(p.tab_size.max(1));
+                ((((x + 0.5) / size).floor() + 1.0) * size, TabAlign::Left)
+            });
+            let gap = match stop.1 {
+                TabAlign::Left => stop.0 - x,
+                TabAlign::Center => stop.0 - x - following / 2.0,
+                TabAlign::Right | TabAlign::Decimal => stop.0 - x - following,
+            };
+            out[k] = gap.max(0.0);
+        }
+        if let (Some(&(last, _)), Some(punct)) = (boxes.last(), hang.trailing(&line)) {
+            let end = line_end + boxes.iter().map(|(k, _)| out[*k] - current[*k]).sum::<f32>();
+            let over = end - width_pt;
+            if over > 0.01 && over <= punct + 0.01 {
+                out[last] = (out[last] - over - 0.05).max(0.0);
+                shrunk.push(index);
+            }
+        }
+    }
+    (out, shrunk)
+}
+
+/// Characters that may not start a line in Chinese and Korean text; at the end of a line
+/// PowerPoint lets one of them hang past the right edge instead of wrapping it.
+const NO_LINE_START: &str = "!%),.:;?]}¢°’”‰′″℃、。〉》」』】〕〗〙〛！％），．：；？］｝～｡｣､";
+
+/// Whether `c` may hang at a line end in text of language `lang`. Japanese hangs only its
+/// full stop and commas; Chinese and Korean any closing punctuation; other languages nothing.
+fn hangs(c: char, lang: &str) -> bool {
+    let lang = lang.to_ascii_lowercase();
+    let is = |p: &str| lang == p || lang.starts_with(&format!("{p}-"));
+    if is("ja") {
+        matches!(c, '。' | '、' | '，' | '．' | '｡' | '､')
+    } else if is("zh") || is("ko") {
+        NO_LINE_START.contains(c)
+    } else {
+        false
+    }
+}
+
+/// Hanging punctuation for one text body: which byte offsets hold a character that may hang.
+struct Hanging<'a> {
+    text: &'a str,
+    /// Byte range of each run with its language, for paragraphs that allow hanging.
+    runs: Vec<(Range<usize>, &'a str)>,
+}
+
+impl<'a> Hanging<'a> {
+    fn new(body: &'a TextBody, ranges: &[Range<usize>], text: &'a str) -> Self {
+        let mut runs = Vec::new();
+        for (p, range) in body.paragraphs.iter().zip(ranges) {
+            if !p.hanging_punct {
+                continue;
+            }
+            let mut pos = range.start;
+            for run in &p.runs {
+                runs.push((pos..pos + run.text.len(), run.style.lang.as_str()));
+                pos += run.text.len();
+            }
+        }
+        Self { text, runs }
+    }
+
+    fn at(&self, i: usize) -> bool {
+        let Some(c) = self.text.get(i..).and_then(|t| t.chars().next()) else { return false };
+        self.runs.iter().find(|(r, _)| r.contains(&i)).is_some_and(|(_, lang)| hangs(c, lang))
+    }
+
+    /// The line's clusters in text order: (byte offset, advance, is whitespace).
+    fn clusters(line: &parley::Line<'_, TextBrush>) -> Vec<(usize, f32, bool)> {
+        let mut out: Vec<(usize, f32, bool)> =
+            line.runs().flat_map(|r| r.clusters().map(|c| (c.text_range().start, c.advance(), c.is_space_or_nbsp() || c.is_hard_line_break())).collect::<Vec<_>>()).collect();
+        out.sort_by_key(|c| c.0);
+        out
+    }
+
+    /// Width of the line's last visible character, when that character may hang.
+    fn trailing(&self, line: &parley::Line<'_, TextBrush>) -> Option<f32> {
+        let clusters = Self::clusters(line);
+        let last = clusters.iter().rev().find(|c| !c.2)?;
+        self.at(last.0).then_some(last.1)
+    }
+
+    /// The first line `i` (without an overhang yet) that could take the start of the next line
+    /// up to a hanging punctuation mark: everything but the mark fits, the mark hangs. Returns
+    /// `i` and the overhang to allow.
+    fn next_overhang(&self, layout: &Layout<TextBrush>, lines: &[LineInfo], extra: &[f32], width_pt: f32) -> Option<(usize, f32)> {
+        let all: Vec<_> = layout.lines().collect();
+        for i in 0..all.len().saturating_sub(1) {
+            if lines.get(i + 1).is_none_or(|l| l.first) || extra.get(i).is_some_and(|e| *e > 0.0) {
+                continue;
+            }
+            let m = all[i].metrics();
+            let available = width_pt - m.inline_min_coord;
+            // Trailing spaces stop hanging once the next line's text joins this one.
+            let content = m.advance;
+            let next = Self::clusters(&all[i + 1]);
+            // Walk to the first mark. If everything before it fits on line i, line breaking only
+            // moved it down because there was no break before the mark, so all of it comes up.
+            let mut prefix = 0.0;
+            for (n, &(at, advance, space)) in next.iter().enumerate() {
+                if space {
+                    break;
+                }
+                // Only the last of several closing marks in a row can hang.
+                let followed = next.get(n + 1).is_some_and(|c| !c.2 && self.at(c.0));
+                if self.at(at) && !followed {
+                    if content + prefix <= available + 0.01 && content + prefix + advance > available {
+                        return Some((i, content + prefix + advance - available + 0.05));
+                    }
+                    break;
+                }
+                prefix += advance;
+                if content + prefix > available + 0.01 {
+                    break;
+                }
+            }
+        }
+        None
+    }
+
+    /// The first line whose overhang no longer ends in a hanging mark (the text moved).
+    fn invalid_extra(&self, layout: &Layout<TextBrush>, extra: &[f32], width_pt: f32) -> Option<usize> {
+        layout.lines().zip(extra).position(|(line, &e)| {
+            if e <= 0.0 {
+                return false;
+            }
+            let m = line.metrics();
+            let available = width_pt - m.inline_min_coord;
+            match self.trailing(&line) {
+                Some(w) => m.advance - m.hanging_advance - w > available + 0.01,
+                None => true,
+            }
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineInfo {
@@ -552,6 +817,100 @@ mod tests {
             }
         }
         out
+    }
+
+    /// x of the first glyph drawn at a normal size after byte offset `from` (tab stand-ins are tiny).
+    fn x_after(b: &BodyLayout, from: usize) -> f32 {
+        for line in b.layout.lines() {
+            for item in line.items() {
+                if let parley::PositionedLayoutItem::GlyphRun(run) = item
+                    && run.run().font_size() > 1.0
+                    && run.run().text_range().start >= from
+                {
+                    return run.positioned_glyphs().next().map_or(f32::NAN, |g| g.x);
+                }
+            }
+        }
+        f32::NAN
+    }
+
+    #[test]
+    fn tabs_go_to_default_stops() {
+        let mut engine = engine();
+        // 預設定位點每 1 吋（72pt）一個；從 "ab" 之後跳到 72pt，第二個 Tab 跳到 144pt
+        let b = engine.layout_body(&body("ab\tc\td", 12.0), 400.0);
+        assert!((x_after(&b, 3) - 72.0).abs() < 0.5, "c at {}", x_after(&b, 3));
+        assert!((x_after(&b, 5) - 144.0).abs() < 0.5, "d at {}", x_after(&b, 5));
+        // Tab 本身只是極小的空白，不會畫出缺字方框
+        assert!(glyphs(&b).iter().filter(|g| g.2 > 1.0).count() == 4);
+        // 開頭的 Tab 讓整行從第一個定位點開始
+        let lead = engine.layout_body(&body("\tx", 12.0), 400.0);
+        assert!((x_after(&lead, 1) - 72.0).abs() < 0.5, "x at {}", x_after(&lead, 1));
+    }
+
+    #[test]
+    fn tabs_use_explicit_stops_and_their_alignment() {
+        use ppt_model::{TabAlign, TabStop};
+        let mut engine = engine();
+        let mut tb = body("a\tb\tcc", 12.0);
+        let pt = |v: f64| (v * EMU_PER_PT) as i64;
+        tb.paragraphs[0].tabs = vec![TabStop { pos: pt(30.0), align: TabAlign::Left }, TabStop { pos: pt(200.0), align: TabAlign::Right }];
+        tb.paragraphs[0].tab_size = pt(50.0);
+        let b = engine.layout_body(&tb, 400.0);
+        assert!((x_after(&b, 2) - 30.0).abs() < 0.5, "b at {}", x_after(&b, 2));
+        // 靠右定位點：後面的 "cc" 結束在 200pt
+        let line = b.layout.lines().next().unwrap();
+        let end = line.metrics().inline_min_coord + line.metrics().advance;
+        assert!((end - 200.0).abs() < 0.5, "cc ends at {end}");
+        // 超過最後一個定位點後，用預設間距的倍數
+        let mut past = body("a\tb\tc", 12.0);
+        past.paragraphs[0].tabs = vec![TabStop { pos: pt(30.0), align: TabAlign::Left }];
+        past.paragraphs[0].tab_size = pt(50.0);
+        let b = engine.layout_body(&past, 400.0);
+        assert!((x_after(&b, 4) - 50.0).abs() < 0.5, "c at {}", x_after(&b, 4));
+    }
+
+    /// `text` in language `lang`, with the box `overflow` points too narrow for it on one line.
+    fn hang_case(engine: &mut TextEngine, text: &str, lang: &str, overflow: f32) -> (TextBody, f32) {
+        let mut tb = body(text, 20.0);
+        for r in &mut tb.paragraphs[0].runs {
+            r.style.lang = lang.to_string();
+        }
+        let natural = engine.layout_body(&tb, 1000.0).layout.lines().next().map_or(0.0, |l| l.metrics().advance);
+        (tb, natural - overflow)
+    }
+
+    #[test]
+    fn closing_punctuation_hangs_in_chinese_text() {
+        let mut engine = engine();
+        let bang = engine.layout_body(&body("!", 20.0), 1000.0).layout.lines().next().unwrap().metrics().advance;
+        // 中文：只差最後的「!」放不下時，讓它懸在框外，不換行
+        let (tb, width) = hang_case(&mut engine, "aa xxxxxxxx!", "zh-CN", bang * 0.6);
+        assert_eq!(engine.layout_body(&tb, width).layout.len(), 1);
+        // 英文、或段落關掉 hangingPunct：照常換行
+        let (tb, width) = hang_case(&mut engine, "aa xxxxxxxx!", "en-US", bang * 0.6);
+        assert_eq!(engine.layout_body(&tb, width).layout.len(), 2);
+        let (mut tb, width) = hang_case(&mut engine, "aa xxxxxxxx!", "zh-CN", bang * 0.6);
+        tb.paragraphs[0].hanging_punct = false;
+        assert_eq!(engine.layout_body(&tb, width).layout.len(), 2);
+        // 超出比標點本身還寬：放不下，照常換行
+        let (tb, width) = hang_case(&mut engine, "aa xxxxxxxx!", "zh-CN", bang + 2.0);
+        assert_eq!(engine.layout_body(&tb, width).layout.len(), 2);
+        // 日文只有句號和逗號會懸掛
+        let (tb, width) = hang_case(&mut engine, "aa xxxxxxxx!", "ja-JP", bang * 0.6);
+        assert_eq!(engine.layout_body(&tb, width).layout.len(), 2);
+    }
+
+    #[test]
+    fn a_tab_narrows_instead_of_letting_punctuation_hang() {
+        let mut engine = engine();
+        let (tb, _) = hang_case(&mut engine, "\txxxxxxxx!", "zh-CN", 0.0);
+        // 框寬讓 Tab（到 72pt）後的文字超出 5pt：Tab 縮 5pt，整行剛好到右緣
+        let text_w = engine.layout_body(&body("xxxxxxxx!", 20.0), 1000.0).layout.lines().next().unwrap().metrics().advance;
+        let width = 72.0 + text_w - 5.0;
+        let b = engine.layout_body(&tb, width);
+        assert_eq!(b.layout.len(), 1);
+        assert!((x_after(&b, 1) - 67.0).abs() < 0.2, "text at {}", x_after(&b, 1));
     }
 
     #[test]

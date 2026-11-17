@@ -381,6 +381,9 @@ pub struct RunStyle {
     /// The run is a field (`a:fld`): its text is a cached value PowerPoint
     /// recomputes, like the slide number.
     pub field: Option<Arc<Field>>,
+    /// Language tag of the run (`a:rPr/@lang`, e.g. `zh-CN`); empty when unknown.
+    /// Line breaking depends on it (hanging punctuation).
+    pub lang: String,
 }
 
 /// A text field (`a:fld`).
@@ -441,7 +444,7 @@ impl RunStyle {
         macro_rules! take {
             ($($f:ident),*) => { $( if self.$f == old.$f { self.$f = new.$f.clone(); } )* };
         }
-        take!(size_pt, bold, italic, underline, strike, baseline, spacing_pt, color, latin_font, ea_font);
+        take!(size_pt, bold, italic, underline, strike, baseline, spacing_pt, color, latin_font, ea_font, lang);
     }
 }
 
@@ -462,6 +465,7 @@ impl Default for RunStyle {
             ea_font: String::new(),
             link: None,
             field: None,
+            lang: String::new(),
         }
     }
 }
@@ -487,8 +491,35 @@ pub struct Paragraph {
     /// Space before/after the paragraph, in points.
     pub space_before: f32,
     pub space_after: f32,
+    /// Default tab spacing (`defTabSz`): tabs past the last stop go to its next multiple.
+    pub tab_size: Emu,
+    /// Explicit tab stops (`a:tabLst`), in position order.
+    pub tabs: Vec<TabStop>,
+    /// East Asian closing punctuation may hang past the right edge instead of wrapping (`hangingPunct`).
+    pub hanging_punct: bool,
     /// Style used when the paragraph has no runs (`a:endParaRPr`).
     pub end_style: RunStyle,
+}
+
+/// PowerPoint's default tab spacing: one inch.
+pub const DEFAULT_TAB_SIZE: Emu = 914_400;
+
+/// How text lines up at a tab stop (`a:tab/@algn`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TabAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+    /// The first decimal point of the following text sits on the stop.
+    Decimal,
+}
+
+/// A tab stop, measured from the left edge of the text area (inside the inset).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TabStop {
+    pub pos: Emu,
+    pub align: TabAlign,
 }
 
 impl Default for Paragraph {
@@ -503,6 +534,9 @@ impl Default for Paragraph {
             indent: 0,
             space_before: 0.0,
             space_after: 0.0,
+            tab_size: DEFAULT_TAB_SIZE,
+            tabs: Vec::new(),
+            hanging_punct: true,
             end_style: RunStyle::default(),
         }
     }
@@ -551,6 +585,9 @@ pub struct ParaDefaults {
     pub indent: Emu,
     pub space_before: f32,
     pub space_after: f32,
+    pub tab_size: Emu,
+    pub tabs: Vec<TabStop>,
+    pub hanging_punct: bool,
 }
 
 impl TextBody {

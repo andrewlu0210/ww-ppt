@@ -1173,6 +1173,9 @@ fn text_body(tx: Node, master: &Master, ph: Option<&Placeholder>, inherited: &[&
                 indent: pstyle.indent.unwrap_or(0),
                 space_before: pstyle.space_before.map(|s| s.to_points(first_size)).unwrap_or(0.0),
                 space_after: pstyle.space_after.map(|s| s.to_points(first_size)).unwrap_or(0.0),
+                tab_size: pstyle.tab_size.unwrap_or(ppt_model::DEFAULT_TAB_SIZE),
+                tabs: pstyle.tabs.clone().unwrap_or_default(),
+                hanging_punct: pstyle.hanging_punct.unwrap_or(true),
                 end_style,
             }
         })
@@ -1222,6 +1225,7 @@ fn run_style(s: &LevelStyle, theme: &Theme) -> RunStyle {
         ea_font: theme.resolve_typeface(s.ea.as_deref().unwrap_or("+mn-ea")),
         link: None,
         field: None,
+        lang: s.lang.clone().unwrap_or_default(),
     }
 }
 
@@ -1235,6 +1239,9 @@ fn para_defaults(s: &LevelStyle, finalize: &dyn Fn(&LevelStyle) -> RunStyle) -> 
         indent: s.indent.unwrap_or(0),
         space_before: s.space_before.map(|v| v.to_points(style.size_pt)).unwrap_or(0.0),
         space_after: s.space_after.map(|v| v.to_points(style.size_pt)).unwrap_or(0.0),
+        tab_size: s.tab_size.unwrap_or(ppt_model::DEFAULT_TAB_SIZE),
+        tabs: s.tabs.clone().unwrap_or_default(),
+        hanging_punct: s.hanging_punct.unwrap_or(true),
         style,
     }
 }

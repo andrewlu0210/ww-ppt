@@ -225,7 +225,15 @@ fn fallback_defaults() -> ParaDefaults {
         indent: 0,
         space_before: 0.0,
         space_after: 0.0,
+        tab_size: ppt_model::DEFAULT_TAB_SIZE,
+        tabs: Vec::new(),
+        hanging_punct: true,
     }
+}
+
+fn is_east_asian(lang: &str) -> bool {
+    let l = lang.to_ascii_lowercase();
+    ["zh", "ja", "ko"].iter().any(|p| l == *p || l.starts_with(&format!("{p}-")))
 }
 
 fn has_cjk(s: &str) -> bool {
@@ -234,8 +242,16 @@ fn has_cjk(s: &str) -> bool {
 
 /// `a:rPr`-style element with only the properties that differ from `base`.
 fn rpr_xml(tag: &str, s: &RunStyle, base: &RunStyle, text: &str, links: &mut Links) -> String {
-    let lang = if has_cjk(text) { "zh-TW" } else { "en-US" };
-    let mut attrs = format!(r#" lang="{lang}" altLang="en-US""#);
+    // Keep the run's own language unless it contradicts the text (CJK typed into an English run, say).
+    let cjk = has_cjk(text);
+    let lang = if !s.lang.is_empty() && (text.is_empty() || is_east_asian(&s.lang) == cjk) {
+        s.lang.as_str()
+    } else if cjk {
+        "zh-TW"
+    } else {
+        "en-US"
+    };
+    let mut attrs = format!(r#" lang="{}" altLang="en-US""#, esc(lang));
     if (s.size_pt - base.size_pt).abs() > 0.01 {
         attrs.push_str(&format!(r#" sz="{}""#, (s.size_pt * 100.0).round() as i64));
     }
@@ -334,6 +350,12 @@ fn paragraph_xml(p: &Paragraph, d: &ParaDefaults, links: &mut Links) -> String {
         };
         attrs.push_str(&format!(r#" algn="{a}""#));
     }
+    if p.tab_size != d.tab_size {
+        attrs.push_str(&format!(r#" defTabSz="{}""#, p.tab_size));
+    }
+    if p.hanging_punct != d.hanging_punct {
+        attrs.push_str(if p.hanging_punct { r#" hangingPunct="1""# } else { r#" hangingPunct="0""# });
+    }
     let mut kids = String::new();
     if (p.line_spacing - d.line_spacing).abs() > 0.001 {
         kids.push_str(&format!(r#"<a:lnSpc><a:spcPct val="{}"/></a:lnSpc>"#, (p.line_spacing * 100_000.0).round() as i64));
@@ -346,6 +368,20 @@ fn paragraph_xml(p: &Paragraph, d: &ParaDefaults, links: &mut Links) -> String {
     }
     if p.bullet != d.bullet {
         kids.push_str(&bullet_xml(p.bullet.as_ref()));
+    }
+    // a:tabLst comes after the bullet elements in a:pPr.
+    if p.tabs != d.tabs {
+        kids.push_str("<a:tabLst>");
+        for t in &p.tabs {
+            let a = match t.align {
+                ppt_model::TabAlign::Left => "l",
+                ppt_model::TabAlign::Center => "ctr",
+                ppt_model::TabAlign::Right => "r",
+                ppt_model::TabAlign::Decimal => "dec",
+            };
+            kids.push_str(&format!(r#"<a:tab pos="{}" algn="{a}"/>"#, t.pos));
+        }
+        kids.push_str("</a:tabLst>");
     }
     let mut out = String::from("<a:p>");
     if !attrs.is_empty() || !kids.is_empty() {

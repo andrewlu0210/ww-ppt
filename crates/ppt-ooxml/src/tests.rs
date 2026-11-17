@@ -223,3 +223,43 @@ fn shape_ids_are_unique() {
 fn rejects_non_zip_input() {
     assert!(parse_pptx(b"hello").is_err());
 }
+
+#[test]
+fn tab_stops_round_trip() {
+    use ppt_model::{TabAlign, TabStop};
+    let pres = parse_pptx(&sample_pptx()).unwrap();
+    // 沒有指定時用 PowerPoint 的預設：1 吋、沒有自訂定位點
+    let p = &pres.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[0];
+    assert_eq!((p.tab_size, p.tabs.len()), (ppt_model::DEFAULT_TAB_SIZE, 0));
+
+    let mut edited = pres.clone();
+    let tabs = vec![TabStop { pos: 457_200, align: TabAlign::Left }, TabStop { pos: 2_743_200, align: TabAlign::Decimal }];
+    {
+        let slide = edited.slide_mut(0).unwrap();
+        let body = &mut slide.shapes[0].text.as_mut().unwrap().paragraphs;
+        body[0].tabs = tabs.clone();
+        body[0].tab_size = 228_600;
+    }
+    let again = parse_pptx(&save_pptx(&edited).unwrap()).unwrap();
+    let p = &again.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[0];
+    assert_eq!(p.tabs, tabs);
+    assert_eq!(p.tab_size, 228_600);
+}
+
+#[test]
+fn run_language_and_hanging_punctuation_round_trip() {
+    let pres = parse_pptx(&sample_pptx()).unwrap();
+    let mut edited = pres.clone();
+    {
+        let slide = edited.slide_mut(0).unwrap();
+        let p = &mut slide.shapes[0].text.as_mut().unwrap().paragraphs[0];
+        assert!(p.hanging_punct, "on unless a style turns it off");
+        p.hanging_punct = false;
+        p.runs[0].style.lang = "zh-CN".into();
+    }
+    let again = parse_pptx(&save_pptx(&edited).unwrap()).unwrap();
+    let p = &again.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[0];
+    assert!(!p.hanging_punct);
+    // 「你好 PowerPoint」含中文，存檔保留原本的 zh-CN，不再一律寫成 zh-TW
+    assert_eq!(p.runs[0].style.lang, "zh-CN");
+}

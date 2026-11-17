@@ -258,7 +258,7 @@ impl TextBody {
             macro_rules! take {
                 ($($f:ident),*) => { $( if p.$f == o.$f { p.$f = n.$f.clone(); } )* };
             }
-            take!(align, bullet, line_spacing, mar_l, indent, space_before, space_after);
+            take!(align, bullet, line_spacing, mar_l, indent, space_before, space_after, tab_size, tabs, hanging_punct);
         }
         self.defaults = new.defaults.clone();
     }
@@ -277,6 +277,9 @@ impl TextBody {
             p.indent = d.indent;
             p.space_before = d.space_before;
             p.space_after = d.space_after;
+            p.tab_size = d.tab_size;
+            p.tabs = d.tabs.clone();
+            p.hanging_punct = d.hanging_punct;
         }
     }
 
