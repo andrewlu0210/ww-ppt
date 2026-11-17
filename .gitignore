@@ -24,6 +24,9 @@
 /samples/vr/test*.pptx
 /samples/vr/test*.pdf
 
+# Company template (the ww-pptx skill keeps its own copy): not tracked
+/samples/ww_template.pptx
+
 # Local secrets (API key for the internal LLM service): never commit
 .env
 .env.*
