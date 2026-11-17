@@ -52,11 +52,15 @@ struct Scale {
     min: f64,
     max: f64,
     unit: f64,
+    /// `c:orientation val="maxMin"`: values run from the far end back.
+    reversed: bool,
 }
 
 impl Scale {
+    /// Where `v` falls along the axis, 0 at the start and 1 at the end (after reversal).
     fn frac(&self, v: f64) -> f64 {
-        if self.max == self.min { 0.0 } else { (v - self.min) / (self.max - self.min) }
+        let f = if self.max == self.min { 0.0 } else { (v - self.min) / (self.max - self.min) };
+        if self.reversed { 1.0 - f } else { f }
     }
 
     fn ticks(&self) -> Vec<f64> {
@@ -99,7 +103,7 @@ fn auto_scale(lo: f64, hi: f64, axis: Option<&Axis>) -> Scale {
     });
     let min = fixed_min.unwrap_or_else(|| if lo < 0.0 { (head(lo, false) / unit).floor() * unit } else { 0.0 });
     let max = fixed_max.unwrap_or_else(|| if hi > 0.0 { (head(hi, true) / unit).ceil() * unit } else { 0.0 });
-    Scale { min, max: if max <= min { min + unit } else { max }, unit }
+    Scale { min, max: if max <= min { min + unit } else { max }, unit, reversed: axis.is_some_and(|a| a.reversed) }
 }
 
 fn stacked(g: Grouping) -> bool {
@@ -288,9 +292,9 @@ pub fn draw_chart(scene: &mut dyn Canvas, engine: &mut TextEngine, chart: &Chart
         match scales.iter_mut().find(|s| s.0 == val_id) {
             Some(s) => {
                 let merged = (s.1.min.min(lo), s.1.max.max(hi));
-                s.1 = Scale { min: merged.0, max: merged.1, unit: 1.0 };
+                s.1 = Scale { min: merged.0, max: merged.1, unit: 1.0, reversed: false };
             }
-            None => scales.push((val_id, Scale { min: lo, max: hi, unit: 1.0 })),
+            None => scales.push((val_id, Scale { min: lo, max: hi, unit: 1.0, reversed: false })),
         }
     }
     let scales: Vec<(u32, Scale)> = scales.into_iter().map(|(id, s)| (id, auto_scale(s.min, s.max, chart.axis(id)))).collect();
@@ -311,48 +315,85 @@ pub fn draw_chart(scene: &mut dyn Canvas, engine: &mut TextEngine, chart: &Chart
     let cat_axis = chart.plots.iter().find_map(|p| p.axes).and_then(|a| chart.axis(a.0));
     let cat_style = cat_axis.map(|a| a.style.clone()).unwrap_or_else(|| chart.text.clone());
     let cat_labels: Vec<Label> = if cat_axis.is_some_and(|a| !a.deleted && a.labels) { categories.iter().map(|c| measure(engine, c, &cat_style)).collect() } else { Vec::new() };
-    let side_width = |pos: AxisPos| {
-        axis_labels.iter().filter(|(id, _)| chart.axis(*id).is_some_and(|a| a.position == pos)).flat_map(|(_, l)| l.iter().map(|x| x.1.w)).fold(0.0, f64::max)
+    let horizontal_bars = chart.plots.iter().any(|p| matches!(p.kind, PlotKind::Bar { horizontal: true, .. }));
+    let n_cats = chart.plots.iter().flat_map(|p| &p.series).map(|s| s.values.len().max(s.categories.len())).max().unwrap_or(0).max(1);
+    // 反轉的類別軸讓數值軸移到另一側（它在第一個類別處交叉），反轉的數值軸則讓類別軸移到另一側。
+    let cat_reversed = cat_axis.is_some_and(|a| a.reversed);
+    let val_reversed = scales.first().is_some_and(|s| s.1.reversed);
+    let value_side = |axis: &Axis| match (horizontal_bars, cat_reversed) {
+        (true, false) => AxisPos::Bottom,
+        (true, true) => AxisPos::Top,
+        (false, _) if (axis.position == AxisPos::Right) != cat_reversed => AxisPos::Right,
+        (false, _) => AxisPos::Left,
+    };
+    let cat_side = match (horizontal_bars, val_reversed) {
+        (true, false) => AxisPos::Left,
+        (true, true) => AxisPos::Right,
+        (false, false) => AxisPos::Bottom,
+        (false, true) => AxisPos::Top,
     };
     let label_gap = 4.0 * PT;
     let cat_h = cat_labels.iter().map(|l| l.h).fold(0.0, f64::max);
+    let cat_w = cat_labels.iter().map(|l| l.w).fold(0.0, f64::max);
+    // 每一側要留給座標軸標籤的寬度：(左, 上, 右, 下)。左、右、下即使沒有標籤也留一點間距（和 PowerPoint 比對調過）
+    let mut room = [label_gap, 0.0, label_gap, label_gap];
+    let slot = |pos: AxisPos| match pos {
+        AxisPos::Left => 0,
+        AxisPos::Top => 1,
+        AxisPos::Right => 2,
+        AxisPos::Bottom => 3,
+    };
+    let mut half = 0.0f64; // 最外側刻度標籤有一半跨出繪圖區
+    for (id, labels) in &axis_labels {
+        let Some(axis) = chart.axis(*id) else { continue };
+        let side = value_side(axis);
+        let along_x = matches!(side, AxisPos::Top | AxisPos::Bottom);
+        let extent = labels.iter().map(|(_, l)| if along_x { l.h } else { l.w }).fold(0.0, f64::max);
+        half = half.max(labels.iter().map(|(_, l)| if along_x { l.w } else { l.h }).fold(0.0, f64::max) / 2.0);
+        let r = &mut room[slot(side)];
+        *r = r.max(extent + label_gap);
+    }
+    if !cat_labels.is_empty() {
+        let extent = if matches!(cat_side, AxisPos::Left | AxisPos::Right) { cat_w } else { cat_h };
+        let r = &mut room[slot(cat_side)];
+        *r = r.max(extent + label_gap);
+    }
+    // 數值方向的兩端留半個刻度標籤，免得頭尾的標籤被裁掉。直條圖頂端沿用和 PowerPoint 比對過的半個類別標籤高；
+    // 手動版面（plotArea 的 manualLayout）照 PowerPoint 讓標籤跨出去
+    if chart.plot_layout.is_none() {
+        if horizontal_bars {
+            room[0] = room[0].max(half);
+            room[2] = room[2].max(half);
+        } else {
+            room[1] = room[1].max(cat_h * 0.5);
+        }
+    }
     let plot = match chart.plot_layout {
         Some(m) => {
             let r = Rect::new(m.x * w, m.y * h, m.x * w + m.w.unwrap_or(1.0 - m.x) * w, m.y * h + m.h.unwrap_or(1.0 - m.y) * h);
-            if chart.plot_layout_inner {
-                r
-            } else {
-                Rect::new(r.x0 + side_width(AxisPos::Left) + label_gap, r.y0, r.x1 - side_width(AxisPos::Right) - label_gap, r.y1 - cat_h - label_gap)
-            }
+            if chart.plot_layout_inner { r } else { Rect::new(r.x0 + room[0], r.y0 + room[1], r.x1 - room[2], r.y1 - room[3]) }
         }
         None => {
             let has_axes = chart.plots.iter().any(|p| p.axes.is_some());
-            if has_axes {
-                Rect::new(
-                    area.x0 + side_width(AxisPos::Left) + label_gap,
-                    area.y0 + cat_h * 0.5,
-                    area.x1 - side_width(AxisPos::Right) - label_gap,
-                    area.y1 - cat_h - label_gap,
-                )
-            } else {
-                area
-            }
+            if has_axes { Rect::new(area.x0 + room[0], area.y0 + room[1], area.x1 - room[2], area.y1 - room[3]) } else { area }
         }
     };
     if let Some(fill) = &chart.plot_fill {
         fill_paint(scene, tf, fill, w, h, &plot);
     }
 
-    let horizontal_bars = chart.plots.iter().any(|p| matches!(p.kind, PlotKind::Bar { horizontal: true, .. }));
-    let n_cats = chart.plots.iter().flat_map(|p| &p.series).map(|s| s.values.len().max(s.categories.len())).max().unwrap_or(0).max(1);
     // Value → position along the value direction; category band → span along the other.
     let val_pos = |scale: &Scale, v: f64| if horizontal_bars { plot.x0 + scale.frac(v) * plot.width() } else { plot.y1 - scale.frac(v) * plot.height() };
     let band = if horizontal_bars { plot.height() / n_cats as f64 } else { plot.width() / n_cats as f64 };
-    let band_start = |i: usize| if horizontal_bars { plot.y1 - (i + 1) as f64 * band } else { plot.x0 + i as f64 * band };
+    let band_start = |i: usize| {
+        let i = if cat_reversed { n_cats - 1 - i.min(n_cats - 1) } else { i };
+        if horizontal_bars { plot.y1 - (i + 1) as f64 * band } else { plot.x0 + i as f64 * band }
+    };
 
     // Gridlines and value labels.
     for (id, scale) in &scales {
         let Some(axis) = chart.axis(*id) else { continue };
+        let side = value_side(axis);
         if let Some(grid) = axis.gridlines {
             for v in scale.ticks() {
                 let p = val_pos(scale, v);
@@ -361,40 +402,51 @@ pub fn draw_chart(scene: &mut dyn Canvas, engine: &mut TextEngine, chart: &Chart
             }
         }
         if let Some(line) = axis.line.filter(|_| !axis.deleted) {
-            let x = if axis.position == AxisPos::Right { plot.x1 } else { plot.x0 };
-            scene.stroke(&Stroke::new(line.width.max(1) as f64), tf, color(line.color), None, &Line::new((x, plot.y0), (x, plot.y1)));
+            let l = match side {
+                AxisPos::Left => Line::new((plot.x0, plot.y0), (plot.x0, plot.y1)),
+                AxisPos::Right => Line::new((plot.x1, plot.y0), (plot.x1, plot.y1)),
+                AxisPos::Top => Line::new((plot.x0, plot.y0), (plot.x1, plot.y0)),
+                AxisPos::Bottom => Line::new((plot.x0, plot.y1), (plot.x1, plot.y1)),
+            };
+            scene.stroke(&Stroke::new(line.width.max(1) as f64), tf, color(line.color), None, &l);
         }
         if let Some((_, labels)) = axis_labels.iter().find(|(a, _)| a == id) {
             for (v, l) in labels {
                 let p = val_pos(scale, *v);
-                if horizontal_bars {
-                    place(scene, tf, l, Point::new(p, plot.y1 + label_gap), 0.5, 0.0);
-                } else if axis.position == AxisPos::Right {
-                    place(scene, tf, l, Point::new(plot.x1 + label_gap, p), 0.0, 0.5);
-                } else {
-                    place(scene, tf, l, Point::new(plot.x0 - label_gap, p), 1.0, 0.5);
+                match side {
+                    AxisPos::Bottom => place(scene, tf, l, Point::new(p, plot.y1 + label_gap), 0.5, 0.0),
+                    AxisPos::Top => place(scene, tf, l, Point::new(p, plot.y0 - label_gap), 0.5, 1.0),
+                    AxisPos::Right => place(scene, tf, l, Point::new(plot.x1 + label_gap, p), 0.0, 0.5),
+                    AxisPos::Left => place(scene, tf, l, Point::new(plot.x0 - label_gap, p), 1.0, 0.5),
                 }
             }
         }
     }
 
-    // Category axis line and labels.
+    // Category axis line (where the value axis crosses zero) and labels.
     if let Some(axis) = cat_axis.filter(|a| !a.deleted) {
         if let Some(line) = axis.line {
-            let l = if horizontal_bars { Line::new((plot.x0, plot.y0), (plot.x0, plot.y1)) } else { Line::new((plot.x0, plot.y1), (plot.x1, plot.y1)) };
+            let at = scales.first().map(|(_, s)| val_pos(s, 0.0f64.clamp(s.min, s.max)));
+            let l = if horizontal_bars {
+                let x = at.unwrap_or(plot.x0);
+                Line::new((x, plot.y0), (x, plot.y1))
+            } else {
+                let y = at.unwrap_or(plot.y1);
+                Line::new((plot.x0, y), (plot.x1, y))
+            };
             scene.stroke(&Stroke::new(line.width.max(1) as f64), tf, color(line.color), None, &l);
         }
         let crowded = !horizontal_bars && cat_labels.iter().any(|l| l.w > band * 1.05);
         // Too many labels for the width: show every n-th one, rotated like Excel.
-        let step = if crowded { ((cat_labels.iter().map(|l| l.h).fold(0.0, f64::max) * 1.6) / band).ceil().max(1.0) as usize } else { 1 };
+        let step = if crowded { ((cat_h * 1.6) / band).ceil().max(1.0) as usize } else { 1 };
         for (i, l) in cat_labels.iter().enumerate().step_by(step) {
             let c = band_start(i) + band / 2.0;
-            if horizontal_bars {
-                place(scene, tf, l, Point::new(plot.x0 - label_gap, c), 1.0, 0.5);
-            } else if crowded {
-                place_rotated(scene, tf, l, Point::new(c, plot.y1 + label_gap), 1.0, 0.5, -PI / 4.0);
-            } else {
-                place(scene, tf, l, Point::new(c, plot.y1 + label_gap), 0.5, 0.0);
+            match cat_side {
+                AxisPos::Left => place(scene, tf, l, Point::new(plot.x0 - label_gap, c), 1.0, 0.5),
+                AxisPos::Right => place(scene, tf, l, Point::new(plot.x1 + label_gap, c), 0.0, 0.5),
+                AxisPos::Top => place(scene, tf, l, Point::new(c, plot.y0 - label_gap), 0.5, 1.0),
+                AxisPos::Bottom if crowded => place_rotated(scene, tf, l, Point::new(c, plot.y1 + label_gap), 1.0, 0.5, -PI / 4.0),
+                AxisPos::Bottom => place(scene, tf, l, Point::new(c, plot.y1 + label_gap), 0.5, 0.0),
             }
         }
     }
@@ -450,7 +502,10 @@ pub fn draw_chart(scene: &mut dyn Canvas, engine: &mut TextEngine, chart: &Chart
                         let Some(v) = s.values.get(i).copied().flatten() else { continue };
                         let (a, b) = value_at(&mut bases, i, v);
                         let offset = if stacked(grouping) { 0.0 } else { si as f64 * bar * (1.0 - ov) };
-                        let start = band_start(i) + gap * bar / 2.0 + offset;
+                        // 同一類別裡的數列順著類別軸的方向排：直條圖由左到右、橫條圖由下到上，軸反轉時相反
+                        let along = gap * bar / 2.0 + offset;
+                        let forward = horizontal_bars == cat_reversed;
+                        let start = if forward { band_start(i) + along } else { band_start(i) + band - along - bar };
                         let (pa, pb) = (val_pos(&scale, a), val_pos(&scale, b));
                         let rect = if horizontal_bars {
                             Rect::new(pa.min(pb), start, pa.max(pb), start + bar)

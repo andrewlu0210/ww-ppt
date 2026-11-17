@@ -200,11 +200,17 @@ fn series(n: Node, ctx: &ColorCtx, base: &RunStyle) -> Series {
     }
 }
 
+/// Axis ids are `xsd:unsignedInt`, but python-pptx writes negative ones and PowerPoint
+/// accepts (and keeps) them as signed 32-bit values. Map both onto the same `u32`.
+fn axis_id(v: &str) -> Option<u32> {
+    v.parse::<u32>().ok().or_else(|| v.parse::<i32>().ok().map(|i| i as u32))
+}
+
 fn axis(n: Node, ctx: &ColorCtx, base: &RunStyle) -> Option<Axis> {
     let scaling = child(n, "scaling");
     let sp_pr = child(n, "spPr");
     Some(Axis {
-        id: val(n, "axId")?.parse().ok()?,
+        id: axis_id(val(n, "axId")?)?,
         category: n.tag_name().name() != "valAx",
         position: match val(n, "axPos") {
             Some("l") => AxisPos::Left,
@@ -224,7 +230,7 @@ fn axis(n: Node, ctx: &ColorCtx, base: &RunStyle) -> Option<Axis> {
         line: sp_pr.and_then(|p| parse_line(child(p, "ln"), None, ctx)),
         labels: val(n, "tickLblPos") != Some("none"),
         style: text_style(child(n, "txPr"), base, ctx),
-        cross_axis: val(n, "crossAx").and_then(|v| v.parse().ok()).unwrap_or(0),
+        cross_axis: val(n, "crossAx").and_then(axis_id).unwrap_or(0),
     })
 }
 
@@ -270,7 +276,7 @@ pub(crate) fn chart(xml: &str, ctx: &ColorCtx, minor: &(String, String)) -> Opti
             },
             _ => continue,
         };
-        let ax: Vec<u32> = children(p, "axId").filter_map(|a| a.attribute("val")?.parse().ok()).collect();
+        let ax: Vec<u32> = children(p, "axId").filter_map(|a| axis_id(a.attribute("val")?)).collect();
         let series = children(p, "ser").map(|s| series(s, ctx, &base)).collect();
         plots.push(Plot {
             kind,
@@ -363,6 +369,24 @@ mod tests {
         assert_eq!((right.position, right.max, right.format.as_deref()), (AxisPos::Right, Some(1.0), Some("0%")));
         assert!(c.axis(2).unwrap().gridlines.is_some());
         assert_eq!(c.legend.as_ref().unwrap().position, LegendPos::Bottom);
+    }
+
+    #[test]
+    fn accepts_negative_axis_ids() {
+        // python-pptx 寫出負數的軸 id；PowerPoint 照樣接受，這裡也要對得起來
+        let xml = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea>
+            <c:barChart><c:barDir val="bar"/><c:grouping val="clustered"/>
+              <c:ser><c:idx val="0"/><c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>3</c:v></c:pt></c:numLit></c:val></c:ser>
+              <c:axId val="-2068027336"/><c:axId val="-2113994440"/></c:barChart>
+            <c:catAx><c:axId val="-2068027336"/><c:scaling><c:orientation val="maxMin"/></c:scaling><c:axPos val="l"/><c:crossAx val="-2113994440"/></c:catAx>
+            <c:valAx><c:axId val="-2113994440"/><c:axPos val="b"/><c:crossAx val="-2068027336"/></c:valAx>
+          </c:plotArea></c:chart></c:chartSpace>"#;
+        let ctx = ColorCtx { theme: Theme::default(), clr_map: Default::default() };
+        let c = chart(xml, &ctx, &("Calibri".into(), String::new())).unwrap();
+        let (cat, val) = c.plots[0].axes.unwrap();
+        assert!(c.axis(cat).unwrap().category && c.axis(cat).unwrap().reversed);
+        assert!(!c.axis(val).unwrap().category);
+        assert_eq!(c.axis(cat).unwrap().cross_axis, val);
     }
 
     #[test]
